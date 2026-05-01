@@ -1,0 +1,260 @@
+'use client';
+
+import { useEffect, useRef, useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { toast } from '@boost/ui';
+import { Camera, Upload, X, Check } from 'lucide-react';
+import { Shell } from '@/components/Shell';
+import { api } from '@/lib/api';
+import { mockClients } from '@boost/core';
+
+interface PendingUpload {
+  id: string;
+  file: File;
+  url: string;
+  tag: string;
+  progress: number;
+  done: boolean;
+  error?: string;
+}
+
+const TAGS = ['product', 'team', 'workspace', 'event', 'other'];
+const MAX_PER_BATCH = 10;
+const MAX_SIZE_MB = 15;
+
+export default function UploadPage() {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
+  const [uploads, setUploads] = useState<PendingUpload[]>([]);
+  const [dragOver, setDragOver] = useState(false);
+
+  // Revoke all object URLs on unmount to prevent memory leaks.
+  useEffect(() => {
+    return () => {
+      for (const u of uploads) URL.revokeObjectURL(u.url);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const addFiles = (files: FileList | null) => {
+    if (!files) return;
+    const accepted: PendingUpload[] = [];
+    for (const f of Array.from(files).slice(0, MAX_PER_BATCH)) {
+      if (!f.type.startsWith('image/')) continue;
+      if (f.size > MAX_SIZE_MB * 1024 * 1024) {
+        toast.error('Too large', `${f.name} is over ${MAX_SIZE_MB}MB`);
+        continue;
+      }
+      accepted.push({
+        id: `${Date.now()}-${accepted.length}`,
+        file: f,
+        url: URL.createObjectURL(f),
+        tag: 'product',
+        progress: 0,
+        done: false,
+      });
+    }
+    if (accepted.length === 0) return;
+    setUploads((prev) => [...prev, ...accepted]);
+    uploadBatch(accepted);
+  };
+
+  const uploadBatch = async (batch: PendingUpload[]) => {
+    let clientId: string;
+    try {
+      const me = await api.getMyClient();
+      clientId = me.id;
+    } catch {
+      clientId = mockClients[0]!.id;
+    }
+    for (const item of batch) {
+      const interval = setInterval(() => {
+        setUploads((prev) =>
+          prev.map((u) =>
+            u.id === item.id && u.progress < 85 && !u.done
+              ? { ...u, progress: u.progress + 12 + Math.random() * 10 }
+              : u,
+          ),
+        );
+      }, 220);
+      try {
+        await api.uploadImages(clientId, [item.file], [item.tag]);
+        clearInterval(interval);
+        setUploads((prev) =>
+          prev.map((u) => (u.id === item.id ? { ...u, progress: 100, done: true } : u)),
+        );
+        toast.success('Uploaded', item.file.name);
+      } catch (e) {
+        clearInterval(interval);
+        setUploads((prev) =>
+          prev.map((u) =>
+            u.id === item.id ? { ...u, progress: 100, done: true, error: (e as Error).message } : u,
+          ),
+        );
+        toast.error('Upload failed', item.file.name);
+      }
+    }
+  };
+
+  const setTag = (id: string, tag: string) =>
+    setUploads((prev) => prev.map((u) => (u.id === id ? { ...u, tag } : u)));
+
+  const remove = (id: string) =>
+    setUploads((prev) => {
+      const target = prev.find((u) => u.id === id);
+      if (target) URL.revokeObjectURL(target.url);
+      return prev.filter((u) => u.id !== id);
+    });
+
+  return (
+    <Shell title="Upload photos" subtitle={`Max ${MAX_PER_BATCH} files · ${MAX_SIZE_MB}MB each`}>
+      <div className="grid grid-cols-2 gap-3">
+        <button
+          type="button"
+          onClick={() => cameraRef.current?.click()}
+          className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white p-4 transition-colors hover:border-[#48D886] active:scale-[0.99]"
+        >
+          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-cta text-white">
+            <Camera className="h-5 w-5" />
+          </div>
+          <div className="text-sm font-semibold text-slate-900">Take photo</div>
+        </button>
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white p-4 transition-colors hover:border-[#48D886] active:scale-[0.99]"
+        >
+          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-900 text-white">
+            <Upload className="h-5 w-5" />
+          </div>
+          <div className="text-sm font-semibold text-slate-900">From gallery</div>
+        </button>
+      </div>
+
+      <div
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragOver(true);
+        }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragOver(false);
+          addFiles(e.dataTransfer.files);
+        }}
+        className={`mt-4 rounded-2xl border-2 border-dashed p-6 text-center transition-colors ${
+          dragOver ? 'border-[#48D886] bg-[#48D886]/5' : 'border-slate-300 bg-white'
+        }`}
+      >
+        <p className="text-sm text-slate-600">Or drag &amp; drop here</p>
+      </div>
+
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp,image/gif"
+        multiple
+        hidden
+        onChange={(e) => {
+          addFiles(e.target.files);
+          e.target.value = '';
+        }}
+      />
+      <input
+        ref={cameraRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        hidden
+        onChange={(e) => {
+          addFiles(e.target.files);
+          e.target.value = '';
+        }}
+      />
+
+      <AnimatePresence>
+        {uploads.length > 0 ? (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="mt-6 space-y-3"
+          >
+            <h2 className="text-sm font-semibold text-slate-900">
+              {uploads.length} file{uploads.length === 1 ? '' : 's'}
+            </h2>
+            {uploads.map((u) => (
+              <div key={u.id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                <div className="flex gap-3 p-3">
+                  <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-xl bg-slate-100">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={u.url} alt="" className="h-full w-full object-cover" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between">
+                      <p className="truncate text-sm font-medium text-slate-900">{u.file.name}</p>
+                      <button
+                        onClick={() => remove(u.id)}
+                        className="rounded-full p-1 text-slate-400 hover:bg-slate-100"
+                        aria-label="Remove"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                    <p className="text-xs text-slate-500">
+                      {(u.file.size / 1024 / 1024).toFixed(1)} MB
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {TAGS.map((t) => (
+                        <button
+                          key={t}
+                          onClick={() => setTag(u.id, t)}
+                          className={`rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                            u.tag === t
+                              ? 'bg-[#1D9CA1] text-white'
+                              : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                          }`}
+                        >
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <div className="h-1 bg-slate-100">
+                  <motion.div
+                    className={`h-full ${u.error ? 'bg-rose-500' : 'bg-gradient-cta'}`}
+                    animate={{ width: `${u.progress}%` }}
+                    transition={{ duration: 0.25 }}
+                  />
+                </div>
+                {u.done ? (
+                  u.error ? (
+                    <div className="flex items-center gap-2 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-800">
+                      <X className="h-3.5 w-3.5" />
+                      {u.error}
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-800">
+                      <Check className="h-3.5 w-3.5" />
+                      Uploaded · AI will analyze shortly
+                    </div>
+                  )
+                ) : null}
+              </div>
+            ))}
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+
+      <div className="mt-6 rounded-2xl bg-white p-4">
+        <h3 className="text-sm font-semibold text-slate-900">Tips for great posts</h3>
+        <ul className="mt-2 space-y-1.5 text-xs text-slate-600">
+          <li>• Natural light beats flash almost always.</li>
+          <li>• Square or portrait crops work best on Instagram.</li>
+          <li>• 10–15 photos a month gives us plenty of variety.</li>
+        </ul>
+      </div>
+    </Shell>
+  );
+}

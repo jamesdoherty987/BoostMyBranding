@@ -1,0 +1,30 @@
+{
+  "name": "boostmybranding",
+  "version": "0.1.0",
+  "private": true,
+  "description": "BoostMyBranding SMMA platform - marketing site, client PWA, agency dashboard",
+  "scripts": {
+    "build": "turbo build",
+    "dev": "turbo dev",
+    "lint": "turbo lint",
+    "audit": "pnpm audit --prod",
+    "format": "prettier --write \"**/*.{ts,tsx,md}\"",
+    "clean": "turbo clean && rm -rf node_modules"
+  },
+  "devDependencies": {
+    "prettier": "^3.3.3",
+    "turbo": "^2.3.0",
+    "typescript": "^5.6.3"
+  },
+  "packageManager": "pnpm@9.12.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "pnpm": {
+    "overrides": {
+      "postcss": "^8.5.10",
+      "drizzle-orm": "^0.45.2",
+      "uuid": "^14.0.0"
+    }
+  }
+}

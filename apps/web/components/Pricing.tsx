@@ -22,8 +22,8 @@ interface TierDef {
 const tiers: TierDef[] = [
   {
     id: 'social_only',
-    name: 'Social Only',
-    price: 700,
+    name: 'Just Socials',
+    price: 250,
     suffix: '/mo',
     description: '30 handcrafted posts a month across 4 platforms, run by our team.',
     features: [
@@ -38,12 +38,12 @@ const tiers: TierDef[] = [
   {
     id: 'full_package',
     name: 'Full Package',
-    price: 800,
+    price: 200,
     setup: 800,
     suffix: '/mo',
     description: 'Social + a fast, modern website we maintain for you as your business changes.',
     features: [
-      'Everything in Social Only',
+      'Everything in Just Socials',
       'Custom website + hosting',
       'Unlimited change requests',
       'Booking forms + map',
@@ -55,8 +55,8 @@ const tiers: TierDef[] = [
   {
     id: 'website_only',
     name: 'Website Only',
-    price: 150,
-    setup: 800,
+    price: 20,
+    setup: 1000,
     suffix: '/mo',
     description: 'A modern website, built custom and kept current every month.',
     features: [
@@ -72,18 +72,18 @@ const tiers: TierDef[] = [
 
 export function Pricing() {
   return (
-    <SectionWrapper id="pricing" className="py-24 md:py-32">
+    <SectionWrapper id="pricing" className="py-14 md:py-32">
       <div className="mx-auto max-w-6xl px-4">
         <div className="mx-auto max-w-2xl text-center">
-          <h2 className="text-4xl font-bold tracking-tight md:text-5xl">
+          <h2 className="text-3xl font-bold tracking-tight md:text-5xl">
             One monthly price. <span className="text-gradient-brand">No hourly rates.</span>
           </h2>
-          <p className="mt-4 text-lg text-slate-600">
+          <p className="mt-3 text-sm text-slate-600 md:mt-4 md:text-lg">
             Flat fee, cancel any time after the first 3 months.
           </p>
         </div>
 
-        <div className="mt-14 grid grid-cols-1 gap-6 md:grid-cols-3">
+        <div className="mt-8 grid grid-cols-2 gap-3 md:mt-14 md:grid-cols-3 md:gap-6">
           {tiers.map((t, i) => (
             <motion.div
               key={t.id}
@@ -91,9 +91,9 @@ export function Pricing() {
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true, margin: '-80px' }}
               transition={{ duration: 0.6, delay: i * 0.08 }}
-              className={`relative flex flex-col rounded-3xl border p-8 ${
+              className={`relative flex flex-col rounded-2xl border p-4 md:rounded-3xl md:p-8 ${
                 t.highlight
-                  ? 'border-transparent bg-slate-900 text-white shadow-2xl md:scale-[1.04]'
+                  ? 'col-span-2 border-transparent bg-slate-900 text-white shadow-2xl md:col-span-1 md:scale-[1.04]'
                   : 'border-slate-200 bg-white'
               }`}
             >
@@ -103,32 +103,32 @@ export function Pricing() {
                   Most popular
                 </div>
               ) : null}
-              <h3 className={`text-xl font-semibold ${t.highlight ? 'text-white' : 'text-slate-900'}`}>
+              <h3 className={`text-base font-semibold md:text-xl ${t.highlight ? 'text-white' : 'text-slate-900'}`}>
                 {t.name}
               </h3>
-              <p className={`mt-2 text-sm ${t.highlight ? 'text-white/70' : 'text-slate-600'}`}>
+              <p className={`mt-1 hidden text-sm md:mt-2 md:block ${t.highlight ? 'text-white/70' : 'text-slate-600'}`}>
                 {t.description}
               </p>
-              <div className="mt-6 flex items-baseline gap-1">
-                <span className="text-5xl font-bold">€{t.price}</span>
-                <span className={`text-sm ${t.highlight ? 'text-white/70' : 'text-slate-500'}`}>
+              <div className="mt-3 flex items-baseline gap-1 md:mt-6">
+                <span className="text-3xl font-bold md:text-5xl">€{t.price}</span>
+                <span className={`text-xs md:text-sm ${t.highlight ? 'text-white/70' : 'text-slate-500'}`}>
                   {t.suffix}
                 </span>
               </div>
               {t.setup ? (
-                <div className={`mt-1 text-xs ${t.highlight ? 'text-white/70' : 'text-slate-500'}`}>
-                  + €{t.setup} one-time setup
+                <div className={`mt-0.5 text-[11px] md:mt-1 md:text-xs ${t.highlight ? 'text-white/70' : 'text-slate-500'}`}>
+                  + €{t.setup} setup
                 </div>
               ) : null}
-              <ul className="mt-6 flex-1 space-y-3">
+              <ul className="mt-3 flex-1 space-y-2 md:mt-6 md:space-y-3">
                 {t.features.map((f) => (
-                  <li key={f} className="flex items-start gap-2 text-sm">
-                    <Check className={`mt-0.5 h-4 w-4 shrink-0 ${t.highlight ? 'text-[#48D886]' : 'text-[#1D9CA1]'}`} />
+                  <li key={f} className="flex items-start gap-1.5 text-xs md:gap-2 md:text-sm">
+                    <Check className={`mt-0.5 h-3.5 w-3.5 shrink-0 md:h-4 md:w-4 ${t.highlight ? 'text-[#48D886]' : 'text-[#1D9CA1]'}`} />
                     <span>{f}</span>
                   </li>
                 ))}
               </ul>
-              <Link href={`/signup?plan=${t.id}`} className="mt-8 block">
+              <Link href={`/signup?plan=${t.id}`} className="mt-4 block md:mt-8">
                 <Button
                   variant={t.highlight ? 'primary' : 'outline'}
                   size="lg"

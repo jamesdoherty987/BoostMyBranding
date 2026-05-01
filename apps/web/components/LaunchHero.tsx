@@ -33,19 +33,29 @@ export function LaunchHero() {
     offset: ['start start', 'end start'],
   });
 
+  /* Desktop parallax transforms */
   const rocketY = useTransform(scrollYProgress, [0, 1], ['0%', '-320%']);
   const rocketScale = useTransform(scrollYProgress, [0, 0.3, 1], [1, 1.08, 0.7]);
   const copyOpacity = useTransform(scrollYProgress, [0, 0.35, 0.7], [1, 1, 0]);
   const copyY = useTransform(scrollYProgress, [0, 1], ['0px', '-80px']);
 
+  /*
+   * Mobile rocket scroll: track the whole page so the rocket flies upward
+   * over the content as the user scrolls past the hero. It starts at its
+   * inline position and accelerates up and off-screen.
+   */
+  const { scrollY } = useScroll();
+  const mobileRocketY = useTransform(scrollY, [0, 600], [0, -800]);
+  const mobileRocketOpacity = useTransform(scrollY, [0, 200, 500], [1, 1, 0]);
+
   return (
     <section
       ref={ref}
-      className="relative"
-      style={{ height: reduced ? '100vh' : '120vh' }}
+      className="relative md:h-[120vh]"
+      style={reduced ? { height: 'auto' } : undefined}
       aria-label="BoostMyBranding launch hero"
     >
-      <div className="sticky top-0 flex h-screen w-full flex-col overflow-hidden">
+      <div className="flex min-h-[100svh] w-full flex-col overflow-hidden md:sticky md:top-0 md:h-screen">
         {/* Light brand backdrop */}
         <div
           aria-hidden
@@ -97,58 +107,59 @@ export function LaunchHero() {
         ) : null}
 
         {/*
-          Copy layer — no initial-to-animate fade. The headline is visible in
-          the server-rendered HTML at full opacity, so there is zero flash on
-          first paint. The only scroll-linked transform is applied via the
-          `style` below and the `motion` hooks into it after hydration.
+          Copy + rocket layer. On mobile the rocket sits inline beside the
+          headline for a compact, integrated hero. On desktop the original
+          centered-copy + absolute-rocket layout is preserved.
         */}
         <motion.div
           className="relative z-20 flex flex-col items-center px-5 pt-20 text-center sm:px-4 sm:pt-24 md:h-full md:justify-center md:pt-0"
           style={reduced ? undefined : { opacity: copyOpacity, y: copyY }}
         >
-          <h1 className="mx-auto max-w-5xl text-balance text-[34px] font-bold leading-[1.05] tracking-tight text-slate-900 sm:text-5xl md:text-7xl lg:text-[92px] lg:leading-[0.95]">
-            Launch your brand.
-            <br />
-            <span className="relative inline-block">
-              <span
-                className="bg-clip-text text-transparent"
-                style={{
-                  backgroundImage:
-                    'linear-gradient(90deg, #1D9CA1 0%, #48D886 50%, #FFEC3D 100%)',
-                }}
-              >
-                Watch it fly.
-              </span>
-              {!reduced ? (
-                <motion.span
-                  initial={{ scaleX: 0 }}
-                  animate={{ scaleX: 1 }}
-                  transition={{ duration: 1.2, delay: 0.3, ease: [0.22, 1, 0.36, 1] }}
-                  className="absolute -bottom-1 left-0 right-0 h-[3px] origin-left rounded-full sm:-bottom-1.5 sm:h-1 md:-bottom-2 md:h-1.5"
-                  style={{
-                    background:
-                      'linear-gradient(90deg, #1D9CA1 0%, #48D886 50%, #FFEC3D 100%)',
-                  }}
-                />
-              ) : (
+          {/* Mobile: headline row */}
+          <div className="md:block">
+            <h1 className="max-w-5xl text-balance text-[28px] font-bold leading-[1.05] tracking-tight text-slate-900 sm:text-5xl md:mx-auto md:text-7xl lg:text-[92px] lg:leading-[0.95]">
+              Launch your brand.
+              <br />
+              <span className="relative inline-block">
                 <span
-                  className="absolute -bottom-1 left-0 right-0 h-[3px] rounded-full sm:-bottom-1.5 sm:h-1 md:-bottom-2 md:h-1.5"
+                  className="bg-clip-text text-transparent"
                   style={{
-                    background:
+                    backgroundImage:
                       'linear-gradient(90deg, #1D9CA1 0%, #48D886 50%, #FFEC3D 100%)',
                   }}
-                />
-              )}
-            </span>
-          </h1>
+                >
+                  Watch it fly.
+                </span>
+                {!reduced ? (
+                  <motion.span
+                    initial={{ scaleX: 0 }}
+                    animate={{ scaleX: 1 }}
+                    transition={{ duration: 1.2, delay: 0.3, ease: [0.22, 1, 0.36, 1] }}
+                    className="absolute -bottom-1 left-0 right-0 h-[3px] origin-left rounded-full sm:-bottom-1.5 sm:h-1 md:-bottom-2 md:h-1.5"
+                    style={{
+                      background:
+                        'linear-gradient(90deg, #1D9CA1 0%, #48D886 50%, #FFEC3D 100%)',
+                    }}
+                  />
+                ) : (
+                  <span
+                    className="absolute -bottom-1 left-0 right-0 h-[3px] rounded-full sm:-bottom-1.5 sm:h-1 md:-bottom-2 md:h-1.5"
+                    style={{
+                      background:
+                        'linear-gradient(90deg, #1D9CA1 0%, #48D886 50%, #FFEC3D 100%)',
+                    }}
+                  />
+                )}
+              </span>
+            </h1>
+          </div>
 
-          <p className="mx-auto mt-4 max-w-2xl text-balance text-[15px] leading-relaxed text-slate-600 sm:mt-5 sm:text-lg md:mt-6 md:text-xl">
-            Done-for-you social media that actually looks professional. We plan, write, and
-            publish every post so your brand keeps showing up, without you sitting in front of
-            Canva on a Sunday night.
+          <p className="mx-auto mt-3 max-w-2xl text-balance text-[14px] leading-relaxed text-slate-600 sm:mt-5 sm:text-lg md:mt-6 md:text-xl">
+            Done-for-you social media that looks professional. We plan, write, and
+            publish every post so your brand keeps showing up.
           </p>
 
-          <div className="mt-5 flex w-full max-w-sm flex-col items-stretch gap-3 sm:w-auto sm:max-w-none sm:flex-row sm:items-center md:mt-8">
+          <div className="mt-4 flex w-full max-w-sm flex-col items-stretch gap-2.5 sm:w-auto sm:max-w-none sm:flex-row sm:items-center md:mt-8 md:gap-3">
             <Link href="/signup" className="block w-full sm:w-auto">
               <ShimmerButton className="group w-full justify-center sm:w-auto">
                 <Zap className="h-4 w-4" />
@@ -163,28 +174,26 @@ export function LaunchHero() {
             </Link>
           </div>
 
-          <ul className="mt-4 flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5 text-xs text-slate-500 sm:mt-6 sm:gap-x-5 sm:text-sm">
-            <li className="inline-flex items-center gap-1.5">
-              <CheckCircle2 className="h-4 w-4 text-[#48D886]" /> No credit card
+          <ul className="mt-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[11px] text-slate-500 sm:mt-6 sm:gap-x-5 sm:text-sm">
+            <li className="inline-flex items-center gap-1">
+              <CheckCircle2 className="h-3.5 w-3.5 text-[#48D886] sm:h-4 sm:w-4" /> No credit card
             </li>
-            <li className="inline-flex items-center gap-1.5">
-              <CheckCircle2 className="h-4 w-4 text-[#48D886]" /> Setup in a week
+            <li className="inline-flex items-center gap-1">
+              <CheckCircle2 className="h-3.5 w-3.5 text-[#48D886] sm:h-4 sm:w-4" /> Setup in a week
             </li>
-            <li className="inline-flex items-center gap-1.5">
-              <CheckCircle2 className="h-4 w-4 text-[#48D886]" /> Cancel any time
+            <li className="inline-flex items-center gap-1">
+              <CheckCircle2 className="h-3.5 w-3.5 text-[#48D886] sm:h-4 sm:w-4" /> Cancel any time
             </li>
           </ul>
         </motion.div>
 
         {/*
-          Rocket. Mobile: compact, stacked under the copy using mt-auto so
-          it always hugs the bottom of the sticky viewport (any extra glow
-          beyond the sticky is clipped cleanly by overflow-hidden). Desktop:
-          absolutely positioned on the right and driven by scroll.
+          Rocket — desktop only: absolutely positioned on the right, driven
+          by scroll. The mobile rocket is now inline in the headline row above.
         */}
         <motion.div
           aria-hidden
-          className="pointer-events-none relative z-10 mt-auto flex w-full justify-center md:absolute md:inset-y-0 md:right-[5%] md:mt-0 md:w-auto md:items-end md:justify-end"
+          className="pointer-events-none relative z-10 hidden md:absolute md:inset-y-0 md:right-[5%] md:flex md:w-auto md:items-end md:justify-end"
           style={{
             y: reduced ? 0 : rocketY,
             scale: reduced ? 1 : rocketScale,
@@ -193,7 +202,7 @@ export function LaunchHero() {
           }}
         >
           <RocketWithFlame
-            className="h-[180px] w-auto sm:h-[240px] md:h-[88vh]"
+            className="h-[88vh] w-auto"
             reduced={!!reduced}
           />
         </motion.div>
@@ -219,6 +228,28 @@ export function LaunchHero() {
           </div>
         </motion.div>
       </div>
+
+      {/*
+        Mobile rocket overlay — lives outside the overflow-hidden container
+        so it can fly upward over the page content on scroll. Absolutely
+        positioned within the section, starting at the top-right of the hero,
+        then translating upward as the user scrolls — flying over the words.
+      */}
+      <motion.div
+        aria-hidden
+        className="pointer-events-none absolute right-3 top-16 z-30 sm:right-6 sm:top-20 md:hidden"
+        style={{
+          y: reduced ? 0 : mobileRocketY,
+          opacity: reduced ? 1 : mobileRocketOpacity,
+          filter:
+            'drop-shadow(0 12px 20px rgba(15,23,42,0.18)) drop-shadow(0 4px 10px rgba(29,156,161,0.18))',
+        }}
+      >
+        <RocketWithFlame
+          className="h-[130px] w-auto sm:h-[170px]"
+          reduced={!!reduced}
+        />
+      </motion.div>
     </section>
   );
 }

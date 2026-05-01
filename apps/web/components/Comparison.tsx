@@ -57,19 +57,19 @@ const QUOTES = [
 
 export function Comparison() {
   return (
-    <SectionWrapper className="bg-slate-50 py-20 md:py-28">
+    <SectionWrapper className="bg-slate-50 py-14 md:py-28">
       <div className="mx-auto max-w-5xl px-4">
         <div className="mx-auto max-w-2xl text-center">
-          <h2 className="text-4xl font-bold tracking-tight md:text-5xl">
+          <h2 className="text-3xl font-bold tracking-tight md:text-5xl">
             Social media,{' '}
             <span className="text-slate-400">done properly.</span>
           </h2>
-          <p className="mt-4 text-slate-600">
+          <p className="mt-3 text-sm text-slate-600 md:mt-4 md:text-base">
             The same standard an in-house team would deliver, without the cost of hiring one.
           </p>
         </div>
 
-        <div className="mt-12 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+        <div className="mt-8 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm md:mt-12 md:rounded-3xl">
           <div className="grid grid-cols-[1fr_1fr_1fr] text-xs font-semibold uppercase tracking-widest md:text-sm">
             <div className="hidden bg-slate-100 p-4 text-slate-500 md:block" />
             <div className="bg-slate-100 p-4 text-slate-500">On your own</div>
@@ -113,7 +113,7 @@ export function Comparison() {
           </ul>
         </div>
 
-        <div className="mt-12 grid grid-cols-1 gap-4 md:grid-cols-3">
+        <div className="mt-8 grid grid-cols-2 gap-3 md:mt-12 md:grid-cols-3 md:gap-4">
           {QUOTES.map((q, i) => (
             <motion.blockquote
               key={q.name}
@@ -121,15 +121,17 @@ export function Comparison() {
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true, margin: '-60px' }}
               transition={{ duration: 0.5, delay: i * 0.08 }}
-              className="rounded-2xl border border-slate-200 bg-white p-5"
+              className={`rounded-xl border border-slate-200 bg-white p-4 md:rounded-2xl md:p-5 ${
+                i === 2 ? 'col-span-2 md:col-span-1' : ''
+              }`}
             >
               <div className="flex gap-0.5 text-[#FFEC3D]">
                 {Array.from({ length: 5 }).map((_, idx) => (
-                  <Star key={idx} className="h-3.5 w-3.5 fill-current" />
+                  <Star key={idx} className="h-3 w-3 fill-current md:h-3.5 md:w-3.5" />
                 ))}
               </div>
-              <p className="mt-3 text-sm text-slate-800">&ldquo;{q.text}&rdquo;</p>
-              <footer className="mt-3 text-xs">
+              <p className="mt-2 text-xs text-slate-800 md:mt-3 md:text-sm">&ldquo;{q.text}&rdquo;</p>
+              <footer className="mt-2 text-[11px] md:mt-3 md:text-xs">
                 <span className="font-semibold text-slate-900">{q.name}</span>
                 <span className="text-slate-500"> · {q.role}</span>
               </footer>

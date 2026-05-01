@@ -71,20 +71,20 @@ const FEATURES: Feature[] = [
 
 export function Features() {
   return (
-    <SectionWrapper id="features" className="py-24 md:py-32">
+    <SectionWrapper id="features" className="py-14 md:py-32">
       <div className="mx-auto max-w-6xl px-4">
         <div className="mx-auto max-w-2xl text-center">
-          <h2 className="text-4xl font-bold tracking-tight text-slate-900 md:text-5xl">
+          <h2 className="text-3xl font-bold tracking-tight text-slate-900 md:text-5xl">
             Social that actually{' '}
             <span className="text-gradient-brand">sells.</span>
           </h2>
-          <p className="mt-4 text-lg text-slate-600">
+          <p className="mt-3 text-sm text-slate-600 md:mt-4 md:text-lg">
             Every post is planned around your brand, your customers, and what actually moves the
-            needle: bookings, foot traffic, enquiries. Not vanity posts, not busy work.
+            needle: bookings, foot traffic, enquiries.
           </p>
         </div>
 
-        <div className="mt-14 grid grid-cols-1 gap-4 md:grid-cols-3">
+        <div className="mt-8 grid grid-cols-2 gap-3 md:mt-14 md:grid-cols-3 md:gap-4">
           {FEATURES.map((f, i) => (
             <FeatureCard key={f.title} feature={f} index={i} />
           ))}
@@ -118,10 +118,10 @@ function FeatureCard({ feature, index }: { feature: Feature; index: number }) {
       viewport={{ once: true, margin: '-60px' }}
       transition={{ duration: 0.55, delay: index * 0.06 }}
       whileHover={{ y: -4 }}
-      className={`group relative flex flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white p-6 shadow-sm transition-shadow hover:shadow-xl md:p-7 ${
-        feature.span === 'lg' ? 'md:col-span-2' : ''
+      className={`group relative flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-xl md:rounded-3xl md:p-7 ${
+        feature.span === 'lg' ? 'col-span-2 md:col-span-2' : ''
       }`}
-      style={{ minHeight: 320 }}
+      style={{ minHeight: undefined }}
     >
       <div
         aria-hidden
@@ -130,19 +130,20 @@ function FeatureCard({ feature, index }: { feature: Feature; index: number }) {
       />
 
       <div
-        className="relative inline-flex h-11 w-11 items-center justify-center rounded-2xl text-white shadow-lg"
+        className="relative inline-flex h-9 w-9 items-center justify-center rounded-xl text-white shadow-lg md:h-11 md:w-11 md:rounded-2xl"
         style={{ background: accentBg }}
       >
-        <Icon className="h-5 w-5" />
+        <Icon className="h-4 w-4 md:h-5 md:w-5" />
       </div>
 
-      <div className="relative mt-5 flex min-h-[120px] items-start">
+      {/* Illustration — hidden on mobile for compact layout */}
+      <div className="relative mt-5 hidden min-h-[120px] items-start md:flex">
         <FeatureIllustration kind={feature.art} />
       </div>
 
-      <div className="relative mt-auto pt-6">
-        <h3 className="text-lg font-bold text-slate-900 md:text-xl">{feature.title}</h3>
-        <p className="mt-2 text-sm text-slate-600">{feature.body}</p>
+      <div className="relative mt-3 md:mt-auto md:pt-6">
+        <h3 className="text-sm font-bold text-slate-900 md:text-xl">{feature.title}</h3>
+        <p className="mt-1 hidden text-sm text-slate-600 md:block">{feature.body}</p>
       </div>
     </motion.article>
   );

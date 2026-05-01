@@ -22,15 +22,15 @@ interface Form {
 }
 
 const TIERS: { id: Tier; name: string; price: string; blurb: string; popular?: boolean }[] = [
-  { id: 'social_only', name: 'Social Only', price: '€700/mo', blurb: '30 posts · 4 platforms · monthly report.' },
+  { id: 'social_only', name: 'Just Socials', price: '€250/mo', blurb: '30 posts · 4 platforms · monthly report.' },
   {
     id: 'full_package',
     name: 'Full Package',
-    price: '€800/mo + €800 setup',
+    price: '€200/mo + €800 setup',
     blurb: 'Social + custom website + unlimited change requests.',
     popular: true,
   },
-  { id: 'website_only', name: 'Website Only', price: '€150/mo + €800 setup', blurb: 'Custom website + hosting + monthly tweaks.' },
+  { id: 'website_only', name: 'Website Only', price: '€20/mo + €1,000 setup', blurb: 'Custom website + hosting + monthly tweaks.' },
 ];
 
 const STEPS = ['Plan', 'Business', 'Pay', 'Done'] as const;

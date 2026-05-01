@@ -48,18 +48,18 @@ const jsonLd = {
       offers: [
         {
           '@type': 'Offer',
-          name: 'Social Only',
-          price: '700',
+          name: 'Just Socials',
+          price: '250',
           priceCurrency: 'EUR',
           description: '30 posts per month across 4 platforms with monthly reporting.',
         },
         {
           '@type': 'Offer',
           name: 'Full Package',
-          price: '800',
+          price: '200',
           priceCurrency: 'EUR',
           description:
-            'Social media management plus a custom website with hosting and unlimited change requests.',
+            'Social media management plus a custom website with hosting and unlimited change requests. €800 one-time setup.',
         },
       ],
     },

@@ -33,7 +33,7 @@ async function main() {
       email: 'sean@murphysplumbing.ie',
       industry: 'Home Services',
       subscriptionTier: 'full_package' as const,
-      monthlyPriceCents: 80000,
+      monthlyPriceCents: 20000,
       brandColors: { primary: '#0EA5E9', secondary: '#0B1220', accent: '#F59E0B' },
     },
     {
@@ -42,7 +42,7 @@ async function main() {
       email: 'nora@atlasfitness.co',
       industry: 'Health & Fitness',
       subscriptionTier: 'social_only' as const,
-      monthlyPriceCents: 70000,
+      monthlyPriceCents: 25000,
       brandColors: { primary: '#EF4444', secondary: '#111827', accent: '#FBBF24' },
     },
     {
@@ -51,7 +51,7 @@ async function main() {
       email: 'luca@verdecafe.com',
       industry: 'Food & Beverage',
       subscriptionTier: 'full_package' as const,
-      monthlyPriceCents: 80000,
+      monthlyPriceCents: 20000,
       brandColors: { primary: '#22C55E', secondary: '#1F2937', accent: '#F97316' },
     },
   ];

@@ -32,7 +32,7 @@ const PLATFORMS = [
 
 export function MonthlyOutput() {
   return (
-    <SectionWrapper className="relative overflow-hidden py-20 md:py-28">
+    <SectionWrapper className="relative overflow-hidden py-14 md:py-28">
       {/* Brand-gradient backdrop */}
       <div
         aria-hidden
@@ -47,39 +47,39 @@ export function MonthlyOutput() {
         <div className="mx-auto max-w-2xl text-center">
           <Badge
             tone="brand"
-            className="mb-4 border-white/20 bg-white/10 text-white backdrop-blur"
+            className="mb-3 border-white/20 bg-white/10 text-white backdrop-blur md:mb-4"
           >
             What's included every month
           </Badge>
-          <h2 className="text-4xl font-bold tracking-tight text-white md:text-5xl">
+          <h2 className="text-3xl font-bold tracking-tight text-white md:text-5xl">
             More than a post-a-day service.
           </h2>
-          <p className="mt-4 text-lg text-white/70">
+          <p className="mt-3 text-sm text-white/70 md:mt-4 md:text-lg">
             A proper social team looking after your brand. One flat fee, every month.
           </p>
         </div>
 
-        <div className="mt-14 grid grid-cols-1 gap-5 md:grid-cols-3">
+        <div className="mt-8 grid grid-cols-2 gap-3 md:mt-14 md:grid-cols-3 md:gap-5">
           {/* 30 posts */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true, margin: '-60px' }}
             transition={{ duration: 0.55 }}
-            className="relative overflow-hidden rounded-3xl border border-white/10 bg-white/5 p-6 backdrop-blur-xl md:p-8"
+            className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur-xl md:rounded-3xl md:p-8"
           >
-            <div className="text-xs font-semibold uppercase tracking-widest text-[#48D886]">
+            <div className="text-[10px] font-semibold uppercase tracking-widest text-[#48D886] md:text-xs">
               Ships
             </div>
-            <div className="mt-2 flex items-baseline gap-1">
-              <span className="text-6xl font-bold text-white md:text-7xl">30</span>
-              <span className="text-lg text-white/70">posts</span>
+            <div className="mt-1 flex items-baseline gap-1 md:mt-2">
+              <span className="text-4xl font-bold text-white md:text-7xl">30</span>
+              <span className="text-sm text-white/70 md:text-lg">posts</span>
             </div>
-            <p className="mt-2 text-sm text-white/60">
+            <p className="mt-1 hidden text-sm text-white/60 md:mt-2 md:block">
               A mix of posts, reels, stories, and carousels, planned together.
             </p>
 
-            <div className="mt-6 grid grid-cols-6 gap-1.5">
+            <div className="mt-3 hidden grid-cols-6 gap-1.5 md:mt-6 md:grid">
               {Array.from({ length: 30 }).map((_, i) => (
                 <motion.div
                   key={i}
@@ -104,20 +104,20 @@ export function MonthlyOutput() {
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true, margin: '-60px' }}
             transition={{ duration: 0.55, delay: 0.1 }}
-            className="relative overflow-hidden rounded-3xl border border-white/10 bg-white/5 p-6 backdrop-blur-xl md:p-8"
+            className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur-xl md:rounded-3xl md:p-8"
           >
-            <div className="text-xs font-semibold uppercase tracking-widest text-[#1D9CA1]">
+            <div className="text-[10px] font-semibold uppercase tracking-widest text-[#1D9CA1] md:text-xs">
               Published to
             </div>
-            <div className="mt-2 flex items-baseline gap-1">
-              <span className="text-6xl font-bold text-white md:text-7xl">7</span>
-              <span className="text-lg text-white/70">platforms</span>
+            <div className="mt-1 flex items-baseline gap-1 md:mt-2">
+              <span className="text-4xl font-bold text-white md:text-7xl">7</span>
+              <span className="text-sm text-white/70 md:text-lg">platforms</span>
             </div>
-            <p className="mt-2 text-sm text-white/60">
+            <p className="mt-1 hidden text-sm text-white/60 md:mt-2 md:block">
               Reformatted per platform: captions, hashtags, aspect ratios.
             </p>
 
-            <div className="mt-6 flex flex-wrap gap-2.5">
+            <div className="mt-3 flex flex-wrap gap-1.5 md:mt-6 md:gap-2.5">
               {PLATFORMS.map((p, i) => (
                 <motion.div
                   key={p.name}
@@ -125,11 +125,11 @@ export function MonthlyOutput() {
                   whileInView={{ opacity: 1, scale: 1 }}
                   viewport={{ once: true }}
                   transition={{ delay: 0.2 + i * 0.04 }}
-                  className="flex h-10 w-10 items-center justify-center rounded-xl shadow-md"
+                  className="flex h-7 w-7 items-center justify-center rounded-lg shadow-md md:h-10 md:w-10 md:rounded-xl"
                   style={{ backgroundColor: p.color }}
                   aria-label={p.name}
                 >
-                  <p.icon className="h-4 w-4 text-white" />
+                  <p.icon className="h-3 w-3 text-white md:h-4 md:w-4" />
                 </motion.div>
               ))}
             </div>
@@ -141,56 +141,60 @@ export function MonthlyOutput() {
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true, margin: '-60px' }}
             transition={{ duration: 0.55, delay: 0.2 }}
-            className="relative overflow-hidden rounded-3xl border border-white/10 bg-white/5 p-6 backdrop-blur-xl md:p-8"
+            className="relative col-span-2 overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur-xl md:col-span-1 md:rounded-3xl md:p-8"
           >
-            <div className="text-xs font-semibold uppercase tracking-widest text-[#FFEC3D]">
-              Your time
-            </div>
-            <div className="mt-2 flex items-baseline gap-1">
-              <span className="text-6xl font-bold text-white md:text-7xl">5</span>
-              <span className="text-lg text-white/70">minutes</span>
-            </div>
-            <p className="mt-2 text-sm text-white/60">
-              Drop a few photos, message us if anything needs changing. That's it.
-            </p>
+            <div className="flex items-center gap-4 md:block">
+              <div>
+                <div className="text-[10px] font-semibold uppercase tracking-widest text-[#FFEC3D] md:text-xs">
+                  Your time
+                </div>
+                <div className="mt-1 flex items-baseline gap-1 md:mt-2">
+                  <span className="text-4xl font-bold text-white md:text-7xl">5</span>
+                  <span className="text-sm text-white/70 md:text-lg">minutes</span>
+                </div>
+                <p className="mt-1 text-xs text-white/60 md:mt-2 md:text-sm">
+                  Drop photos, message us if anything needs changing.
+                </p>
+              </div>
 
-            {/* Clock with a partial arc */}
-            <div className="mt-6 flex items-center justify-center py-2">
-              <svg viewBox="0 0 100 100" className="h-24 w-24">
-                <circle cx="50" cy="50" r="44" stroke="rgba(255,255,255,0.1)" strokeWidth="8" fill="none" />
-                <motion.circle
-                  cx="50"
-                  cy="50"
-                  r="44"
-                  stroke="url(#clockGrad)"
-                  strokeWidth="8"
-                  fill="none"
-                  strokeLinecap="round"
-                  strokeDasharray="276.5"
-                  initial={{ strokeDashoffset: 276.5 }}
-                  whileInView={{ strokeDashoffset: 276.5 - 276.5 * 0.08 }}
-                  viewport={{ once: true }}
-                  transition={{ duration: 1.2, delay: 0.4, ease: 'easeOut' }}
-                  transform="rotate(-90 50 50)"
-                />
-                <defs>
-                  <linearGradient id="clockGrad" x1="0" y1="0" x2="1" y2="1">
-                    <stop offset="0" stopColor="#48D886" />
-                    <stop offset="0.5" stopColor="#1D9CA1" />
-                    <stop offset="1" stopColor="#FFEC3D" />
-                  </linearGradient>
-                </defs>
-                <text
-                  x="50"
-                  y="55"
-                  textAnchor="middle"
-                  fontSize="14"
-                  fontWeight="bold"
-                  fill="#ffffff"
-                >
-                  5 min
-                </text>
-              </svg>
+              {/* Clock with a partial arc — hidden on small mobile, shown on md+ */}
+              <div className="hidden items-center justify-center py-2 md:mt-6 md:flex">
+                <svg viewBox="0 0 100 100" className="h-24 w-24">
+                  <circle cx="50" cy="50" r="44" stroke="rgba(255,255,255,0.1)" strokeWidth="8" fill="none" />
+                  <motion.circle
+                    cx="50"
+                    cy="50"
+                    r="44"
+                    stroke="url(#clockGrad)"
+                    strokeWidth="8"
+                    fill="none"
+                    strokeLinecap="round"
+                    strokeDasharray="276.5"
+                    initial={{ strokeDashoffset: 276.5 }}
+                    whileInView={{ strokeDashoffset: 276.5 - 276.5 * 0.08 }}
+                    viewport={{ once: true }}
+                    transition={{ duration: 1.2, delay: 0.4, ease: 'easeOut' }}
+                    transform="rotate(-90 50 50)"
+                  />
+                  <defs>
+                    <linearGradient id="clockGrad" x1="0" y1="0" x2="1" y2="1">
+                      <stop offset="0" stopColor="#48D886" />
+                      <stop offset="0.5" stopColor="#1D9CA1" />
+                      <stop offset="1" stopColor="#FFEC3D" />
+                    </linearGradient>
+                  </defs>
+                  <text
+                    x="50"
+                    y="55"
+                    textAnchor="middle"
+                    fontSize="14"
+                    fontWeight="bold"
+                    fill="#ffffff"
+                  >
+                    5 min
+                  </text>
+                </svg>
+              </div>
             </div>
           </motion.div>
         </div>

@@ -36,28 +36,28 @@ export function FAQ() {
   const [open, setOpen] = useState<number | null>(0);
 
   return (
-    <SectionWrapper id="faq" className="py-24 md:py-32">
+    <SectionWrapper id="faq" className="py-14 md:py-32">
       <div className="mx-auto max-w-3xl px-4">
         <div className="text-center">
-          <h2 className="text-4xl font-bold tracking-tight md:text-5xl">Frequently asked</h2>
-          <p className="mt-4 text-slate-600">Short, honest answers.</p>
+          <h2 className="text-3xl font-bold tracking-tight md:text-5xl">Frequently asked</h2>
+          <p className="mt-2 text-sm text-slate-600 md:mt-4 md:text-base">Short, honest answers.</p>
         </div>
-        <div className="mt-12 space-y-3">
+        <div className="mt-8 space-y-2 md:mt-12 md:space-y-3">
           {faqs.map((f, i) => {
             const isOpen = open === i;
             return (
               <motion.div
                 key={f.q}
                 layout
-                className="overflow-hidden rounded-2xl border border-slate-200 bg-white"
+                className="overflow-hidden rounded-xl border border-slate-200 bg-white md:rounded-2xl"
               >
                 <button
                   onClick={() => setOpen(isOpen ? null : i)}
-                  className="flex w-full items-center justify-between gap-4 p-5 text-left"
+                  className="flex w-full items-center justify-between gap-3 p-4 text-left md:gap-4 md:p-5"
                 >
-                  <span className="font-medium text-slate-900">{f.q}</span>
+                  <span className="text-sm font-medium text-slate-900 md:text-base">{f.q}</span>
                   <ChevronDown
-                    className={`h-5 w-5 text-slate-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+                    className={`h-4 w-4 shrink-0 text-slate-400 transition-transform md:h-5 md:w-5 ${isOpen ? 'rotate-180' : ''}`}
                   />
                 </button>
                 <AnimatePresence initial={false}>
@@ -69,7 +69,7 @@ export function FAQ() {
                       exit={{ height: 0, opacity: 0 }}
                       transition={{ duration: 0.25 }}
                     >
-                      <div className="px-5 pb-5 text-sm text-slate-600">{f.a}</div>
+                      <div className="px-4 pb-4 text-xs text-slate-600 md:px-5 md:pb-5 md:text-sm">{f.a}</div>
                     </motion.div>
                   ) : null}
                 </AnimatePresence>

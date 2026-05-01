@@ -79,13 +79,6 @@ const FEATURES: Feature[] = [
   },
 ];
 
-const ACCENT_COLORS = {
-  teal: '#1D9CA1',
-  green: '#48D886',
-  yellow: '#FFEC3D',
-  mix: '#1D9CA1',
-} as const;
-
 export function Features() {
   return (
     <SectionWrapper id="features" className="py-14 md:py-32">
@@ -113,7 +106,6 @@ export function Features() {
 
 function FeatureCard({ feature, index }: { feature: Feature; index: number }) {
   const Icon = feature.icon;
-  const color = ACCENT_COLORS[feature.accent];
 
   const accentBg = {
     teal: 'linear-gradient(135deg, #1D9CA1 0%, #48D886 100%)',
@@ -136,21 +128,33 @@ function FeatureCard({ feature, index }: { feature: Feature; index: number }) {
       viewport={{ once: true, margin: '-60px' }}
       transition={{ duration: 0.55, delay: index * 0.06 }}
       whileHover={{ y: -4 }}
+      whileTap={{ scale: 0.97, rotate: -1 }}
       className={`group relative flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-xl md:rounded-3xl ${
         feature.span === 'lg' ? 'col-span-2 md:col-span-2' : ''
       }`}
     >
-      {/*
-        Animated accent bar — top edge of the card. Pulses gently to give
-        each card a living feel, especially on mobile where the illustrations
-        are hidden.
-      */}
-      <motion.div
+      {/* Accent bar — top edge */}
+      <div
         aria-hidden
         className="h-1 w-full md:h-1.5"
         style={{ background: accentBg }}
-        animate={{ opacity: [0.7, 1, 0.7] }}
-        transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut', delay: index * 0.4 }}
+      />
+
+      {/*
+        Shimmer sweep — a diagonal highlight that slides across the card
+        once when it enters the viewport. Gives a "freshly polished" feel.
+      */}
+      <motion.div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 z-10"
+        initial={{ x: '-100%' }}
+        whileInView={{ x: '200%' }}
+        viewport={{ once: true }}
+        transition={{ duration: 0.8, delay: 0.3 + index * 0.1, ease: 'easeInOut' }}
+        style={{
+          background:
+            'linear-gradient(105deg, transparent 40%, rgba(255,255,255,0.5) 50%, transparent 60%)',
+        }}
       />
 
       <div className="flex flex-1 flex-col p-4 md:p-7">
@@ -160,21 +164,13 @@ function FeatureCard({ feature, index }: { feature: Feature; index: number }) {
           style={{ background: accentBgSoft }}
         />
 
-        <div className="relative flex items-center gap-2.5">
+        <div className="relative">
           <div
             className="inline-flex h-9 w-9 items-center justify-center rounded-xl text-white shadow-lg md:h-11 md:w-11 md:rounded-2xl"
             style={{ background: accentBg }}
           >
             <Icon className="h-4 w-4 md:h-5 md:w-5" />
           </div>
-          {/* Animated dot — mobile personality touch */}
-          <motion.span
-            aria-hidden
-            className="h-2 w-2 rounded-full md:hidden"
-            style={{ backgroundColor: color }}
-            animate={{ scale: [1, 1.5, 1], opacity: [0.5, 1, 0.5] }}
-            transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut', delay: index * 0.3 }}
-          />
         </div>
 
         {/* Illustration — desktop only */}
@@ -184,7 +180,7 @@ function FeatureCard({ feature, index }: { feature: Feature; index: number }) {
 
         <div className="relative mt-3 md:mt-auto md:pt-6">
           <h3 className="text-sm font-bold text-slate-900 md:text-xl">{feature.title}</h3>
-          {/* Mobile: short tag instead of full body */}
+          {/* Mobile: short tag */}
           <p className="mt-1 text-[11px] text-slate-500 md:hidden">{feature.tag}</p>
           {/* Desktop: full body */}
           <p className="mt-2 hidden text-sm text-slate-600 md:block">{feature.body}</p>

@@ -2,7 +2,7 @@
 
 import { useRef } from 'react';
 import Link from 'next/link';
-import { motion, useScroll, useTransform, useReducedMotion } from 'framer-motion';
+import { motion, useScroll, useTransform, useSpring, useReducedMotion } from 'framer-motion';
 import { Button, Particles, ShimmerButton } from '@boost/ui';
 import { ArrowRight, Zap, CheckCircle2 } from 'lucide-react';
 
@@ -33,14 +33,19 @@ export function LaunchHero() {
   const copyY = useTransform(scrollYProgress, [0, 1], ['0px', '-80px']);
 
   /*
-   * Mobile rocket: flies upward over the text on scroll. Starts at 0
-   * (its natural position under the copy) and translates up over the
-   * headline. Fades out so it doesn't linger forever.
+   * Mobile rocket: flies upward over the text on scroll. Raw scroll values
+   * are piped through useSpring so the rocket has momentum and easing
+   * instead of jerky 1:1 tracking.
    */
   const { scrollY } = useScroll();
-  const mobileRocketY = useTransform(scrollY, [0, 500], [0, -700]);
-  const mobileRocketScale = useTransform(scrollY, [0, 150, 500], [1, 1.05, 0.8]);
-  const mobileRocketOpacity = useTransform(scrollY, [0, 250, 550], [1, 1, 0]);
+  const mobileRocketYRaw = useTransform(scrollY, [0, 500], [0, -700]);
+  const mobileRocketScaleRaw = useTransform(scrollY, [0, 150, 500], [1, 1.05, 0.8]);
+  const mobileRocketOpacityRaw = useTransform(scrollY, [0, 250, 550], [1, 1, 0]);
+
+  const springConfig = { stiffness: 80, damping: 20, mass: 0.5 };
+  const mobileRocketY = useSpring(mobileRocketYRaw, springConfig);
+  const mobileRocketScale = useSpring(mobileRocketScaleRaw, springConfig);
+  const mobileRocketOpacity = useSpring(mobileRocketOpacityRaw, { stiffness: 120, damping: 25 });
 
   return (
     <section

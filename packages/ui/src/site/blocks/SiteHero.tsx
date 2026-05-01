@@ -93,8 +93,8 @@ export function SiteHero({ config, images, businessName, embedded }: SiteHeroPro
             config.brand.accentColor,
             config.brand.popColor ?? '#FFEC3D',
           ]}
-          speed={0.9}
-          maxSize={2.4}
+          speed={3}
+          maxSize={3}
           className="absolute inset-0 -z-[1]"
         />
       ) : null}
@@ -181,12 +181,10 @@ export function SiteHero({ config, images, businessName, embedded }: SiteHeroPro
                 loading="eager"
               />
             ) : (
-              <div
-                className="h-full w-full"
-                role="img"
-                aria-label={`${businessName} brand illustration`}
-                style={{ background: brandGradient(config.brand, 160) }}
-              />
+              /* Brand-themed abstract SVG when no hero image is available.
+                 Creates a premium geometric pattern using the client's brand
+                 colors — similar in quality to the landing page rocket. */
+              <BrandHeroSvg brand={config.brand} businessName={businessName} />
             )}
             <div
               aria-hidden
@@ -220,6 +218,110 @@ export function SiteHero({ config, images, businessName, embedded }: SiteHeroPro
         </motion.div>
       </div>
     </section>
+  );
+}
+
+/**
+ * Brand-themed abstract SVG illustration for the hero tile when no client
+ * image is available. Uses the brand's primary, accent, and pop colors to
+ * create a premium geometric pattern with layered shapes, gradients, and
+ * subtle animation. Designed to look as polished as a custom illustration.
+ */
+function BrandHeroSvg({
+  brand,
+  businessName,
+}: {
+  brand: WebsiteConfig['brand'];
+  businessName: string;
+}) {
+  const p = brand.primaryColor;
+  const a = brand.accentColor;
+  const pop = brand.popColor ?? '#FFEC3D';
+
+  return (
+    <svg
+      viewBox="0 0 400 500"
+      className="h-full w-full"
+      role="img"
+      aria-label={`${businessName} brand illustration`}
+    >
+      <defs>
+        <linearGradient id="svgBg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor={p} />
+          <stop offset="50%" stopColor={a} />
+          <stop offset="100%" stopColor={pop} />
+        </linearGradient>
+        <linearGradient id="svgAccent" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={a} />
+          <stop offset="100%" stopColor={p} />
+        </linearGradient>
+        <radialGradient id="svgGlow" cx="0.5" cy="0.4" r="0.6">
+          <stop offset="0%" stopColor="#fff" stopOpacity="0.15" />
+          <stop offset="100%" stopColor="#fff" stopOpacity="0" />
+        </radialGradient>
+        <filter id="svgBlur">
+          <feGaussianBlur stdDeviation="20" />
+        </filter>
+      </defs>
+
+      {/* Background */}
+      <rect width="400" height="500" fill={p} />
+
+      {/* Large gradient orbs */}
+      <circle cx="100" cy="120" r="160" fill={a} opacity="0.4" filter="url(#svgBlur)" />
+      <circle cx="320" cy="380" r="140" fill={pop} opacity="0.3" filter="url(#svgBlur)" />
+      <circle cx="200" cy="250" r="100" fill={p} opacity="0.5" filter="url(#svgBlur)" />
+
+      {/* Geometric shapes */}
+      <rect x="60" y="80" width="120" height="120" rx="24" fill={a} opacity="0.6" transform="rotate(-12 120 140)" />
+      <rect x="220" y="200" width="100" height="100" rx="20" fill={pop} opacity="0.5" transform="rotate(8 270 250)" />
+      <circle cx="160" cy="320" r="60" fill="url(#svgAccent)" opacity="0.7" />
+      <rect x="280" y="60" width="80" height="80" rx="16" fill={p} opacity="0.4" transform="rotate(15 320 100)" />
+
+      {/* Grid pattern overlay */}
+      <g opacity="0.08">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <line key={`h${i}`} x1="0" y1={i * 62.5} x2="400" y2={i * 62.5} stroke="#fff" strokeWidth="1" />
+        ))}
+        {Array.from({ length: 7 }).map((_, i) => (
+          <line key={`v${i}`} x1={i * 57} y1="0" x2={i * 57} y2="500" stroke="#fff" strokeWidth="1" />
+        ))}
+      </g>
+
+      {/* Floating circles */}
+      <circle cx="80" cy="400" r="8" fill="#fff" opacity="0.3" />
+      <circle cx="340" cy="140" r="6" fill="#fff" opacity="0.25" />
+      <circle cx="200" cy="60" r="10" fill={pop} opacity="0.6" />
+      <circle cx="300" cy="420" r="5" fill="#fff" opacity="0.2" />
+
+      {/* Central diamond accent */}
+      <polygon
+        points="200,160 260,250 200,340 140,250"
+        fill="none"
+        stroke="#fff"
+        strokeWidth="2"
+        opacity="0.15"
+      />
+      <polygon
+        points="200,190 240,250 200,310 160,250"
+        fill="url(#svgGlow)"
+        opacity="0.6"
+      />
+
+      {/* Business initial */}
+      <text
+        x="200"
+        y="265"
+        textAnchor="middle"
+        fontFamily="ui-sans-serif, system-ui, sans-serif"
+        fontSize="48"
+        fontWeight="800"
+        fill="#fff"
+        opacity="0.9"
+      >
+        {businessName.charAt(0).toUpperCase()}
+      </text>
+    </svg>
   );
 }
 

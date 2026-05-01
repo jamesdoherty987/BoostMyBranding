@@ -1,16 +1,38 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Mail, X } from 'lucide-react';
-import { Button } from '@boost/ui';
+import { Mail, X, Copy, Check, ExternalLink } from 'lucide-react';
+
+const EMAIL = 'contact@boostmybranding.com';
 
 /**
- * Floating "Get in touch" button that opens a small email popup.
- * Renders fixed in the bottom-right corner of the viewport.
+ * Floating "Get in touch" button with a compact popup.
+ * Two actions: copy the email in one click, or open the mail client.
  */
 export function ContactButton() {
   const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const copyEmail = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(EMAIL);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Fallback for older browsers
+      const el = document.createElement('textarea');
+      el.value = EMAIL;
+      el.style.position = 'fixed';
+      el.style.opacity = '0';
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand('copy');
+      document.body.removeChild(el);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  }, []);
 
   return (
     <>
@@ -22,8 +44,10 @@ export function ContactButton() {
         whileTap={{ scale: 0.95 }}
         aria-label="Get in touch"
       >
-        <Mail className="h-5 w-5" />
-        <span className="hidden text-sm font-medium md:inline">Get in touch</span>
+        {open ? <X className="h-5 w-5" /> : <Mail className="h-5 w-5" />}
+        <span className="hidden text-sm font-medium md:inline">
+          {open ? 'Close' : 'Get in touch'}
+        </span>
       </motion.button>
 
       {/* Popup */}
@@ -34,34 +58,51 @@ export function ContactButton() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 12, scale: 0.95 }}
             transition={{ duration: 0.2 }}
-            className="fixed bottom-20 right-5 z-50 w-72 rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl"
+            className="fixed bottom-20 right-5 z-50 w-64 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
           >
-            <div className="flex items-start justify-between">
-              <div>
-                <h3 className="text-sm font-bold text-slate-900">Get in touch</h3>
-                <p className="mt-1 text-xs text-slate-600">
-                  Drop us an email and we&apos;ll get back to you within a day.
-                </p>
-              </div>
-              <button
-                onClick={() => setOpen(false)}
-                className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-                aria-label="Close"
-              >
-                <X className="h-4 w-4" />
-              </button>
+            {/* Header */}
+            <div className="bg-slate-900 px-4 py-3 text-white">
+              <h3 className="text-sm font-bold">Get in touch</h3>
+              <p className="mt-0.5 text-[11px] text-white/70">
+                We reply within a day.
+              </p>
             </div>
 
-            <a href="mailto:contact@boostmybranding.com" className="mt-4 block">
-              <Button size="lg" className="w-full">
-                <Mail className="h-4 w-4" />
-                contact@boostmybranding.com
-              </Button>
-            </a>
+            {/* Email display + actions */}
+            <div className="p-3">
+              <div className="rounded-xl bg-slate-50 px-3 py-2.5">
+                <p className="text-[11px] font-medium text-slate-500">Email</p>
+                <p className="mt-0.5 text-xs font-semibold text-slate-900 break-all">
+                  {EMAIL}
+                </p>
+              </div>
 
-            <p className="mt-3 text-center text-[11px] text-slate-400">
-              Or call us — we&apos;re real people.
-            </p>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <button
+                  onClick={copyEmail}
+                  className="flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition-all hover:bg-slate-50 active:scale-95"
+                >
+                  {copied ? (
+                    <>
+                      <Check className="h-3.5 w-3.5 text-[#48D886]" />
+                      Copied
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="h-3.5 w-3.5" />
+                      Copy
+                    </>
+                  )}
+                </button>
+                <a
+                  href={`mailto:${EMAIL}`}
+                  className="flex items-center justify-center gap-1.5 rounded-xl bg-[#1D9CA1] px-3 py-2 text-xs font-semibold text-white transition-all hover:bg-[#1a8a8e] active:scale-95"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                  Email us
+                </a>
+              </div>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

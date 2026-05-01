@@ -50,13 +50,19 @@ export function SiteServices({ config }: SiteServicesProps) {
                 animate={embedded ? { opacity: 1, y: 0 } : undefined}
                 viewport={{ once: true, margin: '-40px' }}
                 transition={{ delay: i * 0.05, duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
-                className={`group relative overflow-hidden rounded-3xl border border-slate-200 bg-white p-6 transition-all hover:-translate-y-0.5 hover:shadow-xl ${
+                className={`group relative overflow-hidden rounded-3xl border border-slate-200 bg-white p-6 transition-all hover:-translate-y-1 hover:shadow-xl ${
                   featured ? 'lg:col-span-2 lg:row-span-1' : ''
                 }`}
               >
+                {/* Accent top bar */}
                 <div
                   aria-hidden
-                  className="absolute -right-10 -top-10 h-32 w-32 rounded-full opacity-60 blur-2xl transition-opacity group-hover:opacity-100"
+                  className="absolute inset-x-0 top-0 h-1"
+                  style={{ background: `linear-gradient(90deg, var(--bmb-site-primary), var(--bmb-site-accent))` }}
+                />
+                <div
+                  aria-hidden
+                  className="absolute -right-10 -top-10 h-32 w-32 rounded-full opacity-40 blur-2xl transition-opacity group-hover:opacity-80"
                   style={{ background: `rgba(var(--bmb-site-accent-rgb), 0.35)` }}
                 />
                 <div

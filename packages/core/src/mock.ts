@@ -3,7 +3,7 @@
  * Replace with real DB queries once backend is wired up.
  */
 
-import type { Client, ClientImage, Message, Post, WebsiteRequest } from './types';
+import type { Client, ClientImage, Message, Post, WebsiteRequest } from './types.js';
 
 const now = Date.now();
 const iso = (offsetDays: number) => new Date(now + offsetDays * 86400000).toISOString();

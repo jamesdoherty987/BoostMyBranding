@@ -125,28 +125,43 @@ export const sessions = pgTable(
 );
 
 // ----- Clients -----
-export const clients = pgTable('clients', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  businessName: text('business_name').notNull(),
-  contactName: text('contact_name').notNull(),
-  email: text('email').unique().notNull(),
-  phone: text('phone'),
-  websiteUrl: text('website_url'),
-  industry: text('industry'),
-  brandVoice: text('brand_voice'),
-  brandColors: jsonb('brand_colors').$type<{ primary: string; secondary: string; accent: string }>(),
-  logoUrl: text('logo_url'),
-  socialAccounts: jsonb('social_accounts').$type<Record<string, string>>(),
-  contentStudioWorkspaceId: text('contentstudio_workspace_id'),
-  stripeCustomerId: text('stripe_customer_id'),
-  stripeSubscriptionId: text('stripe_subscription_id'),
-  subscriptionTier: subscriptionTierEnum('subscription_tier').default('social_only'),
-  monthlyPriceCents: integer('monthly_price_cents'),
-  isActive: boolean('is_active').default(true).notNull(),
-  onboardedAt: timestamp('onboarded_at'),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
-});
+export const clients = pgTable(
+  'clients',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    businessName: text('business_name').notNull(),
+    /**
+     * URL-safe slug, unique per client. Used for public site URLs
+     * (`/sites/[slug]`). Generated at insert time from businessName, with
+     * a numeric suffix appended if a collision is detected.
+     */
+    slug: text('slug').notNull(),
+    contactName: text('contact_name').notNull(),
+    email: text('email').unique().notNull(),
+    phone: text('phone'),
+    websiteUrl: text('website_url'),
+    industry: text('industry'),
+    brandVoice: text('brand_voice'),
+    brandColors: jsonb('brand_colors').$type<{ primary: string; secondary: string; accent: string }>(),
+    logoUrl: text('logo_url'),
+    socialAccounts: jsonb('social_accounts').$type<Record<string, string>>(),
+    contentStudioWorkspaceId: text('contentstudio_workspace_id'),
+    stripeCustomerId: text('stripe_customer_id'),
+    stripeSubscriptionId: text('stripe_subscription_id'),
+    subscriptionTier: subscriptionTierEnum('subscription_tier').default('social_only'),
+    monthlyPriceCents: integer('monthly_price_cents'),
+    isActive: boolean('is_active').default(true).notNull(),
+    onboardedAt: timestamp('onboarded_at'),
+    /** Generated site config (see services/websites.ts::WebsiteConfig). */
+    websiteConfig: jsonb('website_config'),
+    websiteGeneratedAt: timestamp('website_generated_at'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => ({
+    slugIdx: uniqueIndex('clients_slug_idx').on(table.slug),
+  }),
+);
 
 // ----- Images -----
 export const clientImages = pgTable(
@@ -285,3 +300,22 @@ export const cronRuns = pgTable('cron_runs', {
   status: text('status').default('running'),
   details: jsonb('details'),
 });
+
+// ----- Leads (from generated client sites' contact forms) -----
+export const leads = pgTable(
+  'leads',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    clientId: uuid('client_id')
+      .references(() => clients.id, { onDelete: 'cascade' })
+      .notNull(),
+    name: text('name').notNull(),
+    email: text('email').notNull(),
+    phone: text('phone'),
+    message: text('message'),
+    source: text('source').default('website_contact'),
+    referer: text('referer'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => ({ clientIdx: index('leads_client_idx').on(table.clientId) }),
+);

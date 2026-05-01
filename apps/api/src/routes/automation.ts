@@ -6,6 +6,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { runMonthlyGeneration } from '../services/automation.js';
+import { generateWebsite } from '../services/websites.js';
 import {
   publishDue,
   analyzePendingImages,
@@ -46,6 +47,32 @@ automationRouter.post(
   async (_req, res, next) => {
     try {
       const result = await generateMonthlyBatches();
+      res.json({ data: result });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+const generateWebsiteSchema = z.object({
+  clientId: z.string().min(1).max(100),
+  description: z.string().max(4000).optional(),
+  services: z.array(z.string().max(100)).max(20).optional(),
+  hasBooking: z.boolean().optional(),
+  hasHours: z.boolean().optional(),
+  template: z
+    .enum(['service', 'food', 'beauty', 'fitness', 'professional'])
+    .optional(),
+});
+
+automationRouter.post(
+  '/generate-website',
+  requireAuth,
+  requireRole('agency_admin', 'agency_member'),
+  async (req, res, next) => {
+    try {
+      const args = generateWebsiteSchema.parse(req.body);
+      const result = await generateWebsite(args);
       res.json({ data: result });
     } catch (e) {
       next(e);

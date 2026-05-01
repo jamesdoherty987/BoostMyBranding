@@ -13,21 +13,22 @@ export function Footer() {
           <div>
             <Logo />
             <p className="mt-3 max-w-xs text-sm text-slate-600">
-              Social growth on autopilot for modern local brands.
+              Social growth, done for you. Social media that sounds like you — written by a real team.
             </p>
           </div>
           <div>
             <div className="text-sm font-semibold text-slate-900">Product</div>
             <ul className="mt-3 space-y-2 text-sm text-slate-600">
               <li><Link href="#features" className="hover:text-slate-900">Features</Link></li>
+              <li><Link href="#how-it-works" className="hover:text-slate-900">How it works</Link></li>
+              <li><Link href="/examples" className="hover:text-slate-900">Examples</Link></li>
               <li><Link href="#pricing" className="hover:text-slate-900">Pricing</Link></li>
-              <li><Link href="#portfolio" className="hover:text-slate-900">Case studies</Link></li>
             </ul>
           </div>
           <div>
             <div className="text-sm font-semibold text-slate-900">Company</div>
             <ul className="mt-3 space-y-2 text-sm text-slate-600">
-              <li><Link href="#contact" className="hover:text-slate-900">Contact</Link></li>
+              <li><a href="mailto:hello@boostmybranding.com" className="hover:text-slate-900">Contact</a></li>
               <li><Link href={PORTAL_URL} className="hover:text-slate-900">Client login</Link></li>
               <li><Link href={DASHBOARD_URL} className="hover:text-slate-900">Team login</Link></li>
             </ul>

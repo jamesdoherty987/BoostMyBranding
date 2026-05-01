@@ -8,7 +8,7 @@ import { cn } from '@boost/ui';
 const tabs = [
   { href: '/dashboard', label: 'Home', icon: Home },
   { href: '/upload', label: 'Upload', icon: Upload },
-  { href: '/calendar', label: 'Review', icon: CalendarDays },
+  { href: '/calendar', label: 'Calendar', icon: CalendarDays },
   { href: '/chat', label: 'Chat', icon: MessageSquare },
   { href: '/settings', label: 'You', icon: User },
 ];

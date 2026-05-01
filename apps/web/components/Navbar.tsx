@@ -9,52 +9,64 @@ import { Menu, X } from 'lucide-react';
 const links = [
   { href: '#features', label: 'Features' },
   { href: '#how-it-works', label: 'How it works' },
+  { href: '/examples', label: 'Examples' },
   { href: '#pricing', label: 'Pricing' },
-  { href: '#portfolio', label: 'Work' },
   { href: '#faq', label: 'FAQ' },
 ];
 
 const PORTAL_URL = process.env.NEXT_PUBLIC_PORTAL_URL ?? 'http://localhost:3001';
 
+/**
+ * Sticky navbar that flips between "dark hero" mode (transparent, white
+ * text) and "scrolled" mode (glass pill, dark text). We watch scrollY so
+ * the logo is always readable on whatever is behind it.
+ */
 export function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 24);
+    const onScroll = () => setScrolled(window.scrollY > 80);
     onScroll();
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
+  const linkBase = 'text-sm font-medium transition-colors';
+  const linkColor = scrolled
+    ? 'text-slate-600 hover:text-slate-900'
+    : 'text-slate-700 hover:text-slate-900';
+
   return (
     <header
       className={`fixed top-0 left-0 right-0 z-50 transition-all ${
-        scrolled ? 'py-3' : 'py-5'
+        scrolled ? 'py-2' : 'py-4'
       }`}
     >
       <div
-        className={`mx-auto flex max-w-6xl items-center justify-between px-4 transition-all ${
-          scrolled ? 'glass rounded-2xl py-2 md:px-4' : ''
+        className={`mx-auto flex max-w-6xl items-center justify-between px-4 transition-all duration-300 ${
+          scrolled
+            ? 'rounded-2xl border border-slate-200/70 bg-white/85 py-2 shadow-lg backdrop-blur-xl md:px-4'
+            : ''
         }`}
       >
         <Link href="/" aria-label="BoostMyBranding home">
-          <Logo size="md" />
+          <Logo size="md" variant="default" />
         </Link>
-        <nav className="hidden items-center gap-8 md:flex">
+        <nav className="hidden items-center gap-7 md:flex">
           {links.map((link) => (
-            <Link
-              key={link.href}
-              href={link.href}
-              className="text-sm font-medium text-slate-600 transition-colors hover:text-slate-900"
-            >
+            <Link key={link.href} href={link.href} className={`${linkBase} ${linkColor}`}>
               {link.label}
             </Link>
           ))}
         </nav>
         <div className="hidden items-center gap-2 md:flex">
           <Link href={PORTAL_URL}>
-            <Button variant="ghost" size="sm">
+            <Button
+              variant="ghost"
+              size="sm"
+              className={scrolled ? '' : 'text-slate-700 hover:bg-white/60'}
+            >
               Client login
             </Button>
           </Link>
@@ -63,7 +75,11 @@ export function Navbar() {
           </Link>
         </div>
         <button
-          className="md:hidden rounded-xl p-2 text-slate-700 hover:bg-slate-100"
+          className={`md:hidden rounded-xl p-2 ${
+            scrolled
+              ? 'text-slate-700 hover:bg-slate-100'
+              : 'text-slate-700 hover:bg-white/60'
+          }`}
           onClick={() => setOpen((v) => !v)}
           aria-label="Toggle menu"
         >

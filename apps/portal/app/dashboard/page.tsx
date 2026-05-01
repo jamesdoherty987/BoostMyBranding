@@ -4,29 +4,31 @@ import Link from 'next/link';
 import Image from 'next/image';
 import useSWR from 'swr';
 import { motion } from 'framer-motion';
-import { timeAgo, mockClients, mockPosts, mockMessages, postImageUrl, postScheduledAt } from '@boost/core';
 import {
-  Badge,
-  Button,
-  Skeleton,
-  EmptyState,
-} from '@boost/ui';
+  timeAgo,
+  mockClients,
+  mockPosts,
+  mockMessages,
+  postImageUrl,
+  postScheduledAt,
+} from '@boost/core';
+import { Badge, Button, Skeleton, EmptyState } from '@boost/ui';
 import {
   ArrowRight,
-  CheckCircle2,
   Image as ImageIcon,
   TrendingUp,
-  Clock,
   MessageSquare,
   Upload as UploadIcon,
+  Calendar,
 } from 'lucide-react';
 import { Shell } from '@/components/Shell';
 import { api } from '@/lib/api';
+import { handlePortalAuthError, ALLOW_MOCK_FALLBACK } from '@/lib/auth';
 
 /**
- * Client portal home. Loads the real client + posts + messages when the
- * backend is reachable; otherwise uses the mock fixtures. Skeleton on first
- * load. Empty state when the client has no posts yet (brand new signup).
+ * Client portal home. The client sees what's published and scheduled but
+ * doesn't approve anything — our dashboard handles that. Primary actions
+ * here are "upload photos" and "chat with us".
  */
 export default function DashboardPage() {
   const { data, isLoading } = useSWR('portal:dashboard', async () => {
@@ -37,7 +39,9 @@ export default function DashboardPage() {
         api.listMessages(client.id),
       ]);
       return { client, posts, messages };
-    } catch {
+    } catch (err) {
+      handlePortalAuthError(err);
+      if (!ALLOW_MOCK_FALLBACK) throw err;
       const client = mockClients[0]!;
       return {
         client,
@@ -62,10 +66,12 @@ export default function DashboardPage() {
     );
   }
 
-  const { client, posts, messages } = data as any;
-  const pending = posts.filter((p: any) => p.status === 'pending_approval');
+  const { client, posts, messages } = data;
+  const recentlyPublished = posts
+    .filter((p) => p.status === 'published')
+    .slice(0, 3);
   const upcoming = posts
-    .filter((p: any) => ['approved', 'scheduled'].includes(p.status))
+    .filter((p) => ['scheduled', 'approved'].includes(p.status))
     .slice(0, 3);
   const noContentYet = posts.length === 0;
 
@@ -91,7 +97,7 @@ export default function DashboardPage() {
         </div>
         <div className="mt-1 flex items-baseline gap-1">
           <span className="text-4xl font-bold">
-            {client.stats?.postsThisMonth ?? posts.length}
+            {client.stats?.postsThisMonth ?? recentlyPublished.length}
           </span>
           <span className="text-white/80">posts published</span>
         </div>
@@ -113,12 +119,12 @@ export default function DashboardPage() {
           <div className="text-xs text-slate-500">Drop your latest shots</div>
         </Link>
         <Link
-          href="/calendar"
+          href="/chat"
           className="group rounded-2xl border border-slate-200 bg-white p-4 transition-all hover:-translate-y-0.5 hover:border-[#48D886] hover:shadow-md"
         >
-          <Clock className="h-5 w-5 text-[#1D9CA1]" />
-          <div className="mt-2 text-sm font-semibold text-slate-900">Review posts</div>
-          <div className="text-xs text-slate-500">{pending.length} waiting</div>
+          <MessageSquare className="h-5 w-5 text-[#1D9CA1]" />
+          <div className="mt-2 text-sm font-semibold text-slate-900">Chat with us</div>
+          <div className="text-xs text-slate-500">Anything you want tweaked</div>
         </Link>
       </section>
 
@@ -140,22 +146,25 @@ export default function DashboardPage() {
         </div>
       ) : null}
 
-      {pending.length > 0 ? (
+      {upcoming.length > 0 ? (
         <section className="mt-6">
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-slate-900">Waiting for you</h2>
-            <Link href="/calendar" className="text-xs font-medium text-[#1D9CA1]">
-              See all
+            <h2 className="text-sm font-semibold text-slate-900">Going out soon</h2>
+            <Link
+              href="/calendar"
+              className="inline-flex items-center gap-1 text-xs font-medium text-[#1D9CA1]"
+            >
+              <Calendar className="h-3 w-3" />
+              See calendar
             </Link>
           </div>
-          <div className="mt-3 space-y-3">
-            {pending.slice(0, 2).map((post: any) => (
-              <Link
+          <div className="mt-3 space-y-2">
+            {upcoming.map((post) => (
+              <div
                 key={post.id}
-                href="/calendar"
-                className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3 transition-shadow hover:shadow-md"
+                className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3"
               >
-                <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-xl">
+                <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-xl">
                   <Image
                     src={postImageUrl(post)}
                     alt=""
@@ -165,44 +174,42 @@ export default function DashboardPage() {
                   />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <Badge tone="warning" className="mb-1">
-                    Needs approval
+                  <Badge tone="default" className="mb-1">
+                    {post.platform}
                   </Badge>
                   <div className="line-clamp-2 text-sm text-slate-800">{post.caption}</div>
+                  <div className="mt-0.5 text-xs text-slate-500">
+                    {postScheduledAt(post).toLocaleDateString(undefined, {
+                      weekday: 'short',
+                      month: 'short',
+                      day: 'numeric',
+                    })}
+                  </div>
                 </div>
-                <ArrowRight className="h-4 w-4 text-slate-400" />
-              </Link>
+              </div>
             ))}
           </div>
-          <Link href="/calendar">
-            <Button className="mt-3 w-full" variant="outline">
-              <CheckCircle2 className="h-4 w-4" />
-              Review all ({pending.length})
-            </Button>
-          </Link>
         </section>
       ) : null}
 
-      {upcoming.length > 0 ? (
+      {recentlyPublished.length > 0 ? (
         <section className="mt-6">
-          <h2 className="text-sm font-semibold text-slate-900">Upcoming</h2>
-          <div className="mt-3 space-y-2">
-            {upcoming.map((post: any) => (
-              <div key={post.id} className="flex items-center gap-3 rounded-xl bg-white p-3">
-                <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg">
-                  <Image
-                    src={postImageUrl(post)}
-                    alt=""
-                    fill
-                    className="object-cover"
-                    unoptimized
-                  />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="line-clamp-1 text-sm text-slate-800">{post.caption}</div>
-                  <div className="text-xs text-slate-500 capitalize">
-                    {post.platform} · {postScheduledAt(post).toLocaleDateString()}
-                  </div>
+          <h2 className="text-sm font-semibold text-slate-900">Recently live</h2>
+          <div className="mt-3 grid grid-cols-3 gap-2">
+            {recentlyPublished.map((post) => (
+              <div
+                key={post.id}
+                className="relative aspect-square overflow-hidden rounded-xl bg-slate-100"
+              >
+                <Image
+                  src={postImageUrl(post)}
+                  alt=""
+                  fill
+                  className="object-cover"
+                  unoptimized
+                />
+                <div className="absolute bottom-1 left-1 rounded-full bg-black/60 px-1.5 py-0.5 text-[9px] font-medium capitalize text-white backdrop-blur">
+                  {post.platform}
                 </div>
               </div>
             ))}
@@ -218,12 +225,12 @@ export default function DashboardPage() {
               href="/chat"
               className="inline-flex items-center gap-1 text-xs font-medium text-[#1D9CA1]"
             >
-              <MessageSquare className="h-3 w-3" />
+              <ArrowRight className="h-3 w-3" />
               Open chat
             </Link>
           </div>
           <div className="mt-3 space-y-2">
-            {messages.slice(-2).map((m: any) => (
+            {messages.slice(-2).map((m) => (
               <div key={m.id} className="rounded-xl bg-white p-3">
                 <div className="flex items-center justify-between text-xs">
                   <span className="font-semibold text-slate-900">{m.senderName}</span>

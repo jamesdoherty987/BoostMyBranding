@@ -121,7 +121,7 @@ export default function GeneratePage() {
               >
                 {clients.map((c) => (
                   <option key={c.id} value={c.id}>
-                    {c.businessName} · {(c as any).industry ?? ''}
+                    {c.businessName} · {c.industry ?? ''}
                   </option>
                 ))}
               </select>

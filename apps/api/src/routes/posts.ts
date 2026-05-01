@@ -22,11 +22,36 @@ import type { Request, Response, NextFunction } from 'express';
 
 export const postsRouter = Router();
 
+const POST_STATUSES = [
+  'draft',
+  'pending_internal',
+  'pending_approval',
+  'approved',
+  'scheduled',
+  'publishing',
+  'published',
+  'failed',
+  'rejected',
+] as const;
+const listQuerySchema = z.object({
+  clientId: z.string().min(1).max(100).optional(),
+  status: z.enum(POST_STATUSES).optional(),
+});
+
 postsRouter.get('/', requireAuth, async (req, res, next) => {
   try {
     const user = (req as any).user as { role: string; clientId?: string };
-    let clientId = req.query.clientId as string | undefined;
-    const status = req.query.status as string | undefined;
+    const parsed = listQuerySchema.safeParse({
+      clientId: req.query.clientId,
+      status: req.query.status,
+    });
+    if (!parsed.success) {
+      return res
+        .status(400)
+        .json({ error: { message: 'Invalid query', code: 'VALIDATION' } });
+    }
+    let clientId = parsed.data.clientId;
+    const status = parsed.data.status;
 
     if (user.role === 'client') {
       clientId = user.clientId;
@@ -40,9 +65,9 @@ postsRouter.get('/', requireAuth, async (req, res, next) => {
       return res.json({ data: results });
     }
     const db = getDb();
-    const conds: any[] = [];
+    const conds = [];
     if (clientId) conds.push(eq(posts.clientId, clientId));
-    if (status) conds.push(eq(posts.status, status as any));
+    if (status) conds.push(eq(posts.status, status));
     const rows =
       conds.length > 0
         ? await db.select().from(posts).where(and(...conds))

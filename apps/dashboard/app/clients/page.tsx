@@ -23,6 +23,8 @@ const TIER_TONES = {
   full_package: 'success',
 } as const;
 
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
+
 export default function ClientsPage() {
   const [q, setQ] = useState('');
   const { data = mockClients, isLoading } = useSWR('clients:list', async () => {
@@ -41,10 +43,12 @@ export default function ClientsPage() {
         title="Clients"
         subtitle={`${data.length} brands on BoostMyBranding`}
         action={
-          <Button size="sm">
-            <Plus className="h-4 w-4" />
-            <span className="hidden sm:inline">New client</span>
-          </Button>
+          <a href={`${APP_URL}/signup`} target="_blank" rel="noopener noreferrer">
+            <Button size="sm">
+              <Plus className="h-4 w-4" />
+              <span className="hidden sm:inline">New client</span>
+            </Button>
+          </a>
         }
       />
 
@@ -61,6 +65,17 @@ export default function ClientsPage() {
 
         {isLoading ? (
           <div className="flex justify-center p-12"><Spinner size={28} /></div>
+        ) : filtered.length === 0 ? (
+          <div className="rounded-3xl border border-dashed border-slate-200 p-12 text-center">
+            <p className="text-sm text-slate-600">
+              {q ? `No clients matching "${q}"` : 'No clients yet.'}
+            </p>
+            {q ? (
+              <Button variant="ghost" size="sm" className="mt-3" onClick={() => setQ('')}>
+                Clear search
+              </Button>
+            ) : null}
+          </div>
         ) : (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {filtered.map((c, i) => (
@@ -76,8 +91,8 @@ export default function ClientsPage() {
                 >
                   <div className="relative h-24 bg-gradient-cta md:h-28">
                     <div className="absolute left-5 -bottom-6 h-14 w-14 overflow-hidden rounded-2xl border-4 border-white bg-white md:h-16 md:w-16">
-                      {(c as any).logoUrl ? (
-                        <Image src={(c as any).logoUrl} alt="" fill unoptimized />
+                      {c.logoUrl ? (
+                        <Image src={c.logoUrl} alt="" fill unoptimized />
                       ) : null}
                     </div>
                   </div>
@@ -85,16 +100,16 @@ export default function ClientsPage() {
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
                         <h3 className="truncate font-semibold text-slate-900">{c.businessName}</h3>
-                        <p className="truncate text-xs text-slate-500">{(c as any).industry}</p>
+                        <p className="truncate text-xs text-slate-500">{c.industry}</p>
                       </div>
                       <Badge tone={TIER_TONES[c.subscriptionTier]}>
                         {TIER_LABELS[c.subscriptionTier]}
                       </Badge>
                     </div>
                     <div className="mt-4 grid grid-cols-3 gap-2 border-t border-slate-100 pt-4 text-center">
-                      <Stat label="Posts" value={(c as any).stats?.postsThisMonth ?? 0} />
-                      <Stat label="Waiting" value={(c as any).stats?.pendingApproval ?? 0} />
-                      <Stat label="MRR" value={formatCurrency((c as any).monthlyPriceCents ?? 0)} />
+                      <Stat label="Posts" value={c.stats?.postsThisMonth ?? 0} />
+                      <Stat label="Waiting" value={c.stats?.pendingApproval ?? 0} />
+                      <Stat label="MRR" value={formatCurrency(c.monthlyPriceCents ?? 0)} />
                     </div>
                   </div>
                 </Link>

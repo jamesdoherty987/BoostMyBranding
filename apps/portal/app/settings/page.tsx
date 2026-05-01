@@ -6,6 +6,7 @@ import { Button, Input, toast, Spinner, Badge, Dialog, EmptyState } from '@boost
 import { Check, Instagram, Facebook, Linkedin, Music2, Twitter, LogOut } from 'lucide-react';
 import { Shell } from '@/components/Shell';
 import { api } from '@/lib/api';
+import { handlePortalAuthError, ALLOW_MOCK_FALLBACK } from '@/lib/auth';
 import { mockClients } from '@boost/core';
 
 const SOCIAL_FIELDS = [
@@ -20,7 +21,9 @@ export default function SettingsPage() {
   const { data, isLoading } = useSWR('portal:settings', async () => {
     try {
       return await api.getMyClient();
-    } catch {
+    } catch (err) {
+      handlePortalAuthError(err);
+      if (!ALLOW_MOCK_FALLBACK) throw err;
       return mockClients[0];
     }
   });
@@ -34,9 +37,9 @@ export default function SettingsPage() {
 
   useEffect(() => {
     if (data) {
-      setWebsiteUrl((data as any).websiteUrl ?? '');
-      setIndustry((data as any).industry ?? '');
-      setSocials(((data as any).socialAccounts as Record<string, string>) ?? {});
+      setWebsiteUrl(data.websiteUrl ?? '');
+      setIndustry(data.industry ?? '');
+      setSocials(data.socialAccounts ?? {});
       setDirty(false);
     }
   }, [data]);
@@ -81,7 +84,7 @@ export default function SettingsPage() {
     <Shell title="Settings" subtitle={data.businessName}>
       <section className="rounded-2xl border border-slate-200 bg-white p-4">
         <h2 className="text-sm font-semibold text-slate-900">Business</h2>
-        <p className="text-xs text-slate-500">Used by AI to tune your content.</p>
+        <p className="text-xs text-slate-500">Helps your team tune the monthly content plan.</p>
         <div className="mt-4 space-y-3">
           <Field label="Industry">
             <Input
@@ -113,7 +116,7 @@ export default function SettingsPage() {
         <h2 className="text-sm font-semibold text-slate-900">Brand colors</h2>
         <div className="mt-3 flex gap-3">
           {(['primary', 'secondary', 'accent'] as const).map((key) => {
-            const hex = (data as any).brandColors?.[key] ?? '#48D886';
+            const hex = data.brandColors?.[key] ?? '#48D886';
             return (
               <div key={key} className="flex-1 text-center">
                 <div

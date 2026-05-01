@@ -1,7 +1,7 @@
 import { ImageResponse } from 'next/og';
 
 export const runtime = 'edge';
-export const alt = 'BoostMyBranding — Social growth on autopilot';
+export const alt = 'BoostMyBranding — Social media done for you';
 export const size = { width: 1200, height: 630 };
 export const contentType = 'image/png';
 
@@ -54,19 +54,19 @@ export default function OgImage() {
         {/* Headline */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
           <div style={{ fontSize: 92, fontWeight: 800, lineHeight: 1.02, maxWidth: 980, display: 'flex', flexDirection: 'column' }}>
-            <span>Social growth,</span>
+            <span>Launch your brand.</span>
             <span
               style={{
-                backgroundImage: 'linear-gradient(90deg, #48D886, #1D9CA1, #FFEC3D)',
+                backgroundImage: 'linear-gradient(90deg, #1D9CA1, #48D886, #FFEC3D)',
                 backgroundClip: 'text',
                 color: 'transparent',
               }}
             >
-              on autopilot.
+              Watch it fly.
             </span>
           </div>
           <div style={{ fontSize: 28, color: '#475569', maxWidth: 820, display: 'flex' }}>
-            AI generates, schedules, and publishes a month of on-brand content. You approve with a swipe.
+            A dedicated social team for modern local businesses. Thoughtful posts in your voice, planned and published every month.
           </div>
         </div>
 

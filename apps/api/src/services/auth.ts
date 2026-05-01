@@ -12,7 +12,7 @@
 
 import crypto from 'node:crypto';
 import type { Request, Response, NextFunction } from 'express';
-import { eq, gt, and } from 'drizzle-orm';
+import { eq, gt, and, isNull } from 'drizzle-orm';
 import { getDb, isDbConfigured, users, magicLinks, sessions } from '@boost/database';
 import { env } from '../env.js';
 import { sendEmail, magicLinkEmail } from './resend.js';
@@ -95,26 +95,30 @@ export async function consumeMagicLink(token: string): Promise<{ userId: string 
 
   if (isDbConfigured()) {
     const db = getDb();
-    const [link] = await db
-      .select()
-      .from(magicLinks)
-      .where(and(eq(magicLinks.tokenHash, tokenHash), gt(magicLinks.expiresAt, new Date())));
-    if (!link || link.usedAt) return null;
 
-    // Mark used atomically with a conditional update to prevent token reuse races.
-    const result = await db
+    // Atomic claim: update only if the row is unused AND unexpired, returning
+    // the row in a single statement. This closes the TOCTOU window between
+    // "check if used" and "mark used" that would otherwise allow a token to
+    // be consumed twice by concurrent requests.
+    const [claimed] = await db
       .update(magicLinks)
       .set({ usedAt: new Date() })
-      .where(and(eq(magicLinks.id, link.id), eq(magicLinks.tokenHash, tokenHash)))
-      .returning({ id: magicLinks.id });
-    if (result.length === 0) return null;
+      .where(
+        and(
+          eq(magicLinks.tokenHash, tokenHash),
+          isNull(magicLinks.usedAt),
+          gt(magicLinks.expiresAt, new Date()),
+        ),
+      )
+      .returning({ email: magicLinks.email });
+    if (!claimed) return null;
 
-    let [user] = await db.select().from(users).where(eq(users.email, link.email));
+    let [user] = await db.select().from(users).where(eq(users.email, claimed.email));
     if (!user) {
-      const role = link.email.endsWith('@boostmybranding.com') ? 'agency_admin' : 'client';
+      const role = claimed.email.endsWith('@boostmybranding.com') ? 'agency_admin' : 'client';
       [user] = await db
         .insert(users)
-        .values({ email: link.email, role, emailVerified: new Date() })
+        .values({ email: claimed.email, role, emailVerified: new Date() })
         .returning();
     }
     if (!user) return null;
@@ -123,6 +127,7 @@ export async function consumeMagicLink(token: string): Promise<{ userId: string 
 
   const link = memMagic.get(tokenHash);
   if (!link || link.expiresAt < Date.now()) return null;
+  // Dev mem store: delete immediately so reuse returns null.
   memMagic.delete(tokenHash);
 
   let user = Array.from(memUsers.values()).find((u) => u.email === link.email);

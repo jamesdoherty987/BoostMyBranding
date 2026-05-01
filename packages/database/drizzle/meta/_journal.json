@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1777640094375,
+      "tag": "0000_lame_doctor_spectrum",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1746115200000,
+      "tag": "0001_add_website_config",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1746201600000,
+      "tag": "0002_slugs_and_leads",
+      "breakpoints": true
+    }
+  ]
+}

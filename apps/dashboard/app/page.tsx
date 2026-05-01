@@ -57,7 +57,7 @@ export default function OverviewPage() {
   const loading = loadingClients || loadingPosts;
 
   const totalMRR = clientList.reduce(
-    (sum, c) => ((c as any).isActive !== false ? sum + ((c as any).monthlyPriceCents ?? 0) : sum),
+    (sum, c) => (c.isActive !== false ? sum + (c.monthlyPriceCents ?? 0) : sum),
     0,
   );
   const pendingCount = postList.filter((p) => p.status === 'pending_approval').length;
@@ -232,8 +232,8 @@ export default function OverviewPage() {
                     className="flex items-center gap-3 p-4 transition-colors hover:bg-slate-50"
                   >
                     <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-xl bg-slate-100">
-                      {(c as any).logoUrl ? (
-                        <Image src={(c as any).logoUrl} alt="" fill unoptimized />
+                      {c.logoUrl ? (
+                        <Image src={c.logoUrl} alt="" fill unoptimized />
                       ) : null}
                     </div>
                     <div className="min-w-0 flex-1">
@@ -241,8 +241,8 @@ export default function OverviewPage() {
                         {c.businessName}
                       </div>
                       <div className="truncate text-xs text-slate-500">
-                        {(c as any).stats?.pendingApproval ?? 0} pending ·{' '}
-                        {(c as any).stats?.postsThisMonth ?? 0} live
+                        {c.stats?.pendingApproval ?? 0} pending ·{' '}
+                        {c.stats?.postsThisMonth ?? 0} live
                       </div>
                     </div>
                   </Link>

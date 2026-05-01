@@ -129,3 +129,103 @@ PLATFORM RULES:
 Return ONLY JSON:
 { "caption": "<reformatted>", "hashtags": [...] }`;
 }
+
+/**
+ * Website config generator. Produces a structured JSON blob that drives a
+ * marketing site from a small set of client inputs. Intentionally opinionated
+ * about shape so the front-end can render it deterministically.
+ */
+export function websiteConfigPrompt(vars: {
+  businessName: string;
+  industry: string;
+  description: string;
+  existingMarkdown?: string;
+  services?: string[];
+  hasHours?: boolean;
+  hasBooking?: boolean;
+  imageDescriptions?: string;
+  template?: 'service' | 'food' | 'beauty' | 'fitness' | 'professional';
+}) {
+  return `You are a senior brand & web copywriter. Generate a complete website config JSON for "${vars.businessName}", a ${vars.industry} business.
+
+BUSINESS DESCRIPTION:
+${vars.description}
+
+${vars.existingMarkdown ? `EXISTING SITE CONTENT (for voice + facts):\n${vars.existingMarkdown}\n` : ''}${vars.services?.length ? `KNOWN SERVICES: ${vars.services.join(', ')}\n` : ''}${vars.imageDescriptions ? `AVAILABLE IMAGES:\n${vars.imageDescriptions}\n` : ''}${vars.template ? `TEMPLATE HINT: ${vars.template}\n` : ''}
+
+Return ONLY valid JSON in this exact shape:
+{
+  "template": "<service|food|beauty|fitness|professional>",
+  "layout": ["nav","hero","stats","services","about","gallery","reviews","faq","contact","footer"],
+  "meta": {
+    "title": "<SEO page title, ≤60 chars>",
+    "description": "<SEO meta description, ≤160 chars>",
+    "keywords": ["..."]
+  },
+  "brand": {
+    "tagline": "<6-10 words>",
+    "tone": "<warm|professional|playful|premium>",
+    "primaryColor": "<hex, industry-appropriate>",
+    "accentColor": "<hex, complementary>",
+    "popColor": "<hex, optional highlight>",
+    "darkColor": "<hex, near-black for footer>",
+    "heroStyle": "<light|dark>"
+  },
+  "hero": {
+    "eyebrow": "<optional 2-4 word kicker, e.g. 'Family-run since 1998'>",
+    "headline": "<8-14 words, benefit-led. Last 2 words are auto-highlighted.>",
+    "subheadline": "<1-2 sentences>",
+    "ctaPrimary": { "label": "<action verb>", "href": "<#section or url>" },
+    "ctaSecondary": { "label": "...", "href": "..." },
+    "imageIndex": <number or null>,
+    "effects": { "aurora": true, "particles": true, "grid": true }
+  },
+  "stats": [
+    { "value": <number>, "suffix": "<optional>", "prefix": "<optional>", "label": "<label>" }
+  ],
+  "about": {
+    "heading": "...",
+    "body": "<2-3 short paragraphs separated by blank lines>",
+    "bullets": ["<3-5 short proof points>"],
+    "imageIndex": <number or null>
+  },
+  "services": [
+    {
+      "title": "...",
+      "description": "<1-2 sentences>",
+      "icon": "<one of: Sparkles, Wrench, Hammer, Coffee, Utensils, Leaf, Scissors, HeartPulse, Dumbbell, Phone, Calendar, Globe, Camera, MessageCircle, Star, CheckCircle2, Zap, Truck, Home, Shield, Brush, Sun, Flame, Award, Users>"
+    }
+  ],
+  "gallery": {
+    "heading": "<optional>",
+    "imageIndices": [<indices from AVAILABLE IMAGES above>]
+  },
+  "reviews": [
+    { "text": "<realistic-sounding testimonial>", "author": "<first name + last initial>", "rating": 5 }
+  ],
+  "faq": [
+    { "question": "...", "answer": "..." }
+  ],
+  "contact": {
+    "heading": "...",
+    "body": "...",
+    "address": "<optional>",
+    "phone": "<optional>",
+    "email": "<optional>",
+    "hours": "<optional>",
+    "showBookingForm": ${vars.hasBooking ?? false},
+    "showHours": ${vars.hasHours ?? true}
+  },
+  "navigation": ["Home", "Services", "About", "Contact"]
+}
+
+RULES:
+- Write everything in the client's voice, not generic marketing speak.
+- 3-6 services max. Pick icon names ONLY from the list above.
+- Include 3-4 stats — pick whatever's credible for the industry (years in business, customers served, response time, rating).
+- 3 reviews minimum, 5 max. Make them specific (mention the service).
+- 4-6 FAQ items, based on what a real customer would ask.
+- Colours should fit the industry: food warm terracotta/amber; beauty soft rose/magenta; fitness bold blue/green; service teal/green; professional slate/teal.
+- No placeholder text like "Lorem ipsum" — always write real copy.
+- Last 2 words of the hero headline get auto-highlighted in a brand gradient. Write the headline so the last 2 words form a natural punchy phrase.`;
+}

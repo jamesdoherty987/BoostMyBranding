@@ -15,11 +15,15 @@ export default function LoginPage() {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!/.+@.+\..+/.test(email.trim())) {
+      toast.error('Check your email', 'That doesn\'t look quite right.');
+      return;
+    }
     setLoading(true);
     try {
       const redirectTo =
         typeof window !== 'undefined' ? `${window.location.origin}/dashboard` : undefined;
-      const res = await api.sendMagicLink(email, redirectTo);
+      const res = await api.sendMagicLink(email.trim(), redirectTo);
       setSent(true);
       if (res.devLink) setDevLink(res.devLink);
       toast.success('Check your inbox', 'Magic link sent');

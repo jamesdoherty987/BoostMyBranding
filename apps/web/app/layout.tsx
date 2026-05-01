@@ -1,17 +1,30 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { Inter } from 'next/font/google';
 import './globals.css';
 
-const inter = Inter({ subsets: ['latin'], variable: '--font-inter' });
+const inter = Inter({
+  subsets: ['latin'],
+  variable: '--font-inter',
+  display: 'swap',
+  fallback: ['system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'sans-serif'],
+});
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 5,
+  viewportFit: 'cover',
+  themeColor: '#ffffff',
+};
 
 export const metadata: Metadata = {
-  title: 'BoostMyBranding — Social growth on autopilot',
+  title: 'BoostMyBranding — Social media done for you',
   description:
-    'AI-powered social media, websites, and content for modern local businesses. We run your social. You run your business.',
+    'A dedicated social team for modern local businesses. Thoughtful posts in your voice, planned and published every month. Websites built to match.',
   icons: { icon: '/favicon.svg' },
   openGraph: {
     title: 'BoostMyBranding',
-    description: 'Social growth on autopilot for modern local brands.',
+    description: 'Social media and websites done for you, by a real team.',
     type: 'website',
   },
 };

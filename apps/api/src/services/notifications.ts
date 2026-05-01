@@ -87,3 +87,38 @@ async function listAgencyAdmins(): Promise<string[]> {
     .where(eq(users.role, 'agency_admin'));
   return rows.map((r) => r.email);
 }
+
+/**
+ * Generic agency-wide notification. Used for low-frequency, high-signal
+ * events (new leads, failed runs). Goes to every agency_admin user.
+ */
+export async function sendAgencyNotification(args: {
+  subject: string;
+  body: string;
+}) {
+  const admins = await listAgencyAdmins();
+  if (admins.length === 0) {
+    console.log(`📣 [notify] ${args.subject}`);
+    return;
+  }
+  await Promise.all(
+    admins.map((email) =>
+      sendEmail({
+        to: email,
+        subject: args.subject,
+        text: args.body,
+        html: `<pre style="font-family:Inter,sans-serif;white-space:pre-wrap;color:#0f172a;font-size:14px;line-height:1.55;padding:20px;">${escapeHtml(args.body)}</pre>`,
+      }),
+    ),
+  );
+}
+
+/** Minimal HTML-escape for safe text-in-html rendering of user input. */
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}

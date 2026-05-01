@@ -27,6 +27,7 @@ import { billingRouter } from './routes/billing.js';
 import { webhooksRouter } from './routes/webhooks.js';
 import { realtimeRouter } from './routes/realtime.js';
 import { systemRouter } from './routes/system.js';
+import { leadsRouter } from './routes/leads.js';
 import { startScheduler } from './services/scheduler.js';
 import { localUploadDir } from './services/r2.js';
 
@@ -107,6 +108,7 @@ app.use('/api/v1/automation', automationRouter);
 app.use('/api/v1/billing', billingRouter);
 app.use('/api/v1/realtime', realtimeRouter);
 app.use('/api/v1/system', systemRouter);
+app.use('/api/v1/leads', leadsRouter);
 
 app.use((_req, res) => {
   res.status(404).json({ error: { message: 'Route not found', code: 'NOT_FOUND' } });

@@ -151,6 +151,8 @@ Each login flow is the same: enter the email, click **Send magic link**, then fo
 
 ## 6. Going to production
 
+**TL;DR for Render:** the repo ships a `render.yaml` blueprint that provisions everything (DB + API + cron + migrations) in one click. See [`docs/DEPLOY.md`](./DEPLOY.md) for the full walk-through.
+
 ### Frontends — Vercel (free)
 
 Import the repo three times, one per app. Set root directory to `apps/web`, `apps/portal`, `apps/dashboard`, and set custom subdomains.

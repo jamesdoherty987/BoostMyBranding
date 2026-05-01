@@ -5,10 +5,11 @@
 
 import { Router } from 'express';
 import { z } from 'zod';
-import { eq } from 'drizzle-orm';
-import { getDb, isDbConfigured, clients } from '@boost/database';
-import { mockClients, getClient } from '@boost/core';
+import { eq, desc } from 'drizzle-orm';
+import { getDb, isDbConfigured, clients, clientImages } from '@boost/database';
+import { mockClients, getClient, slugify, type WebsiteConfig } from '@boost/core';
 import { requireAuth, requireRole } from '../services/auth.js';
+import { publicLimiter } from '../middleware/rateLimit.js';
 
 export const clientsRouter = Router();
 
@@ -80,6 +81,76 @@ clientsRouter.patch('/me', requireAuth, async (req, res, next) => {
   }
 });
 
+/**
+ * Public endpoint: fetch a client's generated website config + image URLs by
+ * slug. No auth — these are intended to be served as public marketing sites
+ * at /sites/[slug]. Rate-limited to deter enumeration / scraping.
+ *
+ * Placed BEFORE the authed `/:id` route so the longer path matches first.
+ */
+clientsRouter.get('/public/by-slug/:slug/site', publicLimiter, async (req, res, next) => {
+  try {
+    const rawSlug = String(req.params.slug).toLowerCase();
+    // Normalize through slugify so `MuRpHyS--Plumbing` → `murphys-plumbing`
+    // can't bypass the index. Reject anything that doesn't round-trip (it
+    // means the caller sent junk).
+    const slug = slugify(rawSlug);
+    if (!slug || slug !== rawSlug) {
+      return res.status(404).json({ error: { message: 'Site not found', code: 'NOT_FOUND' } });
+    }
+
+    if (!isDbConfigured()) {
+      const match = mockClients.find((c) => slugify(c.businessName) === slug);
+      if (!match) {
+        return res
+          .status(404)
+          .json({ error: { message: 'Site not found', code: 'NOT_FOUND' } });
+      }
+      return res.json({
+        data: {
+          businessName: match.businessName,
+          slug,
+          clientId: match.id,
+          config: null as WebsiteConfig | null,
+          images: [] as string[],
+          status: 'pending' as const,
+        },
+      });
+    }
+
+    const db = getDb();
+    // Indexed lookup — no more full table scan.
+    const [match] = await db
+      .select()
+      .from(clients)
+      .where(eq(clients.slug, slug))
+      .limit(1);
+    if (!match || !match.isActive) {
+      return res.status(404).json({ error: { message: 'Site not found', code: 'NOT_FOUND' } });
+    }
+    const imgs = await db
+      .select()
+      .from(clientImages)
+      .where(eq(clientImages.clientId, match.id))
+      .orderBy(desc(clientImages.qualityScore))
+      .limit(12);
+    return res.json({
+      data: {
+        businessName: match.businessName,
+        slug: match.slug,
+        clientId: match.id,
+        config: (match.websiteConfig ?? null) as WebsiteConfig | null,
+        images: imgs
+          .map((i) => i.enhancedUrl ?? i.fileUrl)
+          .filter((u): u is string => typeof u === 'string' && u.length > 0),
+        status: match.websiteConfig ? ('ready' as const) : ('pending' as const),
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
 clientsRouter.get('/:id', requireAuth, async (req, res, next) => {
   try {
     const id = String(req.params.id);
@@ -119,13 +190,38 @@ clientsRouter.post(
       const body = createSchema.parse(req.body);
       if (!isDbConfigured()) return res.status(201).json({ data: { id: 'c_new', ...body } });
       const db = getDb();
-      const [row] = await db.insert(clients).values(body).returning();
+      const slug = await reserveSlug(body.businessName);
+      const [row] = await db
+        .insert(clients)
+        .values({ ...body, slug })
+        .returning();
       res.status(201).json({ data: row });
     } catch (e) {
       next(e);
     }
   },
 );
+
+/**
+ * Generate a unique slug for a client. Starts from the base slug and suffixes
+ * `-2`, `-3`, … until the `clients_slug_idx` unique index is free.
+ * This runs with a small retry budget so a concurrent insert can't wedge it.
+ */
+async function reserveSlug(businessName: string): Promise<string> {
+  const base = slugify(businessName) || 'site';
+  const db = getDb();
+  for (let i = 0; i < 50; i++) {
+    const candidate = i === 0 ? base : `${base}-${i + 1}`;
+    const [existing] = await db
+      .select({ id: clients.id })
+      .from(clients)
+      .where(eq(clients.slug, candidate))
+      .limit(1);
+    if (!existing) return candidate;
+  }
+  // Extremely unlikely; fall back to base + timestamp to avoid infinite loops.
+  return `${base}-${Date.now().toString(36).slice(-6)}`;
+}
 
 clientsRouter.post(
   '/:id/onboard',

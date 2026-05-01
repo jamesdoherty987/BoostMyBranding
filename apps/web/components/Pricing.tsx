@@ -25,13 +25,13 @@ const tiers: TierDef[] = [
     name: 'Social Only',
     price: 700,
     suffix: '/mo',
-    description: '30 posts a month across 4 platforms. Approve, schedule, publish.',
+    description: '30 handcrafted posts a month across 4 platforms, run by our team.',
     features: [
       '30 posts / month',
       'Instagram, Facebook, LinkedIn, TikTok',
-      'AI brand-voice doc',
+      'Written in your brand voice',
+      'Dedicated account manager',
       'Monthly performance report',
-      'Client portal + chat',
     ],
     cta: 'Start social',
   },
@@ -41,12 +41,12 @@ const tiers: TierDef[] = [
     price: 800,
     setup: 800,
     suffix: '/mo',
-    description: 'Social media + fast, modern website + ongoing updates.',
+    description: 'Social + a fast, modern website we maintain for you as your business changes.',
     features: [
       'Everything in Social Only',
       'Custom website + hosting',
       'Unlimited change requests',
-      'Booking + map + forms',
+      'Booking forms + map',
       'Priority support',
     ],
     cta: 'Go full package',
@@ -58,13 +58,13 @@ const tiers: TierDef[] = [
     price: 150,
     setup: 800,
     suffix: '/mo',
-    description: 'Premium website + hosting + ongoing tweaks. No social.',
+    description: 'A modern website, built custom and kept current every month.',
     features: [
       'Custom website design',
       'Fast CDN hosting',
-      'Monthly updates',
+      'Ongoing content updates',
       'Booking integration',
-      'Form + analytics setup',
+      'Forms + analytics',
     ],
     cta: 'Just the website',
   },
@@ -76,10 +76,10 @@ export function Pricing() {
       <div className="mx-auto max-w-6xl px-4">
         <div className="mx-auto max-w-2xl text-center">
           <h2 className="text-4xl font-bold tracking-tight md:text-5xl">
-            Simple pricing. <span className="text-gradient-brand">No surprises.</span>
+            One monthly price. <span className="text-gradient-brand">No hourly rates.</span>
           </h2>
           <p className="mt-4 text-lg text-slate-600">
-            Pick a package. Cancel any time after the first 3 months.
+            Flat fee, cancel any time after the first 3 months.
           </p>
         </div>
 

@@ -1,186 +1,108 @@
 'use client';
 
-import { useRef, useState, useEffect } from 'react';
-import Image from 'next/image';
-import { motion, useScroll, useTransform, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { SectionWrapper, Badge } from '@boost/ui';
-import { Upload, Sparkles, Check, Calendar } from 'lucide-react';
+import { Upload, PenLine, Send, CalendarCheck, type LucideIcon } from 'lucide-react';
 
 /**
- * Scroll-driven demo of the monthly cadence. On desktop we use a sticky
- * storyboard (content × 4 viewports); on mobile we collapse into a simpler
- * vertical list so the page isn't needlessly tall.
+ * How it works — written like a boutique agency process, not a tool setup.
+ * Four steps: you hand over the raw material, our team builds the calendar,
+ * chat covers any changes, we publish and report back.
  */
-const STEPS = [
+interface Step {
+  icon: LucideIcon;
+  title: string;
+  body: string;
+  who: 'You' | 'Us';
+  accent: string;
+}
+
+const STEPS: Step[] = [
   {
-    key: 'upload',
     icon: Upload,
-    headline: 'Monday — you drop 15 photos.',
-    body: "From your phone, your camera roll, or straight from a shoot. Tag them, or don't. We'll figure it out.",
-    image: 'https://picsum.photos/seed/demo-upload/900/900',
+    title: 'Send us a handful of photos.',
+    body: "From your phone, your camera roll, or straight from a shoot. 10–15 a fortnight is plenty for our team to work with.",
+    who: 'You',
+    accent: '#48D886',
   },
   {
-    key: 'ai',
-    icon: Sparkles,
-    headline: 'Tuesday — AI drafts a month.',
-    body: '30 captions, hashtags, platform tweaks, and image enhancements. Built from your brand voice.',
-    image: 'https://picsum.photos/seed/demo-ai/900/900',
+    icon: PenLine,
+    title: 'Our team writes the month.',
+    body: "Writers draft captions in your voice, editors choose the best shots, strategists decide what goes where. Nothing ships without a second pair of eyes.",
+    who: 'Us',
+    accent: '#1D9CA1',
   },
   {
-    key: 'approve',
-    icon: Check,
-    headline: 'Wednesday — you swipe to approve.',
-    body: 'Green check or red x. Undo anytime. The whole month takes about 7 minutes.',
-    image: 'https://picsum.photos/seed/demo-approve/900/900',
+    icon: Send,
+    title: 'Chat anything you want changed.',
+    body: "Preview what's coming up in the portal. Want a different photo on the Friday post? Different CTA? Message us, we redo it — no retainer ticket system.",
+    who: 'You',
+    accent: '#48D886',
   },
   {
-    key: 'publish',
-    icon: Calendar,
-    headline: 'The rest of the month runs itself.',
-    body: 'We auto-publish across every platform on schedule. You get a weekly summary email.',
-    image: 'https://picsum.photos/seed/demo-publish/900/900',
+    icon: CalendarCheck,
+    title: 'We publish. You see what shipped.',
+    body: "Posts go live across every platform on schedule. Every Friday you get a short note summarising what went out and how it performed.",
+    who: 'Us',
+    accent: '#FFEC3D',
   },
 ];
 
 export function Demo() {
   return (
-    <SectionWrapper id="how-it-works" className="py-24 md:py-32">
-      <div className="mx-auto max-w-6xl px-4">
-        <div className="mx-auto max-w-2xl text-center">
+    <SectionWrapper id="how-it-works" className="py-20 md:py-28">
+      <div className="mx-auto max-w-3xl px-4">
+        <div className="text-center">
+          <Badge tone="brand" className="mb-4">
+            How we work
+          </Badge>
           <h2 className="text-4xl font-bold tracking-tight md:text-5xl">
-            A week in the life of a <span className="text-gradient-brand">BoostMyBranding</span> client.
+            You send the raw material.{' '}
+            <span className="text-gradient-brand">We make it look great.</span>
           </h2>
           <p className="mt-4 text-lg text-slate-600">
-            Under 10 minutes of your time. A full month of content live.
+            No calls to schedule, no briefs to write. Just drop photos and get back to work.
           </p>
         </div>
-      </div>
 
-      {/* Mobile: vertical stacked cards */}
-      <div className="mx-auto mt-10 max-w-2xl space-y-5 px-4 lg:hidden">
-        {STEPS.map((s, i) => (
-          <motion.div
-            key={s.key}
-            initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, margin: '-80px' }}
-            transition={{ delay: i * 0.08 }}
-            className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm"
-          >
-            <div className="relative aspect-[5/3]">
-              <Image src={s.image} alt="" fill className="object-cover" unoptimized />
-              <div className="absolute inset-0 bg-gradient-to-t from-slate-900/50 to-transparent" />
-              <Badge tone="brand" className="absolute left-3 top-3">
-                Step {i + 1}
-              </Badge>
-            </div>
-            <div className="p-5">
-              <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-cta text-white">
-                  <s.icon className="h-4 w-4" />
-                </div>
-                <h3 className="text-lg font-bold text-slate-900">{s.headline}</h3>
+        <ol className="mt-12 space-y-4">
+          {STEPS.map((s, i) => (
+            <motion.li
+              key={s.title}
+              initial={{ opacity: 0, y: 16 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true, margin: '-80px' }}
+              transition={{ duration: 0.5, delay: i * 0.08 }}
+              className="flex items-start gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm md:p-6"
+            >
+              <div
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-white shadow-md"
+                style={{ background: `linear-gradient(135deg, ${s.accent}, #1D9CA1)` }}
+              >
+                <s.icon className="h-5 w-5" />
               </div>
-              <p className="mt-3 text-sm text-slate-600">{s.body}</p>
-            </div>
-          </motion.div>
-        ))}
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold uppercase tracking-widest text-slate-400">
+                    Step {i + 1}
+                  </span>
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
+                      s.who === 'You'
+                        ? 'bg-[#48D886]/15 text-emerald-700'
+                        : 'bg-[#1D9CA1]/15 text-teal-700'
+                    }`}
+                  >
+                    {s.who}
+                  </span>
+                </div>
+                <h3 className="mt-1 text-lg font-bold text-slate-900 md:text-xl">{s.title}</h3>
+                <p className="mt-1 text-sm text-slate-600 md:text-base">{s.body}</p>
+              </div>
+            </motion.li>
+          ))}
+        </ol>
       </div>
-
-      {/* Desktop: scroll-pinned storyboard */}
-      <DesktopStoryboard />
     </SectionWrapper>
-  );
-}
-
-function DesktopStoryboard() {
-  const ref = useRef<HTMLDivElement>(null);
-  const { scrollYProgress } = useScroll({ target: ref, offset: ['start start', 'end end'] });
-  const [active, setActive] = useState(0);
-
-  useEffect(() => {
-    const unsub = scrollYProgress.on('change', (v) => {
-      const idx = Math.min(STEPS.length - 1, Math.max(0, Math.floor(v * STEPS.length)));
-      setActive(idx);
-    });
-    return unsub;
-  }, [scrollYProgress]);
-
-  const progress = useTransform(scrollYProgress, [0, 1], ['0%', '100%']);
-
-  return (
-    <div
-      ref={ref}
-      className="relative mt-16 hidden lg:block"
-      style={{ height: `${STEPS.length * 100}vh` }}
-    >
-      <div className="sticky top-16 mx-auto max-w-6xl px-4">
-        <div className="grid grid-cols-1 items-center gap-10 lg:grid-cols-2">
-          <div className="relative">
-            <div className="absolute left-3 top-2 bottom-2 w-0.5 bg-slate-200" />
-            <motion.div
-              style={{ height: progress }}
-              className="absolute left-3 top-2 w-0.5 origin-top bg-gradient-to-b from-[#48D886] to-[#1D9CA1]"
-            />
-            <ul className="space-y-10 pl-10">
-              {STEPS.map((s, i) => {
-                const isActive = i === active;
-                return (
-                  <li key={s.key} className="relative">
-                    <div
-                      className={`absolute -left-[36px] top-1 flex h-6 w-6 items-center justify-center rounded-full border-2 transition-colors ${
-                        isActive ? 'border-transparent bg-gradient-cta shadow-brand' : 'border-slate-200 bg-white'
-                      }`}
-                    >
-                      {isActive ? <s.icon className="h-3 w-3 text-white" /> : null}
-                    </div>
-                    <motion.div
-                      animate={{ opacity: isActive ? 1 : 0.4, scale: isActive ? 1 : 0.98 }}
-                      transition={{ duration: 0.4 }}
-                    >
-                      <Badge tone={isActive ? 'brand' : 'default'} className="mb-2">
-                        Step {i + 1}
-                      </Badge>
-                      <h3 className="text-2xl font-bold text-slate-900 md:text-3xl">{s.headline}</h3>
-                      <p className="mt-2 text-slate-600">{s.body}</p>
-                    </motion.div>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-
-          <div className="relative">
-            <div className="relative mx-auto aspect-square w-full max-w-md overflow-hidden rounded-[40px] border border-slate-200 bg-white shadow-2xl">
-              <AnimatePresence mode="wait">
-                {STEPS.map((s, i) =>
-                  i === active ? (
-                    <motion.div
-                      key={s.key}
-                      initial={{ opacity: 0, scale: 1.05 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0, scale: 0.98 }}
-                      transition={{ duration: 0.55 }}
-                      className="absolute inset-0"
-                    >
-                      <Image src={s.image} alt={s.headline} fill className="object-cover" unoptimized />
-                      <div className="absolute inset-0 bg-gradient-to-t from-slate-900/40 via-transparent to-transparent" />
-                      <div className="absolute bottom-6 left-6 right-6 rounded-2xl bg-white/90 p-4 backdrop-blur">
-                        <div className="flex items-center gap-2">
-                          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-cta text-white">
-                            <s.icon className="h-4 w-4" />
-                          </div>
-                          <div className="text-sm font-semibold text-slate-900">{s.headline}</div>
-                        </div>
-                      </div>
-                    </motion.div>
-                  ) : null,
-                )}
-              </AnimatePresence>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
   );
 }

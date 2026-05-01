@@ -4,11 +4,8 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   transpilePackages: ['@boost/ui', '@boost/core', '@boost/api-client'],
   images: {
-    remotePatterns: [
-      { protocol: 'https', hostname: 'picsum.photos' },
-      { protocol: 'https', hostname: 'api.dicebear.com' },
-      { protocol: 'https', hostname: 'images.unsplash.com' },
-    ],
+    // We serve every hero image from /public locally. No remote fetch on page load.
+    remotePatterns: [],
   },
 };
 

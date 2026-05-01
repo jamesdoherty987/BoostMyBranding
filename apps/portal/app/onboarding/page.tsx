@@ -1,11 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button, Input, Spinner, toast, Logo, Toaster } from '@boost/ui';
-import { ArrowRight, Upload, CheckCircle2, Sparkles, Image as ImageIcon } from 'lucide-react';
+import { ArrowRight, Upload, CheckCircle2, Sparkles } from 'lucide-react';
 import { api } from '@/lib/api';
+import { handlePortalAuthError, ALLOW_MOCK_FALLBACK } from '@/lib/auth';
 import { mockClients } from '@boost/core';
 
 /**
@@ -35,13 +36,15 @@ export default function OnboardingPage() {
       try {
         const me = await api.getMyClient();
         clientId = me.id;
-      } catch {
+      } catch (err) {
+        handlePortalAuthError(err);
+        if (!ALLOW_MOCK_FALLBACK) throw err;
         clientId = mockClients[0]!.id;
       }
       if (files.length > 0) {
         await api.uploadImages(clientId, files, ['onboarding']);
       }
-      toast.success('All set!', 'Your first batch is on the way');
+      toast.success('All set!', 'Your account manager will be in touch');
       setStep(2);
     } catch (e) {
       toast.error('Could not upload', (e as Error).message);
@@ -67,7 +70,7 @@ export default function OnboardingPage() {
             >
               <h1 className="text-2xl font-bold tracking-tight">Welcome aboard 🚀</h1>
               <p className="mt-2 text-sm text-slate-600">
-                Two quick questions and we&apos;ll start building your brand voice.
+                Two quick questions so your account manager can start drafting in your voice.
               </p>
 
               <div className="mt-6">
@@ -118,7 +121,7 @@ export default function OnboardingPage() {
             >
               <h1 className="text-2xl font-bold tracking-tight">Drop in your first photos</h1>
               <p className="mt-2 text-sm text-slate-600">
-                10 recent shots is plenty. We&apos;ll enhance and score them automatically.
+                10 recent shots is plenty — our editors will take it from there.
               </p>
 
               <label className="mt-5 flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 p-8 text-center transition-colors hover:border-[#48D886] hover:bg-[#48D886]/5">
@@ -141,14 +144,7 @@ export default function OnboardingPage() {
               {files.length > 0 ? (
                 <div className="mt-4 grid grid-cols-4 gap-2">
                   {files.map((f, i) => (
-                    <div key={i} className="relative aspect-square overflow-hidden rounded-lg bg-slate-100">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={URL.createObjectURL(f)}
-                        alt=""
-                        className="h-full w-full object-cover"
-                      />
-                    </div>
+                    <FilePreview key={`${f.name}-${i}`} file={f} />
                   ))}
                 </div>
               ) : null}
@@ -183,7 +179,7 @@ export default function OnboardingPage() {
               </div>
               <h1 className="mt-5 text-2xl font-bold tracking-tight">You&apos;re all set!</h1>
               <p className="mt-2 text-sm text-slate-600">
-                Our team is building your brand-voice doc and first month of content. We&apos;ll ping you in chat within 2 business days.
+                Your account manager is putting together your first month. We&apos;ll message you in chat within two business days with everything to preview.
               </p>
               <Link href="/dashboard">
                 <Button className="mt-8 w-full" size="lg">
@@ -196,5 +192,25 @@ export default function OnboardingPage() {
         </AnimatePresence>
       </div>
     </main>
+  );
+}
+
+/**
+ * Renders a file preview via a memoized object URL that gets revoked on
+ * unmount — prevents the memory leak from calling URL.createObjectURL in render.
+ */
+function FilePreview({ file }: { file: File }) {
+  const [url, setUrl] = useState<string>('');
+  useEffect(() => {
+    const u = URL.createObjectURL(file);
+    setUrl(u);
+    return () => URL.revokeObjectURL(u);
+  }, [file]);
+  if (!url) return <div className="aspect-square rounded-lg bg-slate-100" />;
+  return (
+    <div className="relative aspect-square overflow-hidden rounded-lg bg-slate-100">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={url} alt="" className="h-full w-full object-cover" />
+    </div>
   );
 }

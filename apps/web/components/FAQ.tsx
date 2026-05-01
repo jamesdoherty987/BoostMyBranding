@@ -8,23 +8,27 @@ import { ChevronDown } from 'lucide-react';
 const faqs = [
   {
     q: 'How long until my first posts go live?',
-    a: 'Onboarding takes about a week — we build your brand voice, set up connections, and generate the first calendar. After approval, posts start shipping right away.',
+    a: "Roughly a week. We spend the first few days with your business — your site, your tone, how you talk to customers — then we build your brand brief and ship the first month of content for you to preview.",
   },
   {
-    q: 'What if I don\'t have photos?',
-    a: 'No problem. We generate on-brand images using AI (Flux 2 Pro) and match them to your voice. Most clients use a 70/30 mix of real + generated.',
+    q: "What if I don't have good photos?",
+    a: "We can work from whatever you've got, even quick phone shots. If you're short on content, we can shoot new photos on our visits, or create on-brand imagery in-house to fill the gaps.",
   },
   {
-    q: 'Do I still control what goes live?',
-    a: 'Always. Every post waits for your approval in the portal. You can approve the whole month in minutes, or review post by post.',
+    q: "Do I see what's going live?",
+    a: "Yes. Everything shows up in your portal before it ships. Scroll through, send us a message if anything needs tweaking. We run the calendar so you don't have to, but nothing is ever a surprise.",
   },
   {
-    q: 'Which platforms do you support?',
-    a: 'Instagram, Facebook, LinkedIn, TikTok, X (Twitter), Pinterest, and Bluesky. Stories and Reels included.',
+    q: 'Which platforms do you cover?',
+    a: "Instagram, Facebook, LinkedIn, TikTok, X (Twitter), Pinterest, and Bluesky. Stories and Reels included. We tailor each post to the platform — no copy-pasting.",
+  },
+  {
+    q: 'Who writes the posts?',
+    a: "Our in-house writers and editors. Every client is assigned a dedicated account manager who gets to know your business and reviews everything before it goes live.",
   },
   {
     q: 'Can I cancel?',
-    a: 'Yes — monthly after the first 3 months. We ask for a short runway so we can build a solid brand-voice doc and deliver real results.',
+    a: "Yes — monthly after the first 3 months. We ask for a short runway so we can properly build your brand voice and actually deliver results, not just activity.",
   },
 ];
 

@@ -1,0 +1,326 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 960" fill="none" aria-hidden="true">
+  <defs>
+    <!-- Main hull: cold white steel with subtle cool shading -->
+    <linearGradient id="hull" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#cbd5e1"/>
+      <stop offset="0.12" stop-color="#f8fafc"/>
+      <stop offset="0.5" stop-color="#ffffff"/>
+      <stop offset="0.82" stop-color="#cbd5e1"/>
+      <stop offset="1" stop-color="#64748b"/>
+    </linearGradient>
+
+    <!-- Hull ambient shadow for depth -->
+    <linearGradient id="hull-shade" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#000" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#000" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000" stop-opacity="0.35"/>
+    </linearGradient>
+
+    <!-- Nose cone: brand teal → green gradient -->
+    <linearGradient id="nose" x1="0.2" y1="0" x2="0.8" y2="1">
+      <stop offset="0" stop-color="#48D886"/>
+      <stop offset="0.5" stop-color="#1D9CA1"/>
+      <stop offset="1" stop-color="#0e5c63"/>
+    </linearGradient>
+
+    <!-- Nose gloss highlight -->
+    <linearGradient id="nose-gloss" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#fff" stop-opacity="0.45"/>
+      <stop offset="0.3" stop-color="#fff" stop-opacity="0.1"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+
+    <!-- Fin: darker teal -->
+    <linearGradient id="fin" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1D9CA1"/>
+      <stop offset="1" stop-color="#0e5c63"/>
+    </linearGradient>
+
+    <!-- Fin back-edge shadow -->
+    <linearGradient id="fin-shade" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#000" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000" stop-opacity="0.45"/>
+    </linearGradient>
+
+    <!-- Window glass -->
+    <radialGradient id="glass" cx="0.35" cy="0.3" r="0.8">
+      <stop offset="0" stop-color="#e0f2fe"/>
+      <stop offset="0.35" stop-color="#38bdf8"/>
+      <stop offset="0.8" stop-color="#0c4a6e"/>
+      <stop offset="1" stop-color="#020617"/>
+    </radialGradient>
+
+    <!-- Outer flame (big halo) -->
+    <radialGradient id="flame-halo" cx="0.5" cy="0" r="0.9">
+      <stop offset="0" stop-color="#FFEC3D" stop-opacity="0.7"/>
+      <stop offset="0.4" stop-color="#fb923c" stop-opacity="0.55"/>
+      <stop offset="0.75" stop-color="#ef4444" stop-opacity="0.3"/>
+      <stop offset="1" stop-color="#ef4444" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Mid flame (yellow body) -->
+    <radialGradient id="flame-mid" cx="0.5" cy="0" r="0.75">
+      <stop offset="0" stop-color="#fff6b0"/>
+      <stop offset="0.35" stop-color="#FFEC3D"/>
+      <stop offset="0.7" stop-color="#fb923c"/>
+      <stop offset="1" stop-color="#fb923c" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Inner flame core (white hot) -->
+    <radialGradient id="flame-core" cx="0.5" cy="0.1" r="0.55">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.55" stop-color="#fff6b0"/>
+      <stop offset="1" stop-color="#FFEC3D" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Metal ring gradient for engine bells -->
+    <linearGradient id="engine" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#334155"/>
+      <stop offset="0.5" stop-color="#94a3b8"/>
+      <stop offset="1" stop-color="#1e293b"/>
+    </linearGradient>
+
+    <!-- Ambient glow blur filter -->
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="10" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Subtle flame turbulence (adds wavy heat shimmer) -->
+    <filter id="flame-noise" x="-10%" y="-10%" width="120%" height="120%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.02 0.08" numOctaves="2" seed="3"/>
+      <feDisplacementMap in="SourceGraphic" scale="6"/>
+    </filter>
+  </defs>
+
+  <!--
+    FLAME — ID'd so we can animate it from outside the SVG in CSS/JS.
+    The three layers share an origin at (240, 700) and scale/translate
+    in sync to look like a single fluttering plume.
+  -->
+  <g id="flame" style="transform-origin: 240px 700px;">
+    <!-- Ambient halo -->
+    <ellipse cx="240" cy="780" rx="170" ry="95" fill="#FFEC3D" opacity="0.18" filter="url(#glow)"/>
+    <ellipse cx="240" cy="810" rx="110" ry="60" fill="#fb923c" opacity="0.28" filter="url(#glow)"/>
+
+    <!-- Outer plume with a natural tear shape (wider near nozzle, pointed at the bottom) -->
+    <path
+      d="
+        M 182 680
+        C 170 760 168 830 200 900
+        C 216 930 228 940 240 950
+        C 252 940 264 930 280 900
+        C 312 830 310 760 298 680
+        Z
+      "
+      fill="url(#flame-halo)"
+      filter="url(#glow)"
+    />
+
+    <!-- Middle yellow body -->
+    <path
+      d="
+        M 202 680
+        C 194 740 192 810 218 880
+        C 228 902 236 912 240 920
+        C 244 912 252 902 262 880
+        C 288 810 286 740 278 680
+        Z
+      "
+      fill="url(#flame-mid)"
+    />
+
+    <!-- Inner white-hot core -->
+    <path
+      d="
+        M 220 680
+        C 214 720 212 780 230 840
+        C 236 860 240 868 240 874
+        C 240 868 244 860 250 840
+        C 268 780 266 720 260 680
+        Z
+      "
+      fill="url(#flame-core)"
+    />
+
+    <!-- Tiny sparks -->
+    <circle cx="170" cy="820" r="3" fill="#FFEC3D" opacity="0.7"/>
+    <circle cx="315" cy="790" r="2.5" fill="#fb923c" opacity="0.7"/>
+    <circle cx="200" cy="900" r="2" fill="#fff" opacity="0.8"/>
+    <circle cx="290" cy="880" r="2.5" fill="#FFEC3D" opacity="0.7"/>
+  </g>
+
+  <!-- FINS: attached to the hull with clean straight inner edges -->
+  <!-- Left fin -->
+  <path
+    d="
+      M 190 560
+      L 120 700
+      C 114 710 120 720 132 716
+      L 190 696
+      Z
+    "
+    fill="url(#fin)"
+  />
+  <path
+    d="
+      M 190 560
+      L 120 700
+      C 114 710 120 720 132 716
+      L 190 696
+      Z
+    "
+    fill="url(#fin-shade)"
+    opacity="0.5"
+  />
+  <!-- Left fin highlight edge -->
+  <path d="M 190 560 L 124 704" stroke="#48D886" stroke-width="2" stroke-linecap="round" opacity="0.5"/>
+
+  <!-- Right fin (mirror) -->
+  <path
+    d="
+      M 290 560
+      L 360 700
+      C 366 710 360 720 348 716
+      L 290 696
+      Z
+    "
+    fill="url(#fin)"
+  />
+  <path
+    d="
+      M 290 560
+      L 360 700
+      C 366 710 360 720 348 716
+      L 290 696
+      Z
+    "
+    fill="url(#fin-shade)"
+    opacity="0.2"
+  />
+
+  <!-- Center (rear) fin: darker, partially hidden behind hull -->
+  <path
+    d="
+      M 232 570
+      L 240 720
+      L 248 570
+      Z
+    "
+    fill="#0e5c63"
+    opacity="0.9"
+  />
+
+  <!-- MAIN HULL (cylinder) -->
+  <path
+    d="
+      M 190 260
+      C 190 255 194 250 200 250
+      L 280 250
+      C 286 250 290 255 290 260
+      L 290 700
+      C 290 710 284 716 276 716
+      L 204 716
+      C 196 716 190 710 190 700
+      Z
+    "
+    fill="url(#hull)"
+  />
+  <path
+    d="
+      M 190 260
+      C 190 255 194 250 200 250
+      L 280 250
+      C 286 250 290 255 290 260
+      L 290 700
+      C 290 710 284 716 276 716
+      L 204 716
+      C 196 716 190 710 190 700
+      Z
+    "
+    fill="url(#hull-shade)"
+  />
+
+  <!-- Hull highlight strip -->
+  <rect x="198" y="260" width="4" height="450" rx="2" fill="#fff" opacity="0.6"/>
+
+  <!-- Brand stripe (wide) across the middle -->
+  <rect x="190" y="460" width="100" height="40" fill="url(#nose)"/>
+  <rect x="190" y="460" width="100" height="40" fill="url(#hull-shade)"/>
+  <!-- Brand stripe shine -->
+  <rect x="198" y="464" width="3" height="32" fill="#fff" opacity="0.45"/>
+
+  <!-- Panel lines (subtle rivets) -->
+  <line x1="210" y1="330" x2="270" y2="330" stroke="#94a3b8" stroke-width="1" opacity="0.5"/>
+  <line x1="210" y1="620" x2="270" y2="620" stroke="#94a3b8" stroke-width="1" opacity="0.5"/>
+  <line x1="210" y1="660" x2="270" y2="660" stroke="#94a3b8" stroke-width="1" opacity="0.35"/>
+
+  <!-- Rivet dots around the window -->
+  <circle cx="210" cy="380" r="2" fill="#64748b"/>
+  <circle cx="270" cy="380" r="2" fill="#64748b"/>
+  <circle cx="210" cy="430" r="2" fill="#64748b"/>
+  <circle cx="270" cy="430" r="2" fill="#64748b"/>
+
+  <!-- WINDOW: dark well with brand teal glass -->
+  <circle cx="240" cy="400" r="42" fill="#0f172a"/>
+  <circle cx="240" cy="400" r="36" fill="url(#glass)"/>
+  <circle cx="240" cy="400" r="36" stroke="#fff" stroke-width="1.5" fill="none" opacity="0.4"/>
+  <!-- Glass reflection -->
+  <ellipse cx="226" cy="385" rx="10" ry="6" fill="#fff" opacity="0.75"/>
+  <ellipse cx="255" cy="418" rx="4" ry="2" fill="#fff" opacity="0.4"/>
+
+  <!-- BOTTOM ring that houses the engine bell -->
+  <rect x="186" y="712" width="108" height="14" rx="4" fill="#475569"/>
+  <rect x="186" y="712" width="108" height="14" rx="4" fill="url(#hull-shade)"/>
+
+  <!-- Engine nozzle (bell shape) -->
+  <path
+    d="
+      M 202 726
+      L 196 760
+      L 284 760
+      L 278 726
+      Z
+    "
+    fill="url(#engine)"
+  />
+  <!-- Nozzle inner darkness -->
+  <ellipse cx="240" cy="760" rx="44" ry="6" fill="#0f172a"/>
+
+  <!-- NOSE CONE: tapered from top of hull (x=190/290) to a rounded point -->
+  <path
+    d="
+      M 190 260
+      C 190 180 210 80 240 40
+      C 270 80 290 180 290 260
+      Z
+    "
+    fill="url(#nose)"
+  />
+  <!-- Nose highlight down the left -->
+  <path
+    d="
+      M 205 255
+      C 207 180 220 90 240 55
+      C 235 100 225 200 222 255
+      Z
+    "
+    fill="url(#nose-gloss)"
+  />
+  <!-- Rounded nose tip (no dot) -->
+  <path
+    d="M 238 38 A 4 3 0 0 1 242 38"
+    stroke="#fff"
+    stroke-width="1"
+    opacity="0.45"
+    fill="none"
+  />
+
+  <!-- Small hull number decal -->
+  <text x="240" y="570" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" font-weight="700" fill="#475569" opacity="0.6">
+    BMB-01
+  </text>
+</svg>

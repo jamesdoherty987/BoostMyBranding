@@ -1,66 +1,78 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { Check, X } from 'lucide-react';
+import { Check, X, Star } from 'lucide-react';
 import { SectionWrapper, Logo } from '@boost/ui';
 
 /**
- * A head-to-head comparison. Shows the pain of doing it yourself vs. what
- * the platform handles. Intentionally short, honest, and direct.
+ * Comparison table + testimonial strip, framed as "running it yourself"
+ * vs. "letting a social team run it for you" — the agency positioning.
  */
 
 const ROWS = [
   {
-    label: 'Content creation',
-    diy: 'You write every caption, source every photo',
-    bmb: 'AI drafts everything in your brand voice',
+    label: 'Writing & captions',
+    diy: 'You write every post, scrambling for angles',
+    bmb: 'Trained writers in your voice, every post',
   },
   {
-    label: 'Scheduling',
-    diy: 'Manual, platform by platform',
-    bmb: 'One click, publishes to all platforms',
+    label: 'Photos & editing',
+    diy: 'Phone shots straight up, feed looks amateur',
+    bmb: 'Edited and colour-graded for every platform',
   },
   {
-    label: 'Platform know-how',
-    diy: 'You master each algorithm yourself',
-    bmb: 'We reformat every post per platform',
+    label: 'Planning',
+    diy: 'Post when you can, inconsistent cadence',
+    bmb: 'Monthly calendar planned a week in advance',
   },
   {
-    label: 'Team needed',
-    diy: 'In-house marketer or an agency retainer',
-    bmb: 'Zero. It just runs.',
+    label: 'Team',
+    diy: 'Full-time marketer at €45k+ or nobody',
+    bmb: 'Dedicated account manager on the team',
   },
   {
-    label: 'Cost predictability',
-    diy: 'Variable — ads, tools, time, freelancers',
-    bmb: 'One flat monthly price',
+    label: 'Your time',
+    diy: '10–15 hours a week gone',
+    bmb: 'Five minutes a fortnight',
+  },
+];
+
+const QUOTES = [
+  {
+    text: "Our Instagram went from three posts a month to three posts a week, and every one of them actually sounds like us.",
+    name: 'Sean Murphy',
+    role: "Murphy's Plumbing",
   },
   {
-    label: 'Time commitment',
-    diy: '10–15 hours / week',
-    bmb: '10 minutes / month to approve',
+    text: "Finally, social media I don't have to think about. Our account manager just gets it.",
+    name: 'Nora Kelly',
+    role: 'Atlas Fitness',
+  },
+  {
+    text: "Website + social for one price, way cheaper than hiring a marketer. Bookings doubled in two months.",
+    name: 'Luca Romano',
+    role: 'Verde Cafe',
   },
 ];
 
 export function Comparison() {
   return (
-    <SectionWrapper className="bg-slate-50 py-24 md:py-32">
-      <div className="mx-auto max-w-6xl px-4">
+    <SectionWrapper className="bg-slate-50 py-20 md:py-28">
+      <div className="mx-auto max-w-5xl px-4">
         <div className="mx-auto max-w-2xl text-center">
           <h2 className="text-4xl font-bold tracking-tight md:text-5xl">
-            Doing it yourself <span className="text-slate-400">is a full-time job.</span>
+            Social media,{' '}
+            <span className="text-slate-400">done properly.</span>
           </h2>
-          <p className="mt-4 text-lg text-slate-600">
-            We do it for you. Here&apos;s what that actually means.
+          <p className="mt-4 text-slate-600">
+            The same standard an in-house team would deliver, without the cost of hiring one.
           </p>
         </div>
 
-        <div className="mt-14 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+        <div className="mt-12 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
           <div className="grid grid-cols-[1fr_1fr_1fr] text-xs font-semibold uppercase tracking-widest md:text-sm">
             <div className="hidden bg-slate-100 p-4 text-slate-500 md:block" />
-            <div className="bg-slate-100 p-4 text-slate-500">
-              Going it alone
-            </div>
+            <div className="bg-slate-100 p-4 text-slate-500">On your own</div>
             <div className="flex items-center gap-2 bg-slate-900 p-4 text-white">
               <Logo wordmark={false} size="sm" />
               <span>BoostMyBranding</span>
@@ -99,6 +111,30 @@ export function Comparison() {
               </motion.li>
             ))}
           </ul>
+        </div>
+
+        <div className="mt-12 grid grid-cols-1 gap-4 md:grid-cols-3">
+          {QUOTES.map((q, i) => (
+            <motion.blockquote
+              key={q.name}
+              initial={{ opacity: 0, y: 12 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true, margin: '-60px' }}
+              transition={{ duration: 0.5, delay: i * 0.08 }}
+              className="rounded-2xl border border-slate-200 bg-white p-5"
+            >
+              <div className="flex gap-0.5 text-[#FFEC3D]">
+                {Array.from({ length: 5 }).map((_, idx) => (
+                  <Star key={idx} className="h-3.5 w-3.5 fill-current" />
+                ))}
+              </div>
+              <p className="mt-3 text-sm text-slate-800">&ldquo;{q.text}&rdquo;</p>
+              <footer className="mt-3 text-xs">
+                <span className="font-semibold text-slate-900">{q.name}</span>
+                <span className="text-slate-500"> · {q.role}</span>
+              </footer>
+            </motion.blockquote>
+          ))}
         </div>
       </div>
     </SectionWrapper>

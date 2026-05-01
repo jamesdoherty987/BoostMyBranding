@@ -1,15 +1,18 @@
 /**
  * Seed a freshly migrated database with a demo agency admin plus the three
- * demo clients and content so dashboard/portal work right away.
+ * demo clients and starter content so dashboard/portal have data on first boot.
  */
 
-import 'dotenv/config';
 import { randomUUID } from 'node:crypto';
-import { getDb, closeDb, clients, users, posts, messages } from './index';
+import { loadRepoRootEnv } from './load-env.js';
+
+loadRepoRootEnv();
+
+// Import the db factory AFTER env is loaded so getDb() sees DATABASE_URL.
+const { getDb, closeDb, clients, users, posts, messages } = await import('./index.js');
 
 async function main() {
   const db = getDb();
-
   console.log('🌱 Seeding demo data…');
 
   const agencyAdminId = randomUUID();
@@ -56,13 +59,15 @@ async function main() {
   for (const c of demoClients) {
     const [row] = await db.insert(clients).values(c).onConflictDoNothing().returning();
     if (!row) continue;
-    await db.insert(users).values({
-      email: c.email,
-      name: c.contactName,
-      role: 'client',
-      clientId: row.id,
-    }).onConflictDoNothing();
-    // Seed a handful of pending posts
+    await db
+      .insert(users)
+      .values({
+        email: c.email,
+        name: c.contactName,
+        role: 'client',
+        clientId: row.id,
+      })
+      .onConflictDoNothing();
     for (let i = 0; i < 6; i++) {
       await db.insert(posts).values({
         clientId: row.id,

@@ -8,25 +8,37 @@ import { Input, Spinner, toast, useRealtime } from '@boost/ui';
 import { Send, Paperclip } from 'lucide-react';
 import { Shell } from '@/components/Shell';
 import { api, API_URL } from '@/lib/api';
+import { handlePortalAuthError, ALLOW_MOCK_FALLBACK } from '@/lib/auth';
 
 /**
  * Chat page with live delivery via SSE. Optimistic UI on send, then
  * replaced by the server-confirmed row when the broadcast arrives.
+ *
+ * We load the client once, then fetch messages keyed by that client id so
+ * SWR caches correctly and realtime updates don't trigger re-renders.
  */
 export default function ChatPage() {
   const [draft, setDraft] = useState('');
-  const [clientId, setClientId] = useState<string>(mockClients[0]!.id);
   const endRef = useRef<HTMLDivElement>(null);
 
+  const { data: me } = useSWR('portal:me', async () => {
+    try {
+      return await api.getMyClient();
+    } catch (err) {
+      handlePortalAuthError(err);
+      if (!ALLOW_MOCK_FALLBACK) throw err;
+      return mockClients[0]!;
+    }
+  });
+  const clientId = me?.id ?? mockClients[0]!.id;
+
   const { data: messages = [], mutate } = useSWR<Message[]>(
-    ['portal:messages', clientId],
+    me ? ['portal:messages', clientId] : null,
     async () => {
       try {
-        const me = await api.getMyClient();
-        setClientId(me.id);
-        return (await api.listMessages(me.id)) as Message[];
+        return (await api.listMessages(clientId)) as Message[];
       } catch {
-        return getMessagesForClient(mockClients[0]!.id);
+        return getMessagesForClient(clientId);
       }
     },
   );
@@ -73,7 +85,7 @@ export default function ChatPage() {
 
   return (
     <Shell title="Chat" subtitle="With your BoostMyBranding team">
-      {messages.length === 0 ? (
+      {!me ? (
         <div className="mt-10 flex justify-center">
           <Spinner size={24} />
         </div>

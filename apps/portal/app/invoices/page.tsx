@@ -6,6 +6,7 @@ import { Badge, Button, Spinner } from '@boost/ui';
 import { Download, CreditCard } from 'lucide-react';
 import { Shell } from '@/components/Shell';
 import { api } from '@/lib/api';
+import { handlePortalAuthError, ALLOW_MOCK_FALLBACK } from '@/lib/auth';
 import { mockClients } from '@boost/core';
 
 const toneMap = {
@@ -25,7 +26,9 @@ export default function InvoicesPage() {
     try {
       const me = await api.getMyClient();
       return { client: me, invoices: [] as any[] };
-    } catch {
+    } catch (err) {
+      handlePortalAuthError(err);
+      if (!ALLOW_MOCK_FALLBACK) throw err;
       return { client: mockClients[0], invoices: [] };
     }
   });
@@ -47,13 +50,13 @@ export default function InvoicesPage() {
   const invoices = data.invoices.length ? data.invoices : demo;
 
   return (
-    <Shell title="Billing" subtitle={`${client.businessName} · ${(client as any).subscriptionTier?.replace('_', ' ') ?? 'Active'}`}>
+    <Shell title="Billing" subtitle={`${client.businessName} · ${client.subscriptionTier?.replace('_', ' ') ?? 'Active'}`}>
       <section className="rounded-2xl bg-gradient-cta p-5 text-white shadow-brand">
         <div className="text-xs font-medium uppercase tracking-widest text-white/80">
           Current plan
         </div>
         <div className="mt-1 text-2xl font-bold">
-          {formatCurrency((client as any).monthlyPriceCents ?? 80000)}
+          {formatCurrency(client.monthlyPriceCents ?? 80000)}
           <span className="text-sm font-normal text-white/80"> / month</span>
         </div>
         {invoices[0]?.due ? (

@@ -6,6 +6,7 @@ import { toast } from '@boost/ui';
 import { Camera, Upload, X, Check } from 'lucide-react';
 import { Shell } from '@/components/Shell';
 import { api } from '@/lib/api';
+import { handlePortalAuthError, ALLOW_MOCK_FALLBACK } from '@/lib/auth';
 import { mockClients } from '@boost/core';
 
 interface PendingUpload {
@@ -64,28 +65,33 @@ export default function UploadPage() {
     try {
       const me = await api.getMyClient();
       clientId = me.id;
-    } catch {
+    } catch (err) {
+      handlePortalAuthError(err);
+      if (!ALLOW_MOCK_FALLBACK) {
+        toast.error('Please sign in', 'Your session has expired.');
+        return;
+      }
       clientId = mockClients[0]!.id;
     }
     for (const item of batch) {
-      const interval = setInterval(() => {
-        setUploads((prev) =>
-          prev.map((u) =>
-            u.id === item.id && u.progress < 85 && !u.done
-              ? { ...u, progress: u.progress + 12 + Math.random() * 10 }
-              : u,
-          ),
-        );
-      }, 220);
       try {
-        await api.uploadImages(clientId, [item.file], [item.tag]);
-        clearInterval(interval);
+        await api.uploadImagesWithProgress(
+          clientId,
+          [item.file],
+          [item.tag],
+          (percent) => {
+            setUploads((prev) =>
+              prev.map((u) =>
+                u.id === item.id && !u.done ? { ...u, progress: percent } : u,
+              ),
+            );
+          },
+        );
         setUploads((prev) =>
           prev.map((u) => (u.id === item.id ? { ...u, progress: 100, done: true } : u)),
         );
         toast.success('Uploaded', item.file.name);
       } catch (e) {
-        clearInterval(interval);
         setUploads((prev) =>
           prev.map((u) =>
             u.id === item.id ? { ...u, progress: 100, done: true, error: (e as Error).message } : u,
@@ -237,7 +243,7 @@ export default function UploadPage() {
                   ) : (
                     <div className="flex items-center gap-2 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-800">
                       <Check className="h-3.5 w-3.5" />
-                      Uploaded · AI will analyze shortly
+                      Received — your team will take it from here
                     </div>
                   )
                 ) : null}

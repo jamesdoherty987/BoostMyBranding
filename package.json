@@ -9,7 +9,11 @@
     "lint": "turbo lint",
     "audit": "pnpm audit --prod",
     "format": "prettier --write \"**/*.{ts,tsx,md}\"",
-    "clean": "turbo clean && rm -rf node_modules"
+    "clean": "turbo clean && rm -rf node_modules",
+    "db:generate": "pnpm --filter @boost/database db:generate",
+    "db:migrate": "pnpm --filter @boost/database db:migrate",
+    "db:seed": "pnpm --filter @boost/database db:seed",
+    "db:studio": "pnpm --filter @boost/database db:studio"
   },
   "devDependencies": {
     "prettier": "^3.3.3",

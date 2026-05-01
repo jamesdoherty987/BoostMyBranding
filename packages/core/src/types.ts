@@ -32,6 +32,9 @@ export type SubscriptionTier = 'social_only' | 'website_only' | 'full_package';
 export interface Client {
   id: string;
   businessName: string;
+  /** URL-safe slug used for public site URLs (/sites/[slug]). Optional on the
+   *  mock shape; present on all real DB rows. */
+  slug?: string;
   contactName: string;
   email: string;
   industry: string;
@@ -41,6 +44,8 @@ export interface Client {
   monthlyPriceCents: number;
   isActive: boolean;
   onboardedAt: string;
+  websiteUrl?: string;
+  socialAccounts?: Record<string, string>;
   stats: {
     postsThisMonth: number;
     pendingApproval: number;

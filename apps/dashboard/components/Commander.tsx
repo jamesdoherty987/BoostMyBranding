@@ -67,9 +67,9 @@ export function Commander() {
         id: `client-${c.id}`,
         group: 'Clients',
         label: c.businessName,
-        hint: (c as any).industry ?? undefined,
+        hint: c.industry ?? undefined,
         icon: <Building2 className="h-3.5 w-3.5" />,
-        keywords: ['client', (c as any).industry ?? ''],
+        keywords: ['client', c.industry ?? ''],
         onSelect: goto(`/clients/${c.id}`),
       })),
     ];

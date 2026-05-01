@@ -9,7 +9,6 @@ interface Step {
   icon: LucideIcon;
   title: string;
   body: string;
-  who: 'You' | 'Us';
   accent: string;
 }
 
@@ -18,28 +17,24 @@ const STEPS: Step[] = [
     icon: Upload,
     title: 'We learn your brand.',
     body: "We study your business, your tone, and your customers. Then we get to work.",
-    who: 'Us',
     accent: '#48D886',
   },
   {
     icon: PenLine,
     title: 'We write the month.',
     body: 'Captions in your voice, best shots picked, calendar planned.',
-    who: 'Us',
     accent: '#1D9CA1',
   },
   {
     icon: Send,
     title: 'We handle the rest.',
     body: 'Every post is checked, polished, and scheduled. You never have to lift a finger.',
-    who: 'Us',
     accent: '#48D886',
   },
   {
     icon: CalendarCheck,
     title: 'We publish & report.',
     body: 'Posts go live on schedule. Friday summary of what shipped.',
-    who: 'Us',
     accent: '#FFEC3D',
   },
 ];
@@ -154,17 +149,6 @@ function TimelineNode({
       </div>
 
       <div className="min-w-0 flex-1 md:mt-4">
-        <div className="flex items-center gap-1.5 md:justify-center">
-          <span
-            className={`rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider md:px-2 md:text-[10px] ${
-              step.who === 'You'
-                ? 'bg-[#48D886]/15 text-emerald-700'
-                : 'bg-[#1D9CA1]/15 text-teal-700'
-            }`}
-          >
-            {step.who}
-          </span>
-        </div>
         <h3 className="mt-1 text-sm font-bold text-slate-900 md:mt-2 md:text-lg">
           {step.title}
         </h3>

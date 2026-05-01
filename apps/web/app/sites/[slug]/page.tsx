@@ -49,7 +49,7 @@ export async function generateMetadata({
   if (!site.config) {
     return {
       title: site.businessName,
-      description: `${site.businessName} — site coming soon.`,
+      description: `${site.businessName} - site coming soon.`,
     };
   }
   return {

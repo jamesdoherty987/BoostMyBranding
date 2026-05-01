@@ -29,7 +29,7 @@ export async function notifyAgencyBatchReady(args: {
     admins.map((email) =>
       sendEmail({
         to: email,
-        subject: `New content ready to review — ${args.clientName}`,
+        subject: `New content ready to review - ${args.clientName}`,
         html: `
           <div style="font-family:Inter,sans-serif;max-width:520px;margin:0 auto;padding:24px;">
             <h2 style="margin:0 0 12px;">New batch is ready 🚀</h2>

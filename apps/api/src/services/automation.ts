@@ -201,7 +201,7 @@ export async function runMonthlyGeneration(args: GenerateArgs) {
       businessName: client.businessName,
       industry: client.industry ?? 'Local Business',
       brandVoice: brandVoice || 'Warm, professional, direct.',
-      imageDescriptions: imageDescs || '(no images — generate all with AI)',
+      imageDescriptions: imageDescs || '(no images, generate all with AI)',
       month: monthName(Number(mm)),
       year: year!,
       postsCount: args.postsCount,

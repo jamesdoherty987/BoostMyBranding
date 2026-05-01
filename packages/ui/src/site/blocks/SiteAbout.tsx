@@ -33,7 +33,7 @@ export function SiteAbout({ config, images, businessName }: SiteAboutProps) {
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={image}
-            alt={`${businessName} — ${about.heading}`}
+            alt={`${businessName}, ${about.heading}`}
             className="h-full w-full object-cover"
             loading="lazy"
           />

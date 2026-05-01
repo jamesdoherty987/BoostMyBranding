@@ -22,12 +22,12 @@ const SIZE_PX: Record<LogoSize, { icon: number; text: string }> = {
 };
 
 /**
- * BoostMyBranding logo. Uses the real PNG rocket the client supplied so it
- * always looks exactly as they drew it — no hand-traced approximation.
+ * BoostMyBranding logo. Uses the real cutout PNG rocket (BMBGreen.PNG) —
+ * transparent background, no added tile or backdrop. The PNG is RGBA so it
+ * sits cleanly on any surface.
  *
- * Wordmark uses brand colors in a three-tone split: green "Boost", teal
- * "My", yellow "Branding". On dark backgrounds the same tones stay visible;
- * only the outer "Boost" and "Branding" flip to keep contrast.
+ * Wordmark uses brand colors in a three-tone split: slate "Boost", teal
+ * "My", slate "Branding". On dark backgrounds the outer words flip to white.
  */
 export function Logo({
   className,
@@ -38,7 +38,6 @@ export function Logo({
 }: LogoProps) {
   const { icon, text } = SIZE_PX[size];
 
-  // Outer letters adapt to the backdrop; middle letters always brand-colored.
   const boostColor = variant === 'light' ? 'text-white' : 'text-slate-900';
   const brandingColor = variant === 'light' ? 'text-white' : 'text-slate-900';
 
@@ -74,10 +73,9 @@ interface RocketMarkProps {
 }
 
 /**
- * Just the rocket, no wordmark. Always the real PNG so the mark stays
- * consistent across placements. Marked `unoptimized` because Next 15's
- * image optimizer rejects some PNG variants with "not a valid image";
- * the PNG is only 96KB so we lose nothing by serving it as-is.
+ * Just the rocket cutout, no wordmark. Transparent-background PNG served
+ * from /logo/boost-rocket.png. Marked `unoptimized` so Next's image
+ * optimizer doesn't re-encode the RGBA transparency.
  */
 export function RocketMark({ size = 32, className }: RocketMarkProps) {
   return (
@@ -99,8 +97,7 @@ interface LogoPngProps {
 }
 
 /**
- * Legacy alias — kept for backwards compatibility with call-sites that
- * previously distinguished PNG vs SVG. Now both are the same PNG.
+ * Legacy alias — kept for backwards compatibility.
  */
 export function LogoPng({ size = 40, className }: LogoPngProps) {
   return <RocketMark size={size} className={className} />;

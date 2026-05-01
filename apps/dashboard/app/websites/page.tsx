@@ -236,7 +236,7 @@ export default function WebsitesPage() {
                 <h2 className="text-sm font-semibold text-slate-900">New site details</h2>
                 <p className="mt-1 text-xs text-slate-500">
                   We scrape the reference URL if you have one, pull the client&apos;s approved
-                  photos, and draft the whole config — hero, services, reviews, FAQ.
+                  photos, and draft the whole config: hero, services, reviews, FAQ.
                 </p>
               </div>
 

@@ -6,10 +6,14 @@ import { Toaster, PageTransition } from '@boost/ui';
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter' });
 
 export const metadata: Metadata = {
-  title: 'BoostMyBranding — Client Portal',
+  title: 'BoostMyBranding - Client Portal',
   description: 'Upload photos, chat with your BoostMyBranding team, see what\'s going live.',
   manifest: '/manifest.json',
-  icons: { icon: '/icon-192.svg' },
+  icons: {
+    icon: [{ url: '/favicon.png', type: 'image/png', sizes: '500x500' }],
+    apple: '/favicon.png',
+    shortcut: '/favicon.png',
+  },
 };
 
 export const viewport: Viewport = {

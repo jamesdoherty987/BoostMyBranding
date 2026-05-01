@@ -8,7 +8,7 @@ import { ChevronDown } from 'lucide-react';
 const faqs = [
   {
     q: 'How long until my first posts go live?',
-    a: "Roughly a week. We spend the first few days with your business — your site, your tone, how you talk to customers — then we build your brand brief and ship the first month of content for you to preview.",
+    a: "Roughly a week. We spend the first few days with your business - your site, your tone, how you talk to customers - then we build your brand brief and ship the first month of content for you to preview.",
   },
   {
     q: "What if I don't have good photos?",
@@ -20,7 +20,7 @@ const faqs = [
   },
   {
     q: 'Which platforms do you cover?',
-    a: "Instagram, Facebook, LinkedIn, TikTok, X (Twitter), Pinterest, and Bluesky. Stories and Reels included. We tailor each post to the platform — no copy-pasting.",
+    a: "Instagram, Facebook, LinkedIn, TikTok, X (Twitter), Pinterest, and Bluesky. Stories and Reels included. We tailor each post to the platform, no copy-pasting.",
   },
   {
     q: 'Who writes the posts?',
@@ -28,7 +28,7 @@ const faqs = [
   },
   {
     q: 'Can I cancel?',
-    a: "Yes — monthly after the first 3 months. We ask for a short runway so we can properly build your brand voice and actually deliver results, not just activity.",
+    a: "Yes, monthly after the first 3 months. We ask for a short runway so we can properly build your brand voice and actually deliver results, not just activity.",
   },
 ];
 

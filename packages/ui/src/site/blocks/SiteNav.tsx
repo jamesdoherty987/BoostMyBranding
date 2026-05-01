@@ -45,7 +45,7 @@ export function SiteNav({ config, businessName, embedded }: SiteNavProps) {
             : ''
         }`}
       >
-        <a href="#top" className="flex items-center gap-2" aria-label={`${businessName} — home`}>
+        <a href="#top" className="flex items-center gap-2" aria-label={`${businessName} home`}>
           <span
             className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-sm font-bold"
             style={{

@@ -219,7 +219,7 @@ function VerdeCafeSite() {
         {/* Services */}
         <div className="grid grid-cols-1 gap-4 p-6 md:grid-cols-3 md:gap-6 md:p-10">
           {[
-            { title: 'Espresso bar', body: 'Ethiopian, Colombian, Kenyan — rotating weekly.' },
+            { title: 'Espresso bar', body: 'Ethiopian, Colombian, Kenyan, rotating weekly.' },
             { title: 'Filter flight', body: 'Three brews, side by side. Our staff pick.' },
             { title: 'Beans to go', body: '250g bags ground to your gear. Subscribe monthly.' },
           ].map((s) => (
@@ -378,7 +378,7 @@ const POSTS: SocialPost[] = [
     handle: '@verdecafe',
     platform: 'instagram',
     caption:
-      'New single-origin on the bar from Wednesday ☕️ Ethiopia Yirgacheffe — jasmine, stone fruit, zero chaos.',
+      'New single-origin on the bar from Wednesday ☕️ Ethiopia Yirgacheffe, jasmine, stone fruit, zero chaos.',
     likes: 412,
     comments: 28,
     tileGradient:
@@ -402,7 +402,7 @@ const POSTS: SocialPost[] = [
     handle: '@oakhilldental',
     platform: 'instagram',
     caption:
-      'Meet Sinead — your new favourite dental hygienist. Book in for a fresh start this month.',
+      'Meet Sinead, your new favourite dental hygienist. Book in for a fresh start this month.',
     likes: 298,
     comments: 19,
     tileGradient:
@@ -426,7 +426,7 @@ const POSTS: SocialPost[] = [
     handle: 'Luna Yoga Studio',
     platform: 'facebook',
     caption:
-      "Back-pain-friendly yoga, Tuesdays 7pm. No experience needed — we'll meet you where you are.",
+      "Back-pain-friendly yoga, Tuesdays 7pm. No experience needed, we'll meet you where you are.",
     likes: 154,
     comments: 22,
     tileGradient:

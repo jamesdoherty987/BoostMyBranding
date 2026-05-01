@@ -35,7 +35,7 @@ const STEPS: Step[] = [
   {
     icon: Send,
     title: 'Chat anything you want changed.',
-    body: "Preview what's coming up in the portal. Want a different photo on the Friday post? Different CTA? Message us, we redo it — no retainer ticket system.",
+    body: "Preview what's coming up in the portal. Want a different photo on the Friday post? Different CTA? Message us, we redo it. No retainer ticket system.",
     who: 'You',
     accent: '#48D886',
   },

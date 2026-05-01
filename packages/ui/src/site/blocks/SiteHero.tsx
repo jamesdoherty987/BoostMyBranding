@@ -176,7 +176,7 @@ export function SiteHero({ config, images, businessName, embedded }: SiteHeroPro
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={heroImage}
-                alt={`${businessName} — ${config.brand.tagline}`}
+                alt={`${businessName}, ${config.brand.tagline}`}
                 className="h-full w-full object-cover"
                 loading="eager"
               />

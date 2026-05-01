@@ -172,7 +172,7 @@ function normalizeConfig(raw: Partial<WebsiteConfig>, template: SiteTemplate): W
     faq: raw.faq ?? [],
     contact: raw.contact ?? {
       heading: 'Get in touch',
-      body: 'Drop us a line — we usually respond within a few hours.',
+      body: 'Drop us a line, we usually respond within a few hours.',
       showBookingForm: true,
       showHours: false,
     },
@@ -208,7 +208,7 @@ function demoConfig(name: string, industry: string, template: SiteTemplate): Web
     template,
     layout: DEFAULT_LAYOUT[template],
     meta: {
-      title: `${name} — ${industry}`,
+      title: `${name} - ${industry}`,
       description: `${name} is a local ${industry.toLowerCase()} business serving the community with quality and care.`,
       keywords: [name.toLowerCase(), industry.toLowerCase(), 'local', 'booking'],
     },
@@ -241,7 +241,7 @@ function demoConfig(name: string, industry: string, template: SiteTemplate): Web
       body: 'Small enough to know you, experienced enough to get it right the first time.\n\nWe show up when we say we will, explain things in plain English, and leave your place better than we found it.',
       bullets: [
         'Fully insured and certified',
-        'Up-front quotes — no surprises',
+        'Up-front quotes, no surprises',
         '14-day satisfaction guarantee',
       ],
       imageIndex: 1,
@@ -292,7 +292,7 @@ function demoConfig(name: string, industry: string, template: SiteTemplate): Web
     faq: [
       {
         question: 'Do you come to me?',
-        answer: 'Yes — we cover the greater city area and surrounding towns.',
+        answer: 'Yes, we cover the greater city area and surrounding towns.',
       },
       {
         question: 'How do I book?',

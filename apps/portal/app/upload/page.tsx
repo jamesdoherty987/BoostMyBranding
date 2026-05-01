@@ -243,7 +243,7 @@ export default function UploadPage() {
                   ) : (
                     <div className="flex items-center gap-2 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-800">
                       <Check className="h-3.5 w-3.5" />
-                      Received — your team will take it from here
+                      Received, your team will take it from here
                     </div>
                   )
                 ) : null}

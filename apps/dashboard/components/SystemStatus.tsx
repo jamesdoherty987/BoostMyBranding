@@ -98,7 +98,7 @@ export function SystemStatus() {
                 })}
               </ul>
               <p className="mt-3 text-[10px] text-slate-500">
-                Missing integrations run in mock mode — add the env var to enable.
+                Missing integrations run in mock mode. Add the env var to enable.
               </p>
             </motion.div>
           </>

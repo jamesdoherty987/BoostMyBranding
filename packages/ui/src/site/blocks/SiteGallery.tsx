@@ -67,7 +67,7 @@ export function SiteGallery({ config, images, businessName }: SiteGalleryProps) 
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={src}
-                  alt={`${businessName} — gallery image ${i + 1}`}
+                  alt={`${businessName}, gallery image ${i + 1}`}
                   className="h-full w-full object-cover transition-transform duration-500 hover:scale-[1.04]"
                   loading="lazy"
                   onError={(e) => {

@@ -96,7 +96,7 @@ const sampleCaptions = [
   'Behind every reliable service is a team that shows up. Meet the crew.',
   "Small details, big impact. Here's what we shipped this week.",
   'Steam, smiles, and specialty beans. Weekend plans sorted.',
-  'Before vs after — the glow-up nobody talks about.',
+  'Before vs after, the glow-up nobody talks about.',
   '5-star review of the week 💛 Thanks for trusting us.',
 ];
 

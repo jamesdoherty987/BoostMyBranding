@@ -121,7 +121,7 @@ export default function OnboardingPage() {
             >
               <h1 className="text-2xl font-bold tracking-tight">Drop in your first photos</h1>
               <p className="mt-2 text-sm text-slate-600">
-                10 recent shots is plenty — our editors will take it from there.
+                10 recent shots is plenty. Our editors will take it from there.
               </p>
 
               <label className="mt-5 flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 p-8 text-center transition-colors hover:border-[#48D886] hover:bg-[#48D886]/5">

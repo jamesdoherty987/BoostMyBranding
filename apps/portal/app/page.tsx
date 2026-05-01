@@ -62,7 +62,7 @@ export default function LoginPage() {
                 href={devLink}
                 className="block rounded-xl border border-dashed border-slate-300 bg-slate-50 p-3 text-center text-xs font-medium text-slate-600 hover:bg-slate-100"
               >
-                Dev link — click to continue
+                Dev link, click to continue
               </a>
             ) : null}
           </div>

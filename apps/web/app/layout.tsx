@@ -9,6 +9,8 @@ const inter = Inter({
   fallback: ['system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'sans-serif'],
 });
 
+const BASE = process.env.NEXT_PUBLIC_APP_URL ?? 'https://boostmybranding.com';
+
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
@@ -18,14 +20,69 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: 'BoostMyBranding — Social media done for you',
+  metadataBase: new URL(BASE),
+  title: {
+    default: 'BoostMyBranding - Social media done for you',
+    template: '%s | BoostMyBranding',
+  },
   description:
     'A dedicated social team for modern local businesses. Thoughtful posts in your voice, planned and published every month. Websites built to match.',
-  icons: { icon: '/favicon.svg' },
+  keywords: [
+    'social media management',
+    'social media agency',
+    'done for you social media',
+    'local business marketing',
+    'social media for small business',
+    'content creation service',
+    'Instagram management',
+    'Facebook management',
+    'LinkedIn management',
+    'TikTok management',
+    'social media scheduling',
+    'website design for small business',
+  ],
+  authors: [{ name: 'BoostMyBranding' }],
+  creator: 'BoostMyBranding',
+  publisher: 'BoostMyBranding',
+  icons: {
+    icon: [{ url: '/favicon.png', type: 'image/png', sizes: '500x500' }],
+    apple: '/favicon.png',
+    shortcut: '/favicon.png',
+  },
   openGraph: {
-    title: 'BoostMyBranding',
-    description: 'Social media and websites done for you, by a real team.',
+    title: 'BoostMyBranding - Social media done for you',
+    description:
+      'A dedicated social team for modern local businesses. Thoughtful posts in your voice, planned and published every month.',
+    url: BASE,
+    siteName: 'BoostMyBranding',
+    locale: 'en_IE',
     type: 'website',
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'BoostMyBranding - Social media done for you',
+    description:
+      'A dedicated social team for modern local businesses. Thoughtful posts in your voice, planned and published every month.',
+    creator: '@boostmybranding',
+  },
+  alternates: {
+    canonical: BASE,
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      'max-video-preview': -1,
+      'max-image-preview': 'large',
+      'max-snippet': -1,
+    },
+  },
+  verification: {
+    // Add your verification codes here when ready:
+    // google: 'your-google-verification-code',
+    // yandex: 'your-yandex-verification-code',
   },
 };
 

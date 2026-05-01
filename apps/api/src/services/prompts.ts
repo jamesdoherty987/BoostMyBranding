@@ -24,7 +24,7 @@ Generate a brand voice guide in this exact JSON format:
     "use": ["list of words/phrases to use"],
     "avoid": ["list of words/phrases to avoid"]
   },
-  "sentenceStyle": "short|medium|long — describe preferred sentence length",
+  "sentenceStyle": "short|medium|long, describe preferred sentence length",
   "emojiUsage": "none|minimal|moderate|heavy",
   "hashtagStyle": "describe hashtag approach",
   "callToAction": "preferred CTA style and examples",
@@ -98,7 +98,7 @@ Generate a content calendar. Return JSON array:
 RULES:
 - Mix content types; no more than 2 promotional in a row
 - Use real images (imageIndex) for at least 60% of posts
-- Vary platforms — don't post identically on all same day
+- Vary platforms, don't post identically on all same day
 - Seasonal references for ${vars.month} where appropriate
 - Instagram: 150-300 chars + hashtags. LinkedIn: 200-500 chars, professional. TikTok: 50-150 chars, casual. X: under 280 chars.
 - Generate exactly ${vars.postsCount} posts.`;
@@ -222,10 +222,10 @@ Return ONLY valid JSON in this exact shape:
 RULES:
 - Write everything in the client's voice, not generic marketing speak.
 - 3-6 services max. Pick icon names ONLY from the list above.
-- Include 3-4 stats — pick whatever's credible for the industry (years in business, customers served, response time, rating).
+- Include 3-4 stats, pick whatever's credible for the industry (years in business, customers served, response time, rating).
 - 3 reviews minimum, 5 max. Make them specific (mention the service).
 - 4-6 FAQ items, based on what a real customer would ask.
 - Colours should fit the industry: food warm terracotta/amber; beauty soft rose/magenta; fitness bold blue/green; service teal/green; professional slate/teal.
-- No placeholder text like "Lorem ipsum" — always write real copy.
+- No placeholder text like "Lorem ipsum", always write real copy.
 - Last 2 words of the hero headline get auto-highlighted in a brand gradient. Write the headline so the last 2 words form a natural punchy phrase.`;
 }

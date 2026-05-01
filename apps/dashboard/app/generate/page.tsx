@@ -106,7 +106,7 @@ export default function GeneratePage() {
     <>
       <PageHeader
         title="Generate content"
-        subtitle="Kick off an AI run for one client — brand voice, captions, images, and schedule."
+        subtitle="Kick off an AI run for one client: brand voice, captions, images, and schedule."
       />
 
       <div className="px-4 py-4 md:px-10 md:py-6">

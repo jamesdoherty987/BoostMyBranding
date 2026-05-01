@@ -57,21 +57,22 @@ export function LaunchHero() {
         />
 
         {/*
-          Grid texture. Lines use an opaque slate with decent alpha so the
-          grid is visible at typical monitor brightness, then a radial mask
-          fades it out near the edges so it doesn't compete with the copy.
+          Grid texture. Lines use an opaque slate at a very low alpha so the
+          grid reads as a faint architectural texture, not a strong mesh. A
+          radial mask fades it out near the edges so it never competes with
+          the headline copy above.
         */}
         <div
           aria-hidden
           className="absolute inset-0 z-0"
           style={{
             backgroundImage:
-              'linear-gradient(rgba(15,23,42,0.09) 1px, transparent 1px), linear-gradient(90deg, rgba(15,23,42,0.09) 1px, transparent 1px)',
-            backgroundSize: '56px 56px',
+              'linear-gradient(rgba(15,23,42,0.045) 1px, transparent 1px), linear-gradient(90deg, rgba(15,23,42,0.045) 1px, transparent 1px)',
+            backgroundSize: '64px 64px',
             maskImage:
-              'radial-gradient(ellipse 80% 70% at 50% 50%, black 45%, transparent 100%)',
+              'radial-gradient(ellipse 75% 65% at 50% 45%, black 35%, transparent 100%)',
             WebkitMaskImage:
-              'radial-gradient(ellipse 80% 70% at 50% 50%, black 45%, transparent 100%)',
+              'radial-gradient(ellipse 75% 65% at 50% 45%, black 35%, transparent 100%)',
           }}
         />
 
@@ -81,14 +82,14 @@ export function LaunchHero() {
             <Particles
               quantity={40}
               color={['#1D9CA1', '#48D886', '#FFEC3D']}
-              speed={1.1}
+              speed={1.8}
               maxSize={2.2}
               className="absolute inset-0 z-[5] md:hidden"
             />
             <Particles
               quantity={140}
               color={['#1D9CA1', '#48D886', '#FFEC3D']}
-              speed={1.1}
+              speed={1.8}
               maxSize={2.8}
               className="absolute inset-0 z-[5] hidden md:block"
             />
@@ -143,7 +144,7 @@ export function LaunchHero() {
 
           <p className="mx-auto mt-4 max-w-2xl text-balance text-[15px] leading-relaxed text-slate-600 sm:mt-5 sm:text-lg md:mt-6 md:text-xl">
             Done-for-you social media that actually looks professional. We plan, write, and
-            publish every post so your brand keeps showing up — without you sitting in front of
+            publish every post so your brand keeps showing up, without you sitting in front of
             Canva on a Sunday night.
           </p>
 

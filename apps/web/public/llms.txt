@@ -1,0 +1,34 @@
+# BoostMyBranding
+
+> A dedicated social media management team for modern local businesses.
+
+BoostMyBranding plans, writes, and publishes social media content for small and local businesses. We handle Instagram, Facebook, LinkedIn, TikTok, X, Pinterest, and Bluesky. Clients get 30 posts per month, a dedicated account manager, and a client portal for communication and content review.
+
+## Services
+
+- **Social Only** (EUR 700/month): 30 posts per month across 4 platforms, monthly performance report, dedicated account manager, client portal access.
+- **Full Package** (EUR 800/month + EUR 800 setup): Everything in Social Only plus a custom mobile-first website with hosting and unlimited change requests.
+- **Website Only** (EUR 150/month + EUR 800 setup): Custom website with hosting and monthly maintenance.
+
+## How it works
+
+1. Client signs up and shares business info, photos, and brand preferences.
+2. Our team studies the business, builds a brand voice guide, and drafts the first month of content.
+3. Content is reviewed internally, then shared with the client for preview via the portal.
+4. Posts are scheduled and published automatically. Client can request changes anytime via chat.
+5. Monthly report covers reach, engagement, and bookings.
+
+## Key pages
+
+- Homepage: /
+- Examples (websites and social posts): /examples
+- Sign up: /signup
+- Privacy policy: /privacy
+- Terms of service: /terms
+- Blog: /blog
+
+## Contact
+
+- Email: hello@boostmybranding.com
+- Instagram: https://instagram.com/boostmybranding
+- Website: https://boostmybranding.com

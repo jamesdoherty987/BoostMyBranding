@@ -76,7 +76,7 @@ export function MonthlyOutput() {
               <span className="text-lg text-white/70">posts</span>
             </div>
             <p className="mt-2 text-sm text-white/60">
-              A mix of posts, reels, stories, and carousels — planned together.
+              A mix of posts, reels, stories, and carousels, planned together.
             </p>
 
             <div className="mt-6 grid grid-cols-6 gap-1.5">
@@ -114,7 +114,7 @@ export function MonthlyOutput() {
               <span className="text-lg text-white/70">platforms</span>
             </div>
             <p className="mt-2 text-sm text-white/60">
-              Reformatted per platform — captions, hashtags, aspect ratios.
+              Reformatted per platform: captions, hashtags, aspect ratios.
             </p>
 
             <div className="mt-6 flex flex-wrap gap-2.5">

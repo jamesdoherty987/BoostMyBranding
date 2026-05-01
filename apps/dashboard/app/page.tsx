@@ -146,7 +146,7 @@ export default function OverviewPage() {
 
         <div className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">
           <Activity className="h-3 w-3" />
-          Live — {publishedThisMonth} posts published this month
+          Live, {publishedThisMonth} posts published this month
         </div>
 
         <section className="mt-6 grid grid-cols-1 gap-4 md:gap-6 lg:grid-cols-3">

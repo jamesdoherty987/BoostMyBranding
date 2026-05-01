@@ -30,7 +30,7 @@ const FEATURES: Feature[] = [
     icon: Sparkles,
     title: 'Posts that sound like you.',
     body:
-      "We study your site, your tone, and the way you actually talk to customers. Every caption lands in your voice — no generic 'Happy Monday!' filler.",
+      "We study your site, your tone, and the way you actually talk to customers. Every caption lands in your voice, no generic 'Happy Monday!' filler.",
     accent: 'teal',
     art: 'voice',
     span: 'lg',
@@ -39,7 +39,7 @@ const FEATURES: Feature[] = [
     icon: Camera,
     title: 'Photos that stop the scroll.',
     body:
-      "Send us phone shots — we pick the strong ones, clean them up, and size them for every platform. Feeds that look like a magazine, not a group chat.",
+      "Send us phone shots. We pick the strong ones, clean them up, and size them for every platform. Feeds that look like a magazine, not a group chat.",
     accent: 'yellow',
     art: 'photos',
   },
@@ -55,7 +55,7 @@ const FEATURES: Feature[] = [
     icon: MessageCircle,
     title: 'A team one tap away.',
     body:
-      "Voice notes, screenshots, 'can we swap that photo?' — message us in the app and it lands with your account manager. Usually a reply within the hour.",
+      "Voice notes, screenshots, 'can we swap that photo?' Message us in the app and it lands with your account manager. Usually a reply within the hour.",
     accent: 'mix',
     art: 'chat',
   },
@@ -63,7 +63,7 @@ const FEATURES: Feature[] = [
     icon: Globe,
     title: 'A website that moves with you.',
     body:
-      "Fast, mobile-first, built around your brand. New menu, new hours, new service — tell us and it's live that day.",
+      "Fast, mobile-first, built around your brand. New menu, new hours, new service - tell us and it's live that day.",
     accent: 'teal',
     art: 'website',
   },
@@ -80,7 +80,7 @@ export function Features() {
           </h2>
           <p className="mt-4 text-lg text-slate-600">
             Every post is planned around your brand, your customers, and what actually moves the
-            needle — bookings, foot traffic, enquiries. Not vanity posts, not busy work.
+            needle: bookings, foot traffic, enquiries. Not vanity posts, not busy work.
           </p>
         </div>
 
@@ -205,7 +205,7 @@ function VoiceArt() {
             caption
           </span>
           <br />
-          &ldquo;Morning ☕ — first pour is on us if you&apos;re in before 9. See you soon.&rdquo;
+          &ldquo;Morning ☕ first pour is on us if you&apos;re in before 9. See you soon.&rdquo;
         </p>
       </div>
     </div>
@@ -289,7 +289,7 @@ function CalendarArt() {
 function ChatArt() {
   const bubbles = [
     { side: 'left', text: 'Can we push Friday?', color: 'slate' },
-    { side: 'right', text: "On it — moved to Sat 10am.", color: 'brand' },
+    { side: 'right', text: "On it, moved to Sat 10am.", color: 'brand' },
     { side: 'left', text: '🙌', color: 'slate' },
   ] as const;
   return (

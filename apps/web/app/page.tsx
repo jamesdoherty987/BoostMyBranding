@@ -72,7 +72,7 @@ const jsonLd = {
           name: 'How long until my first posts go live?',
           acceptedAnswer: {
             '@type': 'Answer',
-            text: 'Roughly a week. We spend the first few days learning your business, then build your brand brief and ship the first month of content for you to preview.',
+            text: 'Roughly a week. We spend the first few days learning your business, then build your brand brief and start publishing.',
           },
         },
         {

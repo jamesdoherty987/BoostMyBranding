@@ -138,7 +138,7 @@ export const mockMessages: Message[] = [
     clientId: 'c_murphy',
     sender: 'agency',
     senderName: 'Jamie (BoostMyBranding)',
-    body: 'Hey Sean! Your April calendar is live for review. 6 posts waiting.',
+    body: 'Hey Sean! Your April calendar is live. 6 new posts going out this week.',
     createdAt: iso(-2),
     isRead: true,
   },

@@ -145,15 +145,15 @@ export function MonthlyOutput() {
                   Your time
                 </div>
                 <div className="mt-1 flex items-baseline gap-1 md:mt-2">
-                  <span className="text-4xl font-bold text-white md:text-7xl">5</span>
-                  <span className="text-sm text-white/70 md:text-lg">minutes</span>
+                  <span className="text-4xl font-bold text-white md:text-7xl">0</span>
+                  <span className="text-sm text-white/70 md:text-lg">effort</span>
                 </div>
                 <p className="mt-1 text-xs text-white/60 md:mt-2 md:text-sm">
-                  Drop photos, message us if anything needs changing.
+                  We handle everything. You get back to running your business.
                 </p>
               </div>
 
-              {/* Clock with a partial arc — hidden on small mobile, shown on md+ */}
+              {/* Checkmark circle — desktop only */}
               <div className="hidden items-center justify-center py-2 md:mt-6 md:flex">
                 <svg viewBox="0 0 100 100" className="h-24 w-24">
                   <circle cx="50" cy="50" r="44" stroke="rgba(255,255,255,0.1)" strokeWidth="8" fill="none" />
@@ -167,7 +167,7 @@ export function MonthlyOutput() {
                     strokeLinecap="round"
                     strokeDasharray="276.5"
                     initial={{ strokeDashoffset: 276.5 }}
-                    whileInView={{ strokeDashoffset: 276.5 - 276.5 * 0.08 }}
+                    whileInView={{ strokeDashoffset: 0 }}
                     viewport={{ once: true }}
                     transition={{ duration: 1.2, delay: 0.4, ease: 'easeOut' }}
                     transform="rotate(-90 50 50)"
@@ -179,16 +179,18 @@ export function MonthlyOutput() {
                       <stop offset="1" stopColor="#FFEC3D" />
                     </linearGradient>
                   </defs>
-                  <text
-                    x="50"
-                    y="55"
-                    textAnchor="middle"
-                    fontSize="14"
-                    fontWeight="bold"
-                    fill="#ffffff"
-                  >
-                    5 min
-                  </text>
+                  <motion.path
+                    d="M 35 52 L 45 62 L 65 40"
+                    stroke="#48D886"
+                    strokeWidth="6"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    fill="none"
+                    initial={{ pathLength: 0 }}
+                    whileInView={{ pathLength: 1 }}
+                    viewport={{ once: true }}
+                    transition={{ duration: 0.6, delay: 1.2, ease: 'easeOut' }}
+                  />
                 </svg>
               </div>
             </div>

@@ -70,7 +70,7 @@ export function LaunchHero() {
           className="absolute inset-0 z-0"
           style={{
             backgroundImage:
-              'linear-gradient(rgba(15,23,42,0.045) 1px, transparent 1px), linear-gradient(90deg, rgba(15,23,42,0.045) 1px, transparent 1px)',
+              'linear-gradient(rgba(15,23,42,0.065) 1px, transparent 1px), linear-gradient(90deg, rgba(15,23,42,0.065) 1px, transparent 1px)',
             backgroundSize: '64px 64px',
             maskImage:
               'radial-gradient(ellipse 75% 65% at 50% 45%, black 35%, transparent 100%)',
@@ -85,15 +85,15 @@ export function LaunchHero() {
             <Particles
               quantity={40}
               color={['#1D9CA1', '#48D886', '#FFEC3D']}
-              speed={1.8}
-              maxSize={2.2}
+              speed={3.5}
+              maxSize={3}
               className="absolute inset-0 z-[5] md:hidden"
             />
             <Particles
               quantity={90}
               color={['#1D9CA1', '#48D886', '#FFEC3D']}
-              speed={1.8}
-              maxSize={2.8}
+              speed={3.5}
+              maxSize={3.5}
               className="absolute inset-0 z-[5] hidden md:block"
             />
           </>
@@ -142,7 +142,7 @@ export function LaunchHero() {
 
           <p className="mx-auto mt-3 max-w-2xl text-balance text-[14px] leading-relaxed text-slate-600 sm:mt-5 sm:text-lg md:mt-6 md:text-xl">
             Done-for-you social media that looks professional. We plan, write, and
-            publish every post so your brand keeps showing up.
+            publish every post — you don&apos;t have to do a thing.
           </p>
 
           <div className="mt-4 flex w-full max-w-sm flex-col items-stretch gap-2.5 sm:w-auto sm:max-w-none sm:flex-row sm:items-center md:mt-8 md:gap-3">

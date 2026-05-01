@@ -124,7 +124,7 @@ export default function DashboardPage() {
         >
           <MessageSquare className="h-5 w-5 text-[#1D9CA1]" />
           <div className="mt-2 text-sm font-semibold text-slate-900">Chat with us</div>
-          <div className="text-xs text-slate-500">Anything you want tweaked</div>
+          <div className="text-xs text-slate-500">Questions or updates</div>
         </Link>
       </section>
 

@@ -36,7 +36,7 @@ const ROWS = [
   {
     label: 'Your time',
     diy: '10–15 hours a week',
-    bmb: 'Five minutes a fortnight',
+    bmb: 'Zero — we handle it all',
   },
 ];
 

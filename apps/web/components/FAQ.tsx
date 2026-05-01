@@ -8,15 +8,15 @@ import { ChevronDown } from 'lucide-react';
 const faqs = [
   {
     q: 'How long until my first posts go live?',
-    a: "Roughly a week. We spend the first few days with your business - your site, your tone, how you talk to customers - then we build your brand brief and ship the first month of content for you to preview.",
+    a: "Roughly a week. We spend the first few days learning your business — your site, your tone, how you talk to customers — then we build your brand brief and start publishing.",
   },
   {
     q: "What if I don't have good photos?",
     a: "We can work from whatever you've got, even quick phone shots. If you're short on content, we can shoot new photos on our visits, or create on-brand imagery in-house to fill the gaps.",
   },
   {
-    q: "Do I see what's going live?",
-    a: "Yes. Everything shows up in your portal before it ships. Scroll through, send us a message if anything needs tweaking. We run the calendar so you don't have to, but nothing is ever a surprise.",
+    q: 'Do I have to approve every post?',
+    a: "No. We handle everything — writing, scheduling, publishing. You can check in any time through your portal, but you never have to approve or review anything. That's the whole point.",
   },
   {
     q: 'Which platforms do you cover?',
@@ -24,7 +24,7 @@ const faqs = [
   },
   {
     q: 'Who writes the posts?',
-    a: "Our in-house writers and editors. Every client is assigned a dedicated account manager who gets to know your business and reviews everything before it goes live.",
+    a: "Our in-house writers and editors. Every client is assigned a dedicated account manager who gets to know your business. The team reviews everything internally before it goes live.",
   },
   {
     q: 'Can I cancel?',

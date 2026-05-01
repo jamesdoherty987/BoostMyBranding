@@ -179,7 +179,7 @@ export default function OnboardingPage() {
               </div>
               <h1 className="mt-5 text-2xl font-bold tracking-tight">You&apos;re all set!</h1>
               <p className="mt-2 text-sm text-slate-600">
-                Your account manager is putting together your first month. We&apos;ll message you in chat within two business days with everything to preview.
+                Your account manager is putting together your first month. We&apos;ll message you in chat within two business days when your first posts are live.
               </p>
               <Link href="/dashboard">
                 <Button className="mt-8 w-full" size="lg">

@@ -47,7 +47,7 @@ const FEATURES: Feature[] = [
     title: 'Photos that stop the scroll.',
     tag: 'Magazine-quality feed',
     body:
-      "Send us phone shots. We pick the strong ones, clean them up, and size them for every platform. Feeds that look like a magazine, not a group chat.",
+      "We source the best shots, clean them up, and size them for every platform. Feeds that look like a magazine, not a group chat.",
     accent: 'yellow',
     art: 'photos',
   },
@@ -56,7 +56,7 @@ const FEATURES: Feature[] = [
     title: '30 posts, planned every month.',
     tag: 'Never miss a day',
     body:
-      "A full calendar goes out monthly, spaced across the right days and platforms. You see it all before it ships.",
+      "A full calendar goes out monthly, spaced across the right days and platforms. We handle everything from planning to publishing.",
     accent: 'green',
     art: 'calendar',
   },
@@ -65,7 +65,7 @@ const FEATURES: Feature[] = [
     title: 'A team one tap away.',
     tag: 'Reply within the hour',
     body:
-      "Voice notes, screenshots, 'can we swap that photo?' Message us in the app and it lands with your account manager. Usually a reply within the hour.",
+      "Questions, ideas, or a quick update about your business? Message us in the app and it lands with your account manager. Usually a reply within the hour.",
     accent: 'mix',
     art: 'chat',
   },

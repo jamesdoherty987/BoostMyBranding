@@ -16,9 +16,9 @@ interface Step {
 const STEPS: Step[] = [
   {
     icon: Upload,
-    title: 'Send us photos.',
-    body: "10\u201315 from your phone every fortnight. That's all we need.",
-    who: 'You',
+    title: 'We learn your brand.',
+    body: "We study your business, your tone, and your customers. Then we get to work.",
+    who: 'Us',
     accent: '#48D886',
   },
   {
@@ -30,9 +30,9 @@ const STEPS: Step[] = [
   },
   {
     icon: Send,
-    title: 'You review & tweak.',
-    body: 'Preview everything in the portal. Message us any changes.',
-    who: 'You',
+    title: 'We handle the rest.',
+    body: 'Every post is checked, polished, and scheduled. You never have to lift a finger.',
+    who: 'Us',
     accent: '#48D886',
   },
   {
@@ -61,11 +61,11 @@ export function Demo() {
             How we work
           </Badge>
           <h2 className="text-3xl font-bold tracking-tight md:text-5xl">
-            You send the raw material.{' '}
-            <span className="text-gradient-brand">We make it look great.</span>
+            You focus on your business.{' '}
+            <span className="text-gradient-brand">We handle the rest.</span>
           </h2>
           <p className="mt-3 text-sm text-slate-600 md:mt-4 md:text-lg">
-            No calls to schedule, no briefs to write. Just drop photos and get back to work.
+            No calls to schedule, no briefs to write, no posts to approve. We run the whole show.
           </p>
         </div>
 

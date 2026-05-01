@@ -2,7 +2,7 @@
 
 import { useRef } from 'react';
 import Link from 'next/link';
-import { motion, useScroll, useTransform, useSpring, useReducedMotion } from 'framer-motion';
+import { motion, useScroll, useTransform, useReducedMotion } from 'framer-motion';
 import { Button, Particles, ShimmerButton } from '@boost/ui';
 import { ArrowRight, Zap, CheckCircle2 } from 'lucide-react';
 
@@ -33,19 +33,14 @@ export function LaunchHero() {
   const copyY = useTransform(scrollYProgress, [0, 1], ['0px', '-80px']);
 
   /*
-   * Mobile rocket: flies upward over the text on scroll. Raw scroll values
-   * are piped through useSpring so the rocket has momentum and easing
-   * instead of jerky 1:1 tracking.
+   * Mobile rocket: flies upward over the text on scroll.
+   * Uses plain useTransform (no springs) to avoid expensive
+   * spring animation loops that would also run on desktop.
    */
   const { scrollY } = useScroll();
-  const mobileRocketYRaw = useTransform(scrollY, [0, 500], [0, -700]);
-  const mobileRocketScaleRaw = useTransform(scrollY, [0, 150, 500], [1, 1.05, 0.8]);
-  const mobileRocketOpacityRaw = useTransform(scrollY, [0, 250, 550], [1, 1, 0]);
-
-  const springConfig = { stiffness: 80, damping: 20, mass: 0.5 };
-  const mobileRocketY = useSpring(mobileRocketYRaw, springConfig);
-  const mobileRocketScale = useSpring(mobileRocketScaleRaw, springConfig);
-  const mobileRocketOpacity = useSpring(mobileRocketOpacityRaw, { stiffness: 120, damping: 25 });
+  const mobileRocketY = useTransform(scrollY, [0, 500], [0, -700]);
+  const mobileRocketScale = useTransform(scrollY, [0, 150, 500], [1, 1.05, 0.8]);
+  const mobileRocketOpacity = useTransform(scrollY, [0, 250, 550], [1, 1, 0]);
 
   return (
     <section
@@ -197,6 +192,7 @@ export function LaunchHero() {
           <RocketWithFlame
             className="h-[200px] w-auto sm:h-[260px]"
             reduced={!!reduced}
+            idPrefix="m-"
           />
         </motion.div>
 
@@ -210,6 +206,7 @@ export function LaunchHero() {
           style={{
             y: reduced ? 0 : rocketY,
             scale: reduced ? 1 : rocketScale,
+            willChange: 'transform',
             filter:
               'drop-shadow(0 20px 30px rgba(15,23,42,0.22)) drop-shadow(0 8px 16px rgba(29,156,161,0.22))',
           }}
@@ -217,6 +214,7 @@ export function LaunchHero() {
           <RocketWithFlame
             className="h-[88vh] w-auto"
             reduced={!!reduced}
+            idPrefix="d-"
           />
         </motion.div>
 
@@ -253,10 +251,13 @@ export function LaunchHero() {
 function RocketWithFlame({
   className,
   reduced,
+  idPrefix = '',
 }: {
   className?: string;
   reduced?: boolean;
+  idPrefix?: string;
 }) {
+  const p = idPrefix;
   return (
     <motion.svg
       xmlns="http://www.w3.org/2000/svg"
@@ -267,74 +268,72 @@ function RocketWithFlame({
       transition={{ duration: 4.5, repeat: Infinity, ease: 'easeInOut' }}
     >
       <defs>
-        <linearGradient id="hull" x1="0" y1="0" x2="1" y2="0">
+        <linearGradient id={`${p}hull`} x1="0" y1="0" x2="1" y2="0">
           <stop offset="0" stopColor="#cbd5e1" />
           <stop offset="0.12" stopColor="#f8fafc" />
           <stop offset="0.5" stopColor="#ffffff" />
           <stop offset="0.82" stopColor="#cbd5e1" />
           <stop offset="1" stopColor="#64748b" />
         </linearGradient>
-        <linearGradient id="hullShade" x1="0" y1="0" x2="1" y2="0">
+        <linearGradient id={`${p}hullShade`} x1="0" y1="0" x2="1" y2="0">
           <stop offset="0" stopColor="#000" stopOpacity="0" />
           <stop offset="0.5" stopColor="#000" stopOpacity="0" />
           <stop offset="1" stopColor="#000" stopOpacity="0.35" />
         </linearGradient>
-        <linearGradient id="nose" x1="0.2" y1="0" x2="0.8" y2="1">
+        <linearGradient id={`${p}nose`} x1="0.2" y1="0" x2="0.8" y2="1">
           <stop offset="0" stopColor="#48D886" />
           <stop offset="0.5" stopColor="#1D9CA1" />
           <stop offset="1" stopColor="#135c61" />
         </linearGradient>
-        <linearGradient id="noseGloss" x1="0" y1="0" x2="1" y2="0">
+        <linearGradient id={`${p}noseGloss`} x1="0" y1="0" x2="1" y2="0">
           <stop offset="0" stopColor="#fff" stopOpacity="0.45" />
           <stop offset="0.3" stopColor="#fff" stopOpacity="0.1" />
           <stop offset="1" stopColor="#fff" stopOpacity="0" />
         </linearGradient>
-        <linearGradient id="fin" x1="0" y1="0" x2="1" y2="1">
+        <linearGradient id={`${p}fin`} x1="0" y1="0" x2="1" y2="1">
           <stop offset="0" stopColor="#1D9CA1" />
           <stop offset="1" stopColor="#135c61" />
         </linearGradient>
-        <linearGradient id="finShade" x1="0" y1="0" x2="1" y2="0">
+        <linearGradient id={`${p}finShade`} x1="0" y1="0" x2="1" y2="0">
           <stop offset="0" stopColor="#000" stopOpacity="0" />
           <stop offset="1" stopColor="#000" stopOpacity="0.45" />
         </linearGradient>
-        <radialGradient id="glass" cx="0.35" cy="0.3" r="0.8">
+        <radialGradient id={`${p}glass`} cx="0.35" cy="0.3" r="0.8">
           <stop offset="0" stopColor="#bae6fd" />
           <stop offset="0.35" stopColor="#48D886" />
           <stop offset="0.8" stopColor="#1D9CA1" />
           <stop offset="1" stopColor="#0b2c30" />
         </radialGradient>
-
-        <radialGradient id="flameHalo" cx="0.5" cy="0" r="0.95">
+        <radialGradient id={`${p}flameHalo`} cx="0.5" cy="0" r="0.95">
           <stop offset="0" stopColor="#FFEC3D" stopOpacity="0.8" />
           <stop offset="0.4" stopColor="#FFEC3D" stopOpacity="0.55" />
           <stop offset="0.75" stopColor="#ffc14d" stopOpacity="0.35" />
           <stop offset="1" stopColor="#ffc14d" stopOpacity="0" />
         </radialGradient>
-        <radialGradient id="flameMid" cx="0.5" cy="0" r="0.78">
+        <radialGradient id={`${p}flameMid`} cx="0.5" cy="0" r="0.78">
           <stop offset="0" stopColor="#fff6b0" />
           <stop offset="0.35" stopColor="#FFEC3D" />
           <stop offset="0.75" stopColor="#ffc14d" />
           <stop offset="1" stopColor="#ffc14d" stopOpacity="0" />
         </radialGradient>
-        <radialGradient id="flameCore" cx="0.5" cy="0.15" r="0.55">
+        <radialGradient id={`${p}flameCore`} cx="0.5" cy="0.15" r="0.55">
           <stop offset="0" stopColor="#ffffff" />
           <stop offset="0.55" stopColor="#fff6b0" />
           <stop offset="1" stopColor="#FFEC3D" stopOpacity="0" />
         </radialGradient>
-        <linearGradient id="engine" x1="0" y1="0" x2="0" y2="1">
+        <linearGradient id={`${p}engine`} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0" stopColor="#334155" />
           <stop offset="0.5" stopColor="#94a3b8" />
           <stop offset="1" stopColor="#1e293b" />
         </linearGradient>
-        <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+        <filter id={`${p}glow`} x="-50%" y="-50%" width="200%" height="200%">
           <feGaussianBlur stdDeviation="10" result="b" />
           <feMerge>
             <feMergeNode in="b" />
             <feMergeNode in="SourceGraphic" />
           </feMerge>
         </filter>
-
-        <filter id="fireWarp" x="-20%" y="-5%" width="140%" height="110%">
+        <filter id={`${p}fireWarp`} x="-20%" y="-5%" width="140%" height="110%">
           <feTurbulence type="fractalNoise" baseFrequency="0.018 0.09" numOctaves="2" seed="1" result="noise">
             {reduced ? null : (
               <animate attributeName="seed" from="1" to="60" dur="2.4s" repeatCount="indefinite" />
@@ -342,7 +341,7 @@ function RocketWithFlame({
           </feTurbulence>
           <feDisplacementMap in="SourceGraphic" in2="noise" scale="14" xChannelSelector="R" yChannelSelector="G" />
         </filter>
-        <filter id="fireWarpTight" x="-10%" y="-5%" width="120%" height="110%">
+        <filter id={`${p}fireWarpTight`} x="-10%" y="-5%" width="120%" height="110%">
           <feTurbulence type="fractalNoise" baseFrequency="0.04 0.14" numOctaves="2" seed="5" result="noise2">
             {reduced ? null : (
               <animate attributeName="seed" from="5" to="90" dur="1.3s" repeatCount="indefinite" />
@@ -353,38 +352,18 @@ function RocketWithFlame({
       </defs>
 
       <g className={reduced ? undefined : 'animate-flame-halo'}>
-        <ellipse cx="240" cy="780" rx="180" ry="100" fill="#FFEC3D" opacity="0.25" filter="url(#glow)" />
-        <ellipse cx="240" cy="820" rx="120" ry="65" fill="#48D886" opacity="0.22" filter="url(#glow)" />
+        <ellipse cx="240" cy="780" rx="180" ry="100" fill="#FFEC3D" opacity="0.25" filter={`url(#${p}glow)`} />
+        <ellipse cx="240" cy="820" rx="120" ry="65" fill="#48D886" opacity="0.22" filter={`url(#${p}glow)`} />
       </g>
-
-      <g
-        className={reduced ? undefined : 'animate-flame-halo'}
-        filter={reduced ? undefined : 'url(#fireWarp)'}
-      >
-        <path
-          d="M 178 680 C 164 760 162 840 198 905 C 216 935 228 945 240 955 C 252 945 264 935 282 905 C 318 840 316 760 302 680 Z"
-          fill="url(#flameHalo)"
-          filter="url(#glow)"
-        />
+      <g className={reduced ? undefined : 'animate-flame-halo'} filter={reduced ? undefined : `url(#${p}fireWarp)`}>
+        <path d="M 178 680 C 164 760 162 840 198 905 C 216 935 228 945 240 955 C 252 945 264 935 282 905 C 318 840 316 760 302 680 Z" fill={`url(#${p}flameHalo)`} filter={`url(#${p}glow)`} />
       </g>
-
-      <g
-        className={reduced ? undefined : 'animate-flame-mid'}
-        filter={reduced ? undefined : 'url(#fireWarpTight)'}
-      >
-        <path
-          d="M 200 680 C 190 740 188 815 216 885 C 226 905 234 915 240 922 C 246 915 254 905 264 885 C 292 815 290 740 280 680 Z"
-          fill="url(#flameMid)"
-        />
+      <g className={reduced ? undefined : 'animate-flame-mid'} filter={reduced ? undefined : `url(#${p}fireWarpTight)`}>
+        <path d="M 200 680 C 190 740 188 815 216 885 C 226 905 234 915 240 922 C 246 915 254 905 264 885 C 292 815 290 740 280 680 Z" fill={`url(#${p}flameMid)`} />
       </g>
-
       <g className={reduced ? undefined : 'animate-flame-core'}>
-        <path
-          d="M 220 680 C 214 720 212 780 230 840 C 236 860 240 868 240 874 C 240 868 244 860 250 840 C 268 780 266 720 260 680 Z"
-          fill="url(#flameCore)"
-        />
+        <path d="M 220 680 C 214 720 212 780 230 840 C 236 860 240 868 240 874 C 240 868 244 860 250 840 C 268 780 266 720 260 680 Z" fill={`url(#${p}flameCore)`} />
       </g>
-
       {!reduced ? (
         <g>
           <circle cx="170" cy="870" r="3" fill="#FFEC3D" className="animate-flame-spark" />
@@ -395,65 +374,43 @@ function RocketWithFlame({
         </g>
       ) : null}
 
-      <path d="M 190 560 L 120 700 C 114 710 120 720 132 716 L 190 696 Z" fill="url(#fin)" />
-      <path d="M 190 560 L 120 700 C 114 710 120 720 132 716 L 190 696 Z" fill="url(#finShade)" opacity="0.5" />
+      <path d="M 190 560 L 120 700 C 114 710 120 720 132 716 L 190 696 Z" fill={`url(#${p}fin)`} />
+      <path d="M 190 560 L 120 700 C 114 710 120 720 132 716 L 190 696 Z" fill={`url(#${p}finShade)`} opacity="0.5" />
       <path d="M 190 560 L 124 704" stroke="#48D886" strokeWidth="2" strokeLinecap="round" opacity="0.5" />
-
-      <path d="M 290 560 L 360 700 C 366 710 360 720 348 716 L 290 696 Z" fill="url(#fin)" />
-      <path d="M 290 560 L 360 700 C 366 710 360 720 348 716 L 290 696 Z" fill="url(#finShade)" opacity="0.2" />
-
+      <path d="M 290 560 L 360 700 C 366 710 360 720 348 716 L 290 696 Z" fill={`url(#${p}fin)`} />
+      <path d="M 290 560 L 360 700 C 366 710 360 720 348 716 L 290 696 Z" fill={`url(#${p}finShade)`} opacity="0.2" />
       <path d="M 232 570 L 240 720 L 248 570 Z" fill="#135c61" opacity="0.9" />
 
-      <path
-        d="M 190 260 C 190 255 194 250 200 250 L 280 250 C 286 250 290 255 290 260 L 290 700 C 290 710 284 716 276 716 L 204 716 C 196 716 190 710 190 700 Z"
-        fill="url(#hull)"
-      />
-      <path
-        d="M 190 260 C 190 255 194 250 200 250 L 280 250 C 286 250 290 255 290 260 L 290 700 C 290 710 284 716 276 716 L 204 716 C 196 716 190 710 190 700 Z"
-        fill="url(#hullShade)"
-      />
+      <path d="M 190 260 C 190 255 194 250 200 250 L 280 250 C 286 250 290 255 290 260 L 290 700 C 290 710 284 716 276 716 L 204 716 C 196 716 190 710 190 700 Z" fill={`url(#${p}hull)`} />
+      <path d="M 190 260 C 190 255 194 250 200 250 L 280 250 C 286 250 290 255 290 260 L 290 700 C 290 710 284 716 276 716 L 204 716 C 196 716 190 710 190 700 Z" fill={`url(#${p}hullShade)`} />
       <rect x="198" y="260" width="4" height="450" rx="2" fill="#fff" opacity="0.6" />
-
-      <rect x="190" y="460" width="100" height="40" fill="url(#nose)" />
-      <rect x="190" y="460" width="100" height="40" fill="url(#hullShade)" />
+      <rect x="190" y="460" width="100" height="40" fill={`url(#${p}nose)`} />
+      <rect x="190" y="460" width="100" height="40" fill={`url(#${p}hullShade)`} />
       <rect x="198" y="464" width="3" height="32" fill="#fff" opacity="0.45" />
 
       <line x1="210" y1="330" x2="270" y2="330" stroke="#94a3b8" strokeWidth="1" opacity="0.5" />
       <line x1="210" y1="620" x2="270" y2="620" stroke="#94a3b8" strokeWidth="1" opacity="0.5" />
       <line x1="210" y1="660" x2="270" y2="660" stroke="#94a3b8" strokeWidth="1" opacity="0.35" />
-
       <circle cx="210" cy="380" r="2" fill="#64748b" />
       <circle cx="270" cy="380" r="2" fill="#64748b" />
       <circle cx="210" cy="430" r="2" fill="#64748b" />
       <circle cx="270" cy="430" r="2" fill="#64748b" />
 
       <circle cx="240" cy="400" r="42" fill="#0b2c30" />
-      <circle cx="240" cy="400" r="36" fill="url(#glass)" />
+      <circle cx="240" cy="400" r="36" fill={`url(#${p}glass)`} />
       <circle cx="240" cy="400" r="36" stroke="#fff" strokeWidth="1.5" fill="none" opacity="0.4" />
       <ellipse cx="226" cy="385" rx="10" ry="6" fill="#fff" opacity="0.75" />
       <ellipse cx="255" cy="418" rx="4" ry="2" fill="#fff" opacity="0.4" />
 
       <rect x="186" y="712" width="108" height="14" rx="4" fill="#475569" />
-      <rect x="186" y="712" width="108" height="14" rx="4" fill="url(#hullShade)" />
-
-      <path d="M 202 726 L 196 760 L 284 760 L 278 726 Z" fill="url(#engine)" />
+      <rect x="186" y="712" width="108" height="14" rx="4" fill={`url(#${p}hullShade)`} />
+      <path d="M 202 726 L 196 760 L 284 760 L 278 726 Z" fill={`url(#${p}engine)`} />
       <ellipse cx="240" cy="760" rx="44" ry="6" fill="#0f172a" />
 
-      <path d="M 190 260 C 190 180 210 80 240 40 C 270 80 290 180 290 260 Z" fill="url(#nose)" />
-      <path d="M 205 255 C 207 180 220 90 240 55 C 235 100 225 200 222 255 Z" fill="url(#noseGloss)" />
+      <path d="M 190 260 C 190 180 210 80 240 40 C 270 80 290 180 290 260 Z" fill={`url(#${p}nose)`} />
+      <path d="M 205 255 C 207 180 220 90 240 55 C 235 100 225 200 222 255 Z" fill={`url(#${p}noseGloss)`} />
 
-      <text
-        x="240"
-        y="570"
-        textAnchor="middle"
-        fontFamily="ui-sans-serif, system-ui, sans-serif"
-        fontSize="14"
-        fontWeight="700"
-        fill="#475569"
-        opacity="0.6"
-      >
-        BMB-01
-      </text>
+      <text x="240" y="570" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="14" fontWeight="700" fill="#475569" opacity="0.6">BMB-01</text>
     </motion.svg>
   );
 }

@@ -110,8 +110,8 @@ function FeatureCard({ feature, index }: { feature: Feature; index: number }) {
   /* 3D tilt — card rotates to follow the cursor on hover */
   const x = useMotionValue(0);
   const y = useMotionValue(0);
-  const rotateX = useSpring(useTransform(y, [-0.5, 0.5], [8, -8]), { stiffness: 200, damping: 20 });
-  const rotateY = useSpring(useTransform(x, [-0.5, 0.5], [-8, 8]), { stiffness: 200, damping: 20 });
+  const rotateX = useSpring(useTransform(y, [-0.5, 0.5], [8, -8]), { stiffness: 150, damping: 25 });
+  const rotateY = useSpring(useTransform(x, [-0.5, 0.5], [-8, 8]), { stiffness: 150, damping: 25 });
 
   const handleMouse = (e: React.MouseEvent<HTMLElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -146,7 +146,7 @@ function FeatureCard({ feature, index }: { feature: Feature; index: number }) {
       onMouseMove={handleMouse}
       onMouseLeave={handleLeave}
       whileTap={{ scale: 0.97 }}
-      style={{ rotateX, rotateY, transformPerspective: 800 }}
+      style={{ rotateX, rotateY, transformPerspective: 800, willChange: 'transform' }}
       className={`group relative flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-xl md:rounded-3xl ${
         feature.span === 'lg' ? 'col-span-2 md:col-span-2' : ''
       }`}

@@ -13,7 +13,7 @@ export default function SettingsPage() {
             <h2 className="text-sm font-semibold text-slate-900">Agency profile</h2>
             <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
               <Input defaultValue="BoostMyBranding" />
-              <Input defaultValue="hello@boostmybranding.com" type="email" />
+              <Input defaultValue="contact@boostmybranding.com" type="email" />
             </div>
             <Button className="mt-4" size="sm">
               Save

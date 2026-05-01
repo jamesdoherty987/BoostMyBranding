@@ -45,7 +45,7 @@ const schema = z.object({
   STRIPE_PRICE_FULL: z.string().optional(),
 
   RESEND_API_KEY: z.string().optional(),
-  FROM_EMAIL: z.string().default('hello@boostmybranding.com'),
+  FROM_EMAIL: z.string().default('contact@boostmybranding.com'),
 
   CONTENTSTUDIO_API_KEY: z.string().optional(),
   CONTENTSTUDIO_WORKSPACE_ID: z.string().optional(),

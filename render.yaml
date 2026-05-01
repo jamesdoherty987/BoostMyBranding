@@ -84,7 +84,7 @@ services:
       - key: RESEND_API_KEY
         sync: false
       - key: FROM_EMAIL
-        value: hello@boostmybranding.com
+        value: contact@boostmybranding.com
       - key: CONTENTSTUDIO_API_KEY
         sync: false
       - key: CONTENTSTUDIO_WORKSPACE_ID

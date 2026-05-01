@@ -29,7 +29,7 @@ export function Footer() {
           <div>
             <div className="text-sm font-semibold text-slate-900">Company</div>
             <ul className="mt-3 space-y-2 text-sm text-slate-600">
-              <li><a href="mailto:hello@boostmybranding.com" className="hover:text-slate-900">Contact</a></li>
+              <li><a href="mailto:contact@boostmybranding.com" className="hover:text-slate-900">Contact</a></li>
               <li><Link href={PORTAL_URL} className="hover:text-slate-900">Client login</Link></li>
               <li><Link href={DASHBOARD_URL} className="hover:text-slate-900">Team login</Link></li>
             </ul>
@@ -52,8 +52,8 @@ export function Footer() {
         <div className="mt-10 flex flex-col items-start justify-between gap-3 border-t border-slate-200 pt-6 text-sm text-slate-500 md:flex-row md:items-center">
           <span>© {new Date().getFullYear()} BoostMyBranding. All rights reserved.</span>
           <span className="flex gap-4">
-            <Link href="/privacy" className="hover:text-slate-900">Privacy</Link>
-            <Link href="/terms" className="hover:text-slate-900">Terms</Link>
+            <a href="/privacy" className="hover:text-slate-900">Privacy</a>
+            <a href="/terms" className="hover:text-slate-900">Terms</a>
           </span>
         </div>
       </div>

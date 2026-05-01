@@ -25,7 +25,7 @@ const jsonLd = {
         'A dedicated social media management team for modern local businesses. We plan, write, and publish every post so your brand keeps showing up.',
       contactPoint: {
         '@type': 'ContactPoint',
-        email: 'hello@boostmybranding.com',
+        email: 'contact@boostmybranding.com',
         contactType: 'customer service',
       },
     },

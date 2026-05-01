@@ -1,17 +1,10 @@
 'use client';
 
 import { useRef, type RefObject } from 'react';
-import { motion, useMotionValue, useSpring, useTransform } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { SectionWrapper, Badge, AnimatedBeam } from '@boost/ui';
 import { Upload, PenLine, Send, CalendarCheck, type LucideIcon } from 'lucide-react';
 
-/**
- * How it works — vertical timeline with animated beams connecting each
- * step. Visually distinct from the feature card grid above.
- *
- * Desktop: horizontal timeline with beams flowing left-to-right.
- * Mobile: vertical timeline with a glowing line and staggered nodes.
- */
 interface Step {
   icon: LucideIcon;
   title: string;
@@ -76,29 +69,29 @@ export function Demo() {
           </p>
         </div>
 
-        {/* Timeline */}
         <div ref={containerRef} className="relative mt-10 md:mt-16">
-          {/* Animated beams connecting nodes */}
-          {nodeRefs.slice(0, -1).map((fromRef, i) => {
-            const nextStep = STEPS[i + 1];
-            if (!nextStep) return null;
-            return (
-              <AnimatedBeam
-                key={i}
-                containerRef={containerRef as RefObject<HTMLElement>}
-                fromRef={fromRef as RefObject<HTMLElement>}
-                toRef={nodeRefs[i + 1] as RefObject<HTMLElement>}
-                duration={3}
-                delay={i * 0.8}
-                pathColor="rgba(29,156,161,0.15)"
-                gradientStart={STEPS[i]!.accent}
-                gradientStop={nextStep.accent}
-                pathWidth={2}
-              />
-            );
-          })}
+          {/* Beams — desktop only to avoid scroll listeners on mobile */}
+          <div className="hidden md:block">
+            {nodeRefs.slice(0, -1).map((fromRef, i) => {
+              const nextStep = STEPS[i + 1];
+              if (!nextStep) return null;
+              return (
+                <AnimatedBeam
+                  key={i}
+                  containerRef={containerRef as RefObject<HTMLElement>}
+                  fromRef={fromRef as RefObject<HTMLElement>}
+                  toRef={nodeRefs[i + 1] as RefObject<HTMLElement>}
+                  duration={3}
+                  delay={i * 0.8}
+                  pathColor="rgba(29,156,161,0.15)"
+                  gradientStart={STEPS[i]!.accent}
+                  gradientStop={nextStep.accent}
+                  pathWidth={2}
+                />
+              );
+            })}
+          </div>
 
-          {/* Steps — vertical on mobile, horizontal on desktop */}
           <ol className="relative flex flex-col gap-8 md:flex-row md:gap-0 md:justify-between">
             {STEPS.map((s, i) => (
               <TimelineNode
@@ -129,22 +122,6 @@ function TimelineNode({
 }) {
   const Icon = step.icon;
 
-  /* 3D tilt on hover — follows cursor position within the card */
-  const x = useMotionValue(0);
-  const y = useMotionValue(0);
-  const rotateX = useSpring(useTransform(y, [-0.5, 0.5], [6, -6]), { stiffness: 200, damping: 20 });
-  const rotateY = useSpring(useTransform(x, [-0.5, 0.5], [-6, 6]), { stiffness: 200, damping: 20 });
-
-  const handleMouse = (e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    x.set((e.clientX - rect.left) / rect.width - 0.5);
-    y.set((e.clientY - rect.top) / rect.height - 0.5);
-  };
-  const handleLeave = () => {
-    x.set(0);
-    y.set(0);
-  };
-
   return (
     <motion.li
       initial={{ opacity: 0, y: 24 }}
@@ -153,7 +130,6 @@ function TimelineNode({
       transition={{ duration: 0.6, delay: index * 0.12 }}
       className="relative flex items-start gap-4 md:flex-1 md:flex-col md:items-center md:text-center"
     >
-      {/* Mobile: vertical connecting line */}
       {!isLast && (
         <div
           aria-hidden
@@ -164,28 +140,20 @@ function TimelineNode({
         />
       )}
 
-      {/* Node circle — the ref that AnimatedBeam connects to */}
       <div
         ref={nodeRef}
-        className="relative z-10 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-white shadow-lg md:h-14 md:w-14"
+        className="relative z-10 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-white shadow-lg transition-transform duration-200 hover:scale-110 md:h-14 md:w-14"
         style={{
           background: `linear-gradient(135deg, ${step.accent}, #1D9CA1)`,
         }}
       >
         <Icon className="h-4 w-4 md:h-6 md:w-6" />
-        {/* Step number badge */}
         <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-white text-[9px] font-bold text-slate-900 shadow-sm md:h-5 md:w-5 md:text-[10px]">
           {index + 1}
         </span>
       </div>
 
-      {/* Content card with 3D tilt */}
-      <motion.div
-        onMouseMove={handleMouse}
-        onMouseLeave={handleLeave}
-        style={{ rotateX, rotateY, transformPerspective: 600 }}
-        className="min-w-0 flex-1 md:mt-4"
-      >
+      <div className="min-w-0 flex-1 md:mt-4">
         <div className="flex items-center gap-1.5 md:justify-center">
           <span
             className={`rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider md:px-2 md:text-[10px] ${
@@ -203,7 +171,7 @@ function TimelineNode({
         <p className="mt-0.5 text-xs text-slate-600 md:mt-1 md:text-sm">
           {step.body}
         </p>
-      </motion.div>
+      </div>
     </motion.li>
   );
 }

@@ -1,6 +1,7 @@
 'use client';
 
-import { motion, useMotionValue, useSpring, useTransform } from 'framer-motion';
+import { motion } from 'framer-motion';
+import { useRef, useCallback } from 'react';
 import { SectionWrapper } from '@boost/ui';
 import {
   MessageCircle,
@@ -106,22 +107,26 @@ export function Features() {
 
 function FeatureCard({ feature, index }: { feature: Feature; index: number }) {
   const Icon = feature.icon;
+  const cardRef = useRef<HTMLElement>(null);
 
-  /* 3D tilt — card rotates to follow the cursor on hover */
-  const x = useMotionValue(0);
-  const y = useMotionValue(0);
-  const rotateX = useSpring(useTransform(y, [-0.5, 0.5], [8, -8]), { stiffness: 150, damping: 25 });
-  const rotateY = useSpring(useTransform(x, [-0.5, 0.5], [-8, 8]), { stiffness: 150, damping: 25 });
+  /*
+   * CSS-powered 3D tilt — sets CSS custom properties on mousemove.
+   * The actual rotation is handled by a CSS transition on the element,
+   * which the browser composites on the GPU. No JS animation loop.
+   */
+  const handleMouse = useCallback((e: React.MouseEvent<HTMLElement>) => {
+    const el = cardRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const px = (e.clientX - rect.left) / rect.width - 0.5;
+    const py = (e.clientY - rect.top) / rect.height - 0.5;
+    el.style.transform = `perspective(800px) rotateX(${py * -8}deg) rotateY(${px * 8}deg)`;
+  }, []);
 
-  const handleMouse = (e: React.MouseEvent<HTMLElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    x.set((e.clientX - rect.left) / rect.width - 0.5);
-    y.set((e.clientY - rect.top) / rect.height - 0.5);
-  };
-  const handleLeave = () => {
-    x.set(0);
-    y.set(0);
-  };
+  const handleLeave = useCallback(() => {
+    const el = cardRef.current;
+    if (el) el.style.transform = 'perspective(800px) rotateX(0deg) rotateY(0deg)';
+  }, []);
 
   const accentBg = {
     teal: 'linear-gradient(135deg, #1D9CA1 0%, #48D886 100%)',
@@ -139,6 +144,7 @@ function FeatureCard({ feature, index }: { feature: Feature; index: number }) {
 
   return (
     <motion.article
+      ref={cardRef}
       initial={{ opacity: 0, y: 20 }}
       whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true, margin: '-60px' }}
@@ -146,8 +152,8 @@ function FeatureCard({ feature, index }: { feature: Feature; index: number }) {
       onMouseMove={handleMouse}
       onMouseLeave={handleLeave}
       whileTap={{ scale: 0.97 }}
-      style={{ rotateX, rotateY, transformPerspective: 800, willChange: 'transform' }}
-      className={`group relative flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-xl md:rounded-3xl ${
+      style={{ willChange: 'transform', transition: 'transform 0.15s ease-out' }}
+      className={`group relative flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm hover:shadow-xl md:rounded-3xl ${
         feature.span === 'lg' ? 'col-span-2 md:col-span-2' : ''
       }`}
     >

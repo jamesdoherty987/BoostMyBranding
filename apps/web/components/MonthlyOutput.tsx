@@ -66,7 +66,7 @@ export function MonthlyOutput() {
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true, margin: '-60px' }}
             transition={{ duration: 0.55 }}
-            className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur-xl md:rounded-3xl md:p-8"
+            className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur-sm md:rounded-3xl md:p-8"
           >
             <div className="text-[10px] font-semibold uppercase tracking-widest text-[#48D886] md:text-xs">
               Ships
@@ -81,12 +81,8 @@ export function MonthlyOutput() {
 
             <div className="mt-3 hidden grid-cols-6 gap-1.5 md:mt-6 md:grid">
               {Array.from({ length: 30 }).map((_, i) => (
-                <motion.div
+                <div
                   key={i}
-                  initial={{ opacity: 0, scale: 0.8 }}
-                  whileInView={{ opacity: 1, scale: 1 }}
-                  viewport={{ once: true }}
-                  transition={{ delay: i * 0.015, duration: 0.3 }}
                   className="aspect-square rounded"
                   style={{
                     background: `linear-gradient(135deg, ${
@@ -104,7 +100,7 @@ export function MonthlyOutput() {
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true, margin: '-60px' }}
             transition={{ duration: 0.55, delay: 0.1 }}
-            className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur-xl md:rounded-3xl md:p-8"
+            className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur-sm md:rounded-3xl md:p-8"
           >
             <div className="text-[10px] font-semibold uppercase tracking-widest text-[#1D9CA1] md:text-xs">
               Published to
@@ -141,7 +137,7 @@ export function MonthlyOutput() {
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true, margin: '-60px' }}
             transition={{ duration: 0.55, delay: 0.2 }}
-            className="relative col-span-2 overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur-xl md:col-span-1 md:rounded-3xl md:p-8"
+            className="relative col-span-2 overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur-sm md:col-span-1 md:rounded-3xl md:p-8"
           >
             <div className="flex items-center gap-4 md:block">
               <div>

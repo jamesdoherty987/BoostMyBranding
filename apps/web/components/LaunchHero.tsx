@@ -90,7 +90,7 @@ export function LaunchHero() {
               className="absolute inset-0 z-[5] md:hidden"
             />
             <Particles
-              quantity={140}
+              quantity={90}
               color={['#1D9CA1', '#48D886', '#FFEC3D']}
               speed={1.8}
               maxSize={2.8}
@@ -186,7 +186,7 @@ export function LaunchHero() {
             scale: reduced ? 1 : mobileRocketScale,
             opacity: reduced ? 1 : mobileRocketOpacity,
             filter:
-              'drop-shadow(0 16px 24px rgba(15,23,42,0.20)) drop-shadow(0 6px 12px rgba(29,156,161,0.20))',
+              'drop-shadow(0 12px 20px rgba(15,23,42,0.20))',
           }}
         >
           <RocketWithFlame
@@ -208,7 +208,7 @@ export function LaunchHero() {
             scale: reduced ? 1 : rocketScale,
             willChange: 'transform',
             filter:
-              'drop-shadow(0 20px 30px rgba(15,23,42,0.22)) drop-shadow(0 8px 16px rgba(29,156,161,0.22))',
+              'drop-shadow(0 16px 24px rgba(15,23,42,0.25))',
           }}
         >
           <RocketWithFlame

@@ -1,7 +1,7 @@
 {
   "name": "BoostMyBranding — Client Portal",
   "short_name": "BMB Portal",
-  "description": "Upload photos, approve posts, chat with your team.",
+  "description": "Your social media dashboard. Chat with your team, track what's live.",
   "start_url": "/dashboard",
   "display": "standalone",
   "background_color": "#F5F7FA",

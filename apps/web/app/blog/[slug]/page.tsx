@@ -129,14 +129,14 @@ export default async function BlogPostPage({
             Want this handled for you?
           </h3>
           <p className="mt-2 text-sm text-slate-600">
-            We plan, write, and publish your social media every month. Start a free trial and
-            see your first content plan within a week.
+            We plan, write, and publish your social media every month. Get started and
+            see your first content live within a week.
           </p>
           <Link
             href="/signup"
             className="mt-4 inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-[#1D9CA1] via-[#48D886] to-[#FFEC3D] px-6 py-3 text-sm font-semibold text-white shadow-sm transition-transform hover:scale-[1.02]"
           >
-            Start free trial
+            Get started
           </Link>
         </div>
 

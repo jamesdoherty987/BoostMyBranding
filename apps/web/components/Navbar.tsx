@@ -71,7 +71,7 @@ export function Navbar() {
             </Button>
           </Link>
           <Link href="/signup">
-            <Button size="sm">Start free trial</Button>
+            <Button size="sm">Get started</Button>
           </Link>
         </div>
         <button
@@ -114,7 +114,7 @@ export function Navbar() {
               </Link>
               <Link href="/signup" className="flex-1" onClick={() => setOpen(false)}>
                 <Button size="sm" className="w-full">
-                  Start free trial
+                  Get started
                 </Button>
               </Link>
             </div>

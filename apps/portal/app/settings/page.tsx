@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react';
 import useSWR from 'swr';
 import { Button, Input, toast, Spinner, Badge, Dialog, EmptyState } from '@boost/ui';
-import { Check, Instagram, Facebook, Linkedin, Music2, Twitter, LogOut } from 'lucide-react';
+import { Check, Instagram, Facebook, Linkedin, Music2, Twitter, LogOut, Download } from 'lucide-react';
+import Link from 'next/link';
 import { Shell } from '@/components/Shell';
 import { api } from '@/lib/api';
 import { handlePortalAuthError, ALLOW_MOCK_FALLBACK } from '@/lib/auth';
@@ -172,7 +173,20 @@ export default function SettingsPage() {
         </Button>
       </div>
 
-      <div className="mt-6 flex items-center gap-2 rounded-2xl bg-slate-100 p-3">
+      <Link
+        href="/install"
+        className="mt-4 flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 transition-colors hover:bg-slate-50"
+      >
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#1D9CA1]/10 text-[#1D9CA1]">
+          <Download className="h-5 w-5" />
+        </div>
+        <div className="flex-1">
+          <div className="text-sm font-semibold text-slate-900">Install the app</div>
+          <div className="text-xs text-slate-500">Add to your home screen for quick access</div>
+        </div>
+      </Link>
+
+      <div className="mt-4 flex items-center gap-2 rounded-2xl bg-slate-100 p-3">
         <Badge tone="brand">Pro tip</Badge>
         <p className="text-xs text-slate-600">
           Upload photos weekly for the freshest content. Quality &gt; quantity.

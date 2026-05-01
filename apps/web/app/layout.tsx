@@ -86,10 +86,15 @@ export const metadata: Metadata = {
   },
 };
 
+import { ContactButton } from '@/components/ContactButton';
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={inter.variable}>
-      <body className="bg-white text-slate-900 antialiased">{children}</body>
+      <body className="bg-white text-slate-900 antialiased">
+        {children}
+        <ContactButton />
+      </body>
     </html>
   );
 }

@@ -13,12 +13,17 @@ import {
 
 /**
  * Features grid. Copy is written like a boutique agency talking about
- * craft and quality, not like an AI tool talking about automation. The
- * internal tooling is our advantage — the pitch is the work it produces.
+ * craft and quality, not like an AI tool talking about automation.
+ *
+ * Mobile: 2-col grid, compact cards with icon + title + a small animated
+ * accent element that gives each card personality (emoji, color pulse, etc).
+ * Desktop: full illustrations + body text.
  */
 interface Feature {
   icon: LucideIcon;
   title: string;
+  /** Short label shown on mobile under the title */
+  tag: string;
   body: string;
   accent: 'teal' | 'green' | 'yellow' | 'mix';
   art: 'voice' | 'photos' | 'calendar' | 'chat' | 'website';
@@ -29,6 +34,7 @@ const FEATURES: Feature[] = [
   {
     icon: Sparkles,
     title: 'Posts that sound like you.',
+    tag: 'Your voice, not ours',
     body:
       "We study your site, your tone, and the way you actually talk to customers. Every caption lands in your voice, no generic 'Happy Monday!' filler.",
     accent: 'teal',
@@ -38,6 +44,7 @@ const FEATURES: Feature[] = [
   {
     icon: Camera,
     title: 'Photos that stop the scroll.',
+    tag: 'Magazine-quality feed',
     body:
       "Send us phone shots. We pick the strong ones, clean them up, and size them for every platform. Feeds that look like a magazine, not a group chat.",
     accent: 'yellow',
@@ -46,6 +53,7 @@ const FEATURES: Feature[] = [
   {
     icon: CalendarClock,
     title: '30 posts, planned every month.',
+    tag: 'Never miss a day',
     body:
       "A full calendar goes out monthly, spaced across the right days and platforms. You see it all before it ships.",
     accent: 'green',
@@ -54,6 +62,7 @@ const FEATURES: Feature[] = [
   {
     icon: MessageCircle,
     title: 'A team one tap away.',
+    tag: 'Reply within the hour',
     body:
       "Voice notes, screenshots, 'can we swap that photo?' Message us in the app and it lands with your account manager. Usually a reply within the hour.",
     accent: 'mix',
@@ -62,12 +71,20 @@ const FEATURES: Feature[] = [
   {
     icon: Globe,
     title: 'A website that moves with you.',
+    tag: 'Live same-day updates',
     body:
       "Fast, mobile-first, built around your brand. New menu, new hours, new service - tell us and it's live that day.",
     accent: 'teal',
     art: 'website',
   },
 ];
+
+const ACCENT_COLORS = {
+  teal: '#1D9CA1',
+  green: '#48D886',
+  yellow: '#FFEC3D',
+  mix: '#1D9CA1',
+} as const;
 
 export function Features() {
   return (
@@ -96,6 +113,7 @@ export function Features() {
 
 function FeatureCard({ feature, index }: { feature: Feature; index: number }) {
   const Icon = feature.icon;
+  const color = ACCENT_COLORS[feature.accent];
 
   const accentBg = {
     teal: 'linear-gradient(135deg, #1D9CA1 0%, #48D886 100%)',
@@ -118,32 +136,59 @@ function FeatureCard({ feature, index }: { feature: Feature; index: number }) {
       viewport={{ once: true, margin: '-60px' }}
       transition={{ duration: 0.55, delay: index * 0.06 }}
       whileHover={{ y: -4 }}
-      className={`group relative flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-xl md:rounded-3xl md:p-7 ${
+      className={`group relative flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-xl md:rounded-3xl ${
         feature.span === 'lg' ? 'col-span-2 md:col-span-2' : ''
       }`}
-      style={{ minHeight: undefined }}
     >
-      <div
+      {/*
+        Animated accent bar — top edge of the card. Pulses gently to give
+        each card a living feel, especially on mobile where the illustrations
+        are hidden.
+      */}
+      <motion.div
         aria-hidden
-        className="pointer-events-none absolute inset-0 opacity-60 transition-opacity duration-500 group-hover:opacity-100"
-        style={{ background: accentBgSoft }}
+        className="h-1 w-full md:h-1.5"
+        style={{ background: accentBg }}
+        animate={{ opacity: [0.7, 1, 0.7] }}
+        transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut', delay: index * 0.4 }}
       />
 
-      <div
-        className="relative inline-flex h-9 w-9 items-center justify-center rounded-xl text-white shadow-lg md:h-11 md:w-11 md:rounded-2xl"
-        style={{ background: accentBg }}
-      >
-        <Icon className="h-4 w-4 md:h-5 md:w-5" />
-      </div>
+      <div className="flex flex-1 flex-col p-4 md:p-7">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 opacity-60 transition-opacity duration-500 group-hover:opacity-100"
+          style={{ background: accentBgSoft }}
+        />
 
-      {/* Illustration — hidden on mobile for compact layout */}
-      <div className="relative mt-5 hidden min-h-[120px] items-start md:flex">
-        <FeatureIllustration kind={feature.art} />
-      </div>
+        <div className="relative flex items-center gap-2.5">
+          <div
+            className="inline-flex h-9 w-9 items-center justify-center rounded-xl text-white shadow-lg md:h-11 md:w-11 md:rounded-2xl"
+            style={{ background: accentBg }}
+          >
+            <Icon className="h-4 w-4 md:h-5 md:w-5" />
+          </div>
+          {/* Animated dot — mobile personality touch */}
+          <motion.span
+            aria-hidden
+            className="h-2 w-2 rounded-full md:hidden"
+            style={{ backgroundColor: color }}
+            animate={{ scale: [1, 1.5, 1], opacity: [0.5, 1, 0.5] }}
+            transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut', delay: index * 0.3 }}
+          />
+        </div>
 
-      <div className="relative mt-3 md:mt-auto md:pt-6">
-        <h3 className="text-sm font-bold text-slate-900 md:text-xl">{feature.title}</h3>
-        <p className="mt-1 hidden text-sm text-slate-600 md:block">{feature.body}</p>
+        {/* Illustration — desktop only */}
+        <div className="relative mt-5 hidden min-h-[120px] items-start md:flex">
+          <FeatureIllustration kind={feature.art} />
+        </div>
+
+        <div className="relative mt-3 md:mt-auto md:pt-6">
+          <h3 className="text-sm font-bold text-slate-900 md:text-xl">{feature.title}</h3>
+          {/* Mobile: short tag instead of full body */}
+          <p className="mt-1 text-[11px] text-slate-500 md:hidden">{feature.tag}</p>
+          {/* Desktop: full body */}
+          <p className="mt-2 hidden text-sm text-slate-600 md:block">{feature.body}</p>
+        </div>
       </div>
     </motion.article>
   );
@@ -166,7 +211,6 @@ function FeatureIllustration({ kind }: { kind: Feature['art'] }) {
   }
 }
 
-/** Voice — style tags plus a sample draft, framed as a brief not a model. */
 function VoiceArt() {
   const tokens = [
     { text: 'warm', color: '#48D886' },

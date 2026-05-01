@@ -7,22 +7,15 @@ import { Button, Particles, ShimmerButton } from '@boost/ui';
 import { ArrowRight, Zap, CheckCircle2 } from 'lucide-react';
 
 /**
- * Hero with a realistic cutout rocket that sits low on the page at rest,
- * then blasts upward fast on scroll. The flame is composed of four
- * independently-animated layers (halo, mid body, inner core, sparks) each
- * on a different frequency so the fire looks genuinely chaotic and alive.
+ * Hero with a realistic cutout rocket.
  *
- * The headline/subhead are rendered with NO initial opacity animation so
- * they're visible in the very first paint after SSR. The only motion on
- * the copy is the scroll-linked fade once the user starts scrolling.
+ * Desktop (md+): sticky 120vh parallax, rocket absolutely positioned right,
+ * driven by scroll transforms.
  *
- * Layout strategy:
- * - Desktop (md+): the original sticky 120vh parallax with the rocket
- *   absolutely positioned on the right side.
- * - Mobile: copy stacks above a compact rocket inside a flex column. The
- *   sticky container still clips any overflow so tall phones look clean.
- *   Rocket size is tuned to fit alongside the copy within 100vh on
- *   common phones (iPhone SE → 13 Pro Max range).
+ * Mobile: compact layout — copy stacked above a centered rocket that sits
+ * directly under the text. On scroll the rocket flies upward over the copy
+ * (z-index above the text) creating a "launch" feel. No forced 100vh so
+ * there's no empty space — the hero is only as tall as its content.
  */
 export function LaunchHero() {
   const ref = useRef<HTMLDivElement>(null);
@@ -40,13 +33,14 @@ export function LaunchHero() {
   const copyY = useTransform(scrollYProgress, [0, 1], ['0px', '-80px']);
 
   /*
-   * Mobile rocket scroll: track the whole page so the rocket flies upward
-   * over the content as the user scrolls past the hero. It starts at its
-   * inline position and accelerates up and off-screen.
+   * Mobile rocket: flies upward over the text on scroll. Starts at 0
+   * (its natural position under the copy) and translates up over the
+   * headline. Fades out so it doesn't linger forever.
    */
   const { scrollY } = useScroll();
-  const mobileRocketY = useTransform(scrollY, [0, 600], [0, -800]);
-  const mobileRocketOpacity = useTransform(scrollY, [0, 200, 500], [1, 1, 0]);
+  const mobileRocketY = useTransform(scrollY, [0, 500], [0, -700]);
+  const mobileRocketScale = useTransform(scrollY, [0, 150, 500], [1, 1.05, 0.8]);
+  const mobileRocketOpacity = useTransform(scrollY, [0, 250, 550], [1, 1, 0]);
 
   return (
     <section
@@ -55,7 +49,11 @@ export function LaunchHero() {
       style={reduced ? { height: 'auto' } : undefined}
       aria-label="BoostMyBranding launch hero"
     >
-      <div className="flex min-h-[100svh] w-full flex-col overflow-hidden md:sticky md:top-0 md:h-screen">
+      {/*
+        Desktop: sticky full-screen container.
+        Mobile: normal flow, no min-height, no overflow-hidden (rocket escapes upward).
+      */}
+      <div className="relative flex w-full flex-col md:sticky md:top-0 md:h-screen md:overflow-hidden">
         {/* Light brand backdrop */}
         <div
           aria-hidden
@@ -66,12 +64,7 @@ export function LaunchHero() {
           }}
         />
 
-        {/*
-          Grid texture. Lines use an opaque slate at a very low alpha so the
-          grid reads as a faint architectural texture, not a strong mesh. A
-          radial mask fades it out near the edges so it never competes with
-          the headline copy above.
-        */}
+        {/* Grid texture */}
         <div
           aria-hidden
           className="absolute inset-0 z-0"
@@ -86,7 +79,7 @@ export function LaunchHero() {
           }}
         />
 
-        {/* Particles — fewer + smaller on mobile for perf and clarity */}
+        {/* Particles */}
         {!reduced ? (
           <>
             <Particles
@@ -106,53 +99,46 @@ export function LaunchHero() {
           </>
         ) : null}
 
-        {/*
-          Copy + rocket layer. On mobile the rocket sits inline beside the
-          headline for a compact, integrated hero. On desktop the original
-          centered-copy + absolute-rocket layout is preserved.
-        */}
+        {/* Copy */}
         <motion.div
-          className="relative z-20 flex flex-col items-center px-5 pt-20 text-center sm:px-4 sm:pt-24 md:h-full md:justify-center md:pt-0"
+          className="relative z-20 flex flex-col items-center px-5 pt-24 text-center sm:px-4 sm:pt-28 md:h-full md:justify-center md:pt-0"
           style={reduced ? undefined : { opacity: copyOpacity, y: copyY }}
         >
-          {/* Mobile: headline row */}
-          <div className="md:block">
-            <h1 className="max-w-5xl text-balance text-[28px] font-bold leading-[1.05] tracking-tight text-slate-900 sm:text-5xl md:mx-auto md:text-7xl lg:text-[92px] lg:leading-[0.95]">
-              Launch your brand.
-              <br />
-              <span className="relative inline-block">
-                <span
-                  className="bg-clip-text text-transparent"
+          <h1 className="mx-auto max-w-5xl text-balance text-[28px] font-bold leading-[1.05] tracking-tight text-slate-900 sm:text-5xl md:text-7xl lg:text-[92px] lg:leading-[0.95]">
+            Launch your brand.
+            <br />
+            <span className="relative inline-block">
+              <span
+                className="bg-clip-text text-transparent"
+                style={{
+                  backgroundImage:
+                    'linear-gradient(90deg, #1D9CA1 0%, #48D886 50%, #FFEC3D 100%)',
+                }}
+              >
+                Watch it fly.
+              </span>
+              {!reduced ? (
+                <motion.span
+                  initial={{ scaleX: 0 }}
+                  animate={{ scaleX: 1 }}
+                  transition={{ duration: 1.2, delay: 0.3, ease: [0.22, 1, 0.36, 1] }}
+                  className="absolute -bottom-1 left-0 right-0 h-[3px] origin-left rounded-full sm:-bottom-1.5 sm:h-1 md:-bottom-2 md:h-1.5"
                   style={{
-                    backgroundImage:
+                    background:
                       'linear-gradient(90deg, #1D9CA1 0%, #48D886 50%, #FFEC3D 100%)',
                   }}
-                >
-                  Watch it fly.
-                </span>
-                {!reduced ? (
-                  <motion.span
-                    initial={{ scaleX: 0 }}
-                    animate={{ scaleX: 1 }}
-                    transition={{ duration: 1.2, delay: 0.3, ease: [0.22, 1, 0.36, 1] }}
-                    className="absolute -bottom-1 left-0 right-0 h-[3px] origin-left rounded-full sm:-bottom-1.5 sm:h-1 md:-bottom-2 md:h-1.5"
-                    style={{
-                      background:
-                        'linear-gradient(90deg, #1D9CA1 0%, #48D886 50%, #FFEC3D 100%)',
-                    }}
-                  />
-                ) : (
-                  <span
-                    className="absolute -bottom-1 left-0 right-0 h-[3px] rounded-full sm:-bottom-1.5 sm:h-1 md:-bottom-2 md:h-1.5"
-                    style={{
-                      background:
-                        'linear-gradient(90deg, #1D9CA1 0%, #48D886 50%, #FFEC3D 100%)',
-                    }}
-                  />
-                )}
-              </span>
-            </h1>
-          </div>
+                />
+              ) : (
+                <span
+                  className="absolute -bottom-1 left-0 right-0 h-[3px] rounded-full sm:-bottom-1.5 sm:h-1 md:-bottom-2 md:h-1.5"
+                  style={{
+                    background:
+                      'linear-gradient(90deg, #1D9CA1 0%, #48D886 50%, #FFEC3D 100%)',
+                  }}
+                />
+              )}
+            </span>
+          </h1>
 
           <p className="mx-auto mt-3 max-w-2xl text-balance text-[14px] leading-relaxed text-slate-600 sm:mt-5 sm:text-lg md:mt-6 md:text-xl">
             Done-for-you social media that looks professional. We plan, write, and
@@ -188,8 +174,30 @@ export function LaunchHero() {
         </motion.div>
 
         {/*
-          Rocket — desktop only: absolutely positioned on the right, driven
-          by scroll. The mobile rocket is now inline in the headline row above.
+          Mobile rocket — centered directly under the copy, in normal flow.
+          z-30 so it flies OVER the text when scrolling up. The container
+          has no overflow-hidden on mobile so the rocket can escape upward.
+        */}
+        <motion.div
+          aria-hidden
+          className="relative z-30 mt-2 flex justify-center pb-6 md:hidden"
+          style={{
+            y: reduced ? 0 : mobileRocketY,
+            scale: reduced ? 1 : mobileRocketScale,
+            opacity: reduced ? 1 : mobileRocketOpacity,
+            filter:
+              'drop-shadow(0 16px 24px rgba(15,23,42,0.20)) drop-shadow(0 6px 12px rgba(29,156,161,0.20))',
+          }}
+        >
+          <RocketWithFlame
+            className="h-[200px] w-auto sm:h-[260px]"
+            reduced={!!reduced}
+          />
+        </motion.div>
+
+        {/*
+          Desktop rocket — absolutely positioned on the right, driven by
+          scroll parallax. Hidden on mobile.
         */}
         <motion.div
           aria-hidden
@@ -207,8 +215,7 @@ export function LaunchHero() {
           />
         </motion.div>
 
-        {/* Scroll hint — desktop only. On mobile the content scrolls normally
-            so the hint would be misleading. */}
+        {/* Scroll hint — desktop only */}
         <motion.div
           aria-hidden
           className="absolute inset-x-0 bottom-6 z-20 hidden justify-center text-xs font-medium tracking-widest text-slate-500 md:flex"
@@ -228,31 +235,10 @@ export function LaunchHero() {
           </div>
         </motion.div>
       </div>
-
-      {/*
-        Mobile rocket overlay — lives outside the overflow-hidden container
-        so it can fly upward over the page content on scroll. Absolutely
-        positioned within the section, starting at the top-right of the hero,
-        then translating upward as the user scrolls — flying over the words.
-      */}
-      <motion.div
-        aria-hidden
-        className="pointer-events-none absolute right-3 top-16 z-30 sm:right-6 sm:top-20 md:hidden"
-        style={{
-          y: reduced ? 0 : mobileRocketY,
-          opacity: reduced ? 1 : mobileRocketOpacity,
-          filter:
-            'drop-shadow(0 12px 20px rgba(15,23,42,0.18)) drop-shadow(0 4px 10px rgba(29,156,161,0.18))',
-        }}
-      >
-        <RocketWithFlame
-          className="h-[130px] w-auto sm:h-[170px]"
-          reduced={!!reduced}
-        />
-      </motion.div>
     </section>
   );
 }
+
 
 /**
  * Inline rocket SVG. The flame uses `feTurbulence` + `feDisplacementMap`

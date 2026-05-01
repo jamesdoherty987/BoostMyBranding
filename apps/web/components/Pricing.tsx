@@ -83,7 +83,8 @@ export function Pricing() {
           </p>
         </div>
 
-        <div className="mt-8 grid grid-cols-2 gap-3 md:mt-14 md:grid-cols-3 md:gap-6">
+        {/* All three cards equal width — single column on mobile, 3-col on desktop */}
+        <div className="mt-8 grid grid-cols-1 gap-4 md:mt-14 md:grid-cols-3 md:gap-6">
           {tiers.map((t, i) => (
             <motion.div
               key={t.id}
@@ -91,9 +92,9 @@ export function Pricing() {
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true, margin: '-80px' }}
               transition={{ duration: 0.6, delay: i * 0.08 }}
-              className={`relative flex flex-col rounded-2xl border p-4 md:rounded-3xl md:p-8 ${
+              className={`relative flex flex-col rounded-2xl border p-5 md:rounded-3xl md:p-8 ${
                 t.highlight
-                  ? 'col-span-2 border-transparent bg-slate-900 text-white shadow-2xl md:col-span-1 md:scale-[1.04]'
+                  ? 'border-transparent bg-slate-900 text-white shadow-2xl md:scale-[1.04]'
                   : 'border-slate-200 bg-white'
               }`}
             >
@@ -103,32 +104,40 @@ export function Pricing() {
                   Most popular
                 </div>
               ) : null}
-              <h3 className={`text-base font-semibold md:text-xl ${t.highlight ? 'text-white' : 'text-slate-900'}`}>
-                {t.name}
-              </h3>
-              <p className={`mt-1 hidden text-sm md:mt-2 md:block ${t.highlight ? 'text-white/70' : 'text-slate-600'}`}>
-                {t.description}
-              </p>
-              <div className="mt-3 flex items-baseline gap-1 md:mt-6">
-                <span className="text-3xl font-bold md:text-5xl">€{t.price}</span>
-                <span className={`text-xs md:text-sm ${t.highlight ? 'text-white/70' : 'text-slate-500'}`}>
-                  {t.suffix}
-                </span>
-              </div>
-              {t.setup ? (
-                <div className={`mt-0.5 text-[11px] md:mt-1 md:text-xs ${t.highlight ? 'text-white/70' : 'text-slate-500'}`}>
-                  + €{t.setup} setup
+
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className={`text-lg font-semibold md:text-xl ${t.highlight ? 'text-white' : 'text-slate-900'}`}>
+                    {t.name}
+                  </h3>
+                  <p className={`mt-1 text-xs md:text-sm ${t.highlight ? 'text-white/70' : 'text-slate-600'}`}>
+                    {t.description}
+                  </p>
                 </div>
-              ) : null}
-              <ul className="mt-3 flex-1 space-y-2 md:mt-6 md:space-y-3">
+                <div className="shrink-0 text-right">
+                  <div className="flex items-baseline gap-0.5">
+                    <span className="text-3xl font-bold md:text-5xl">€{t.price}</span>
+                    <span className={`text-xs md:text-sm ${t.highlight ? 'text-white/70' : 'text-slate-500'}`}>
+                      {t.suffix}
+                    </span>
+                  </div>
+                  {t.setup ? (
+                    <div className={`mt-0.5 text-[11px] md:text-xs ${t.highlight ? 'text-white/70' : 'text-slate-500'}`}>
+                      + €{t.setup} setup
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+
+              <ul className="mt-4 flex-1 space-y-2 md:mt-6 md:space-y-3">
                 {t.features.map((f) => (
-                  <li key={f} className="flex items-start gap-1.5 text-xs md:gap-2 md:text-sm">
+                  <li key={f} className="flex items-start gap-2 text-xs md:text-sm">
                     <Check className={`mt-0.5 h-3.5 w-3.5 shrink-0 md:h-4 md:w-4 ${t.highlight ? 'text-[#48D886]' : 'text-[#1D9CA1]'}`} />
                     <span>{f}</span>
                   </li>
                 ))}
               </ul>
-              <Link href={`/signup?plan=${t.id}`} className="mt-4 block md:mt-8">
+              <Link href={`/signup?plan=${t.id}`} className="mt-5 block md:mt-8">
                 <Button
                   variant={t.highlight ? 'primary' : 'outline'}
                   size="lg"

@@ -1,6 +1,6 @@
 'use client';
 
-import { motion } from 'framer-motion';
+import { motion, useMotionValue, useSpring, useTransform } from 'framer-motion';
 import { SectionWrapper } from '@boost/ui';
 import {
   MessageCircle,
@@ -107,6 +107,22 @@ export function Features() {
 function FeatureCard({ feature, index }: { feature: Feature; index: number }) {
   const Icon = feature.icon;
 
+  /* 3D tilt — card rotates to follow the cursor on hover */
+  const x = useMotionValue(0);
+  const y = useMotionValue(0);
+  const rotateX = useSpring(useTransform(y, [-0.5, 0.5], [8, -8]), { stiffness: 200, damping: 20 });
+  const rotateY = useSpring(useTransform(x, [-0.5, 0.5], [-8, 8]), { stiffness: 200, damping: 20 });
+
+  const handleMouse = (e: React.MouseEvent<HTMLElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    x.set((e.clientX - rect.left) / rect.width - 0.5);
+    y.set((e.clientY - rect.top) / rect.height - 0.5);
+  };
+  const handleLeave = () => {
+    x.set(0);
+    y.set(0);
+  };
+
   const accentBg = {
     teal: 'linear-gradient(135deg, #1D9CA1 0%, #48D886 100%)',
     green: 'linear-gradient(135deg, #48D886 0%, #1D9CA1 100%)',
@@ -127,8 +143,10 @@ function FeatureCard({ feature, index }: { feature: Feature; index: number }) {
       whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true, margin: '-60px' }}
       transition={{ duration: 0.55, delay: index * 0.06 }}
-      whileHover={{ y: -4 }}
-      whileTap={{ scale: 0.97, rotate: -1 }}
+      onMouseMove={handleMouse}
+      onMouseLeave={handleLeave}
+      whileTap={{ scale: 0.97 }}
+      style={{ rotateX, rotateY, transformPerspective: 800 }}
       className={`group relative flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-xl md:rounded-3xl ${
         feature.span === 'lg' ? 'col-span-2 md:col-span-2' : ''
       }`}

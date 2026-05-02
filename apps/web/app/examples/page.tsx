@@ -239,7 +239,7 @@ function BookedForYouSite() {
           screenshotMobile={SCREENSHOT_MOBILE}
         />
 
-        <div className="border-t border-slate-100 p-6 md:p-10">
+        <div className="hidden border-t border-slate-100 p-6 md:block md:p-10">
           <div className="flex flex-col items-start justify-between gap-4 rounded-2xl bg-slate-50 p-5 md:flex-row md:items-center">
             <div>
               <div className="text-xs font-semibold uppercase tracking-widest text-indigo-600">

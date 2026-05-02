@@ -342,7 +342,6 @@ function LiveSiteEmbed({
         title="bookedforyou.ie live preview"
         loading="lazy"
         referrerPolicy="no-referrer-when-downgrade"
-        sandbox="allow-scripts allow-same-origin allow-forms"
         onLoad={() => {
           setIframeLoaded(true);
           if (timeoutRef.current) clearTimeout(timeoutRef.current);

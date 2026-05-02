@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Navbar } from '@/components/Navbar';
@@ -23,9 +23,6 @@ import {
   Facebook,
   Linkedin,
   ExternalLink,
-  CalendarCheck,
-  Clock,
-  Sparkles,
 } from 'lucide-react';
 
 type Tab = 'websites' | 'social';
@@ -192,7 +189,26 @@ function BrowserChrome({
 /* Website — BookedForYou.ie (real client, live site)                 */
 /* ------------------------------------------------------------------ */
 
+/**
+ * AI receptionist for tradespeople. Uses a layered strategy:
+ *   1. Try an iframe embed on all devices. BookedForYou is fully responsive
+ *      so the embedded version adapts to the card width naturally.
+ *   2. If the iframe never fires `load` within the timeout (i.e. the site
+ *      blocks framing via X-Frame-Options / CSP frame-ancestors) we swap
+ *      to a screenshot. Desktop viewports get the desktop screenshot,
+ *      mobile viewports get the mobile one, via <picture>+media queries.
+ *   3. No screenshot uploaded yet? The fallback renders a stylised card
+ *      using the site's real copy so it's never empty or broken.
+ */
 function BookedForYouSite() {
+  const SITE_URL = 'https://bookedforyou.ie';
+  // Drop real screenshots at:
+  //   apps/web/public/examples/bookedforyou-desktop.png  (around 1440px wide)
+  //   apps/web/public/examples/bookedforyou-mobile.png   (around 390px wide)
+  // The browser picks the right one via the <picture> element's media query.
+  const SCREENSHOT_DESKTOP = '/examples/bookedforyou-desktop.png';
+  const SCREENSHOT_MOBILE = '/examples/bookedforyou-mobile.png';
+
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-3 px-1">
@@ -201,114 +217,269 @@ function BookedForYouSite() {
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
             Live site
           </Badge>
-          <span className="text-xs text-slate-500">Built by us, shipped and online today</span>
+          <span className="hidden text-xs text-slate-500 sm:inline">
+            Scroll to explore the real site
+          </span>
         </div>
         <a
-          href="https://bookedforyou.ie"
+          href={SITE_URL}
           target="_blank"
           rel="noopener noreferrer"
           className="inline-flex items-center gap-1.5 rounded-full bg-slate-900 px-3.5 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-slate-700"
         >
-          Visit bookedforyou.ie
+          Open in new tab
           <ExternalLink className="h-3 w-3" />
         </a>
       </div>
 
-      <BrowserChrome url="bookedforyou.ie" href="https://bookedforyou.ie">
-        <div className="relative">
-          <div className="relative h-[300px] w-full overflow-hidden md:h-[440px]">
-            <div
-              aria-hidden
-              className="absolute inset-0"
-              style={{
-                background:
-                  'radial-gradient(60% 50% at 20% 30%, rgba(72,216,134,0.55), transparent 60%), radial-gradient(60% 50% at 80% 20%, rgba(29,156,161,0.55), transparent 60%), linear-gradient(135deg, #0f2a32, #1D9CA1 55%, #48D886)',
-              }}
-            />
-            <div
-              aria-hidden
-              className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom,rgba(0,0,0,0.35),transparent)]"
-            />
-            <div className="absolute inset-0 flex items-center justify-center px-6 text-center text-white">
-              <div>
-                <p className="text-xs font-medium uppercase tracking-[0.3em] text-[#FFEC3D]">
-                  Bookings, simplified
-                </p>
-                <h3 className="mt-3 text-4xl font-bold tracking-tight md:text-6xl">
-                  Booked<span className="text-[#FFEC3D]">For</span>You
-                </h3>
-                <p className="mx-auto mt-3 max-w-md text-sm text-white/85 md:text-base">
-                  A smarter way for Irish businesses to take bookings online — no
-                  phone tag, no double-bookings.
-                </p>
-                <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">
-                  <span className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-semibold text-slate-900">
-                    <CalendarCheck className="h-3.5 w-3.5" />
-                    Start taking bookings
-                  </span>
-                  <span className="inline-flex items-center gap-2 rounded-full border border-white/60 bg-white/10 px-4 py-2 text-sm font-semibold text-white">
-                    See how it works
-                    <ArrowRight className="h-3.5 w-3.5" />
-                  </span>
-                </div>
+      <BrowserChrome url="bookedforyou.ie" href={SITE_URL}>
+        <LiveSiteEmbed
+          siteUrl={SITE_URL}
+          screenshotDesktop={SCREENSHOT_DESKTOP}
+          screenshotMobile={SCREENSHOT_MOBILE}
+        />
+
+        <div className="border-t border-slate-100 p-6 md:p-10">
+          <div className="flex flex-col items-start justify-between gap-4 rounded-2xl bg-slate-50 p-5 md:flex-row md:items-center">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-widest text-indigo-600">
+                AI receptionist for tradespeople
               </div>
+              <div className="mt-1 text-sm font-semibold text-slate-900">
+                1,000+ calls tested · 0 customers missed · 30% more bookings
+              </div>
+              <p className="mt-1 text-xs text-slate-600">
+                Built end-to-end by us — marketing site, dashboard, and phone-AI integration.
+              </p>
             </div>
+            <a
+              href={SITE_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-slate-700"
+            >
+              Visit full site
+              <ExternalLink className="h-3.5 w-3.5" />
+            </a>
           </div>
+        </div>
+      </BrowserChrome>
+    </div>
+  );
+}
 
-          <div className="grid grid-cols-1 gap-4 p-6 md:grid-cols-3 md:gap-6 md:p-10">
-            {[
-              {
-                icon: CalendarCheck,
-                title: '24/7 online booking',
-                body: 'Customers book themselves in, day or night. Your calendar stays in sync.',
-              },
-              {
-                icon: Clock,
-                title: 'Automated reminders',
-                body: 'SMS and email reminders cut no-shows without you lifting a finger.',
-              },
-              {
-                icon: Sparkles,
-                title: 'Built for Ireland',
-                body: 'Irish payment methods, VAT-ready invoices, and local support when you need it.',
-              },
-            ].map((s) => (
-              <div key={s.title} className="rounded-2xl border border-slate-200 p-4">
-                <div className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-[#48D886]/15 text-[#1D9CA1]">
-                  <s.icon className="h-4 w-4" />
-                </div>
-                <div className="mt-3 text-sm font-semibold text-slate-900">{s.title}</div>
-                <p className="mt-1 text-xs text-slate-600">{s.body}</p>
-              </div>
-            ))}
+/**
+ * Live site embed with graceful degradation.
+ *
+ * Strategy:
+ *   - Try the iframe on both mobile and desktop. BookedForYou is fully
+ *     responsive (proper viewport meta, mobile breakpoints), so embedded
+ *     it renders its real mobile layout inside the card.
+ *   - If the iframe doesn't fire `load` within a short timeout we assume
+ *     it was blocked (X-Frame-Options / CSP frame-ancestors) and swap in
+ *     the screenshot fallback.
+ *
+ * We intentionally don't try to inspect `contentWindow.location` to detect
+ * a blocked iframe — that throws a cross-origin error on SUCCESSFUL loads
+ * too, so it's not a reliable signal. A `load`-event timeout is more
+ * accurate and quieter in the console.
+ */
+function LiveSiteEmbed({
+  siteUrl,
+  screenshotDesktop,
+  screenshotMobile,
+}: {
+  siteUrl: string;
+  screenshotDesktop: string;
+  screenshotMobile: string;
+}) {
+  const [iframeLoaded, setIframeLoaded] = useState(false);
+  const [iframeBlocked, setIframeBlocked] = useState(false);
+  const [screenshotMissing, setScreenshotMissing] = useState(false);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // If we haven't seen a `load` event within the timeout, assume the iframe
+  // was blocked by the remote site's X-Frame-Options / CSP headers and swap
+  // to the fallback preview. Mobile networks can be slow, so we give it
+  // enough time to settle on 3G/4G.
+  useEffect(() => {
+    if (iframeLoaded || iframeBlocked) return;
+    timeoutRef.current = setTimeout(() => setIframeBlocked(true), 5000);
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, [iframeLoaded, iframeBlocked]);
+
+  if (iframeBlocked) {
+    return (
+      <FallbackPreview
+        siteUrl={siteUrl}
+        screenshotDesktop={screenshotDesktop}
+        screenshotMobile={screenshotMobile}
+        screenshotMissing={screenshotMissing}
+        onScreenshotMissing={() => setScreenshotMissing(true)}
+      />
+    );
+  }
+
+  return (
+    <div className="relative aspect-[16/11] w-full bg-slate-900 md:aspect-[16/10]">
+      {/* Loading shimmer until the iframe fires `load`. */}
+      {!iframeLoaded ? (
+        <div
+          aria-hidden
+          className="absolute inset-0 flex items-center justify-center bg-slate-900"
+        >
+          <div className="flex flex-col items-center gap-3 text-white/80">
+            <div className="h-6 w-6 animate-spin rounded-full border-2 border-white/20 border-t-white/80" />
+            <div className="text-xs font-medium">Loading bookedforyou.ie…</div>
           </div>
+        </div>
+      ) : null}
 
-          <div className="border-t border-slate-100 p-6 md:p-10">
-            <div className="flex flex-col items-start justify-between gap-4 rounded-2xl bg-slate-50 p-5 md:flex-row md:items-center">
-              <div>
-                <div className="text-xs font-semibold uppercase tracking-widest text-[#1D9CA1]">
-                  Want to see it for real?
-                </div>
-                <div className="mt-1 text-sm font-semibold text-slate-900">
-                  The full site is live at bookedforyou.ie
-                </div>
-                <p className="mt-1 text-xs text-slate-600">
-                  Opens in a new tab — poke around, we won&apos;t be offended.
-                </p>
-              </div>
+      <iframe
+        src={siteUrl}
+        title="bookedforyou.ie live preview"
+        loading="lazy"
+        referrerPolicy="no-referrer-when-downgrade"
+        sandbox="allow-scripts allow-same-origin allow-forms"
+        onLoad={() => {
+          setIframeLoaded(true);
+          if (timeoutRef.current) clearTimeout(timeoutRef.current);
+        }}
+        className="absolute inset-0 h-full w-full border-0"
+        // `touch-action: pan-y` biases touch gestures toward vertical
+        // scroll, which helps iOS Safari hand gestures to the iframe
+        // rather than hijacking them for parent-page pan/zoom.
+        style={{ touchAction: 'pan-y' }}
+      />
+
+      {iframeLoaded ? (
+        <div className="pointer-events-none absolute bottom-3 right-3 rounded-full bg-slate-900/80 px-3 py-1 text-[11px] font-medium text-white/90 shadow-lg backdrop-blur">
+          ↕ Scroll inside the preview
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Fallback card. Rendered when the iframe fails to load (blocked by the
+ * remote site's frame-ancestors / X-Frame-Options). Uses a `<picture>`
+ * element so the browser picks the right screenshot for the viewport —
+ * mobile phones get the portrait mobile screenshot, desktops get the wide
+ * one. If the file is missing on disk, we fall through to a stylised
+ * content preview so the card is never broken.
+ */
+function FallbackPreview({
+  siteUrl,
+  screenshotDesktop,
+  screenshotMobile,
+  screenshotMissing,
+  onScreenshotMissing,
+}: {
+  siteUrl: string;
+  screenshotDesktop: string;
+  screenshotMobile: string;
+  screenshotMissing: boolean;
+  onScreenshotMissing: () => void;
+}) {
+  if (screenshotMissing) {
+    return <StylisedContentPreview siteUrl={siteUrl} />;
+  }
+
+  return (
+    <a
+      href={siteUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label="Open bookedforyou.ie in a new tab"
+      className="relative block aspect-[16/11] w-full overflow-hidden bg-slate-900 md:aspect-[16/10]"
+    >
+      <picture>
+        {/* Mobile source first — the browser picks the first <source>
+            whose media query matches. Tailwind's `md` breakpoint is 768px. */}
+        <source media="(max-width: 767px)" srcSet={screenshotMobile} />
+        <source media="(min-width: 768px)" srcSet={screenshotDesktop} />
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={screenshotDesktop}
+          alt="Screenshot of bookedforyou.ie homepage"
+          className="absolute inset-0 h-full w-full object-cover object-top"
+          loading="lazy"
+          onError={onScreenshotMissing}
+        />
+      </picture>
+      <div className="pointer-events-none absolute bottom-3 right-3 inline-flex items-center gap-1.5 rounded-full bg-slate-900/85 px-3 py-1 text-[11px] font-semibold text-white shadow-lg backdrop-blur">
+        Open in new tab
+        <ExternalLink className="h-3 w-3" />
+      </div>
+    </a>
+  );
+}
+
+/**
+ * Stylised content preview using the site's real copy. This is the
+ * ultimate fallback — shown if there's no screenshot on disk AND the
+ * iframe is blocked (or we're on mobile). Colour palette matches the real
+ * site (dark navy + indigo/sky), NOT the BoostMyBranding brand.
+ */
+function StylisedContentPreview({ siteUrl }: { siteUrl: string }) {
+  return (
+    <div className="relative">
+      <div className="relative h-[320px] w-full overflow-hidden md:h-[460px]">
+        <div
+          aria-hidden
+          className="absolute inset-0"
+          style={{
+            background:
+              'radial-gradient(60% 50% at 15% 15%, rgba(99,102,241,0.35), transparent 60%), radial-gradient(55% 50% at 90% 20%, rgba(14,165,233,0.25), transparent 60%), linear-gradient(180deg, #0b1020 0%, #0f172a 55%, #1e293b 100%)',
+          }}
+        />
+        <div
+          aria-hidden
+          className="absolute inset-0"
+          style={{
+            backgroundImage:
+              'linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px)',
+            backgroundSize: '48px 48px',
+            maskImage: 'radial-gradient(ellipse 70% 60% at 50% 40%, black 35%, transparent 100%)',
+            WebkitMaskImage:
+              'radial-gradient(ellipse 70% 60% at 50% 40%, black 35%, transparent 100%)',
+          }}
+        />
+
+        <div className="absolute inset-0 flex items-center px-6 md:px-12">
+          <div className="max-w-xl text-white">
+            <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs font-medium text-white/85 backdrop-blur">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+              AI receptionist for tradespeople
+            </div>
+            <h3 className="mt-4 text-3xl font-bold tracking-tight md:text-5xl">
+              The receptionist that
+              <br />
+              <span className="bg-gradient-to-r from-indigo-300 via-sky-300 to-emerald-300 bg-clip-text text-transparent">
+                saves you money.
+              </span>
+            </h3>
+            <p className="mt-4 max-w-md text-sm text-white/75 md:text-base">
+              Stop missing calls and losing jobs. Our AI handles your phone, books
+              appointments, and manages customers while you&apos;re on site.
+            </p>
+            <div className="mt-6 flex flex-col gap-3 sm:flex-row">
               <a
-                href="https://bookedforyou.ie"
+                href={siteUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-slate-700"
+                className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-semibold text-slate-900 transition-colors hover:bg-slate-100"
               >
-                Visit site
-                <ExternalLink className="h-3.5 w-3.5" />
+                Visit the site
+                <ArrowRight className="h-3.5 w-3.5" />
               </a>
             </div>
           </div>
         </div>
-      </BrowserChrome>
+      </div>
     </div>
   );
 }

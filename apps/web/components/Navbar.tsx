@@ -7,11 +7,11 @@ import { Button, Logo } from '@boost/ui';
 import { Menu, X } from 'lucide-react';
 
 const links = [
-  { href: '#features', label: 'Features' },
-  { href: '#how-it-works', label: 'How it works' },
+  { href: '/#features', label: 'Features' },
+  { href: '/#how-it-works', label: 'How it works' },
   { href: '/examples', label: 'Examples' },
   { href: '/blog', label: 'Blog' },
-  { href: '#pricing', label: 'Pricing' },
+  { href: '/#pricing', label: 'Pricing' },
 ];
 
 const PORTAL_URL = process.env.NEXT_PUBLIC_PORTAL_URL ?? 'http://localhost:3001';

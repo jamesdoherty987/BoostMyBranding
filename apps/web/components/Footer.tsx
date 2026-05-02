@@ -19,11 +19,11 @@ export function Footer() {
           <div>
             <div className="text-sm font-semibold text-slate-900">Product</div>
             <ul className="mt-3 space-y-2 text-sm text-slate-600">
-              <li><Link href="#features" className="hover:text-slate-900">Features</Link></li>
-              <li><Link href="#how-it-works" className="hover:text-slate-900">How it works</Link></li>
+              <li><Link href="/#features" className="hover:text-slate-900">Features</Link></li>
+              <li><Link href="/#how-it-works" className="hover:text-slate-900">How it works</Link></li>
               <li><Link href="/examples" className="hover:text-slate-900">Examples</Link></li>
               <li><Link href="/blog" className="hover:text-slate-900">Blog</Link></li>
-              <li><Link href="#pricing" className="hover:text-slate-900">Pricing</Link></li>
+              <li><Link href="/#pricing" className="hover:text-slate-900">Pricing</Link></li>
             </ul>
           </div>
           <div>

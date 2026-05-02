@@ -323,7 +323,7 @@ function LiveSiteEmbed({
   }
 
   return (
-    <div className="relative aspect-[16/11] w-full bg-slate-900 md:aspect-[16/10]">
+    <div className="relative aspect-[3/4] w-full bg-slate-900 md:aspect-[16/10]">
       {/* Loading shimmer until the iframe fires `load`. */}
       {!iframeLoaded ? (
         <div
@@ -394,7 +394,7 @@ function FallbackPreview({
       target="_blank"
       rel="noopener noreferrer"
       aria-label="Open bookedforyou.ie in a new tab"
-      className="relative block aspect-[16/11] w-full overflow-hidden bg-slate-900 md:aspect-[16/10]"
+      className="relative block aspect-[3/4] w-full overflow-hidden bg-slate-900 md:aspect-[16/10]"
     >
       <picture>
         {/* Mobile source first — the browser picks the first <source>

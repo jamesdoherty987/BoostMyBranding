@@ -22,6 +22,10 @@ import {
   Instagram,
   Facebook,
   Linkedin,
+  ExternalLink,
+  CalendarCheck,
+  Clock,
+  Sparkles,
 } from 'lucide-react';
 
 type Tab = 'websites' | 'social';
@@ -93,6 +97,7 @@ export default function ExamplesPage() {
                   transition={{ duration: 0.35 }}
                   className="space-y-10"
                 >
+                  <BookedForYouSite />
                   <CafeSite />
                   <TradeSite />
                 </motion.div>
@@ -145,7 +150,15 @@ export default function ExamplesPage() {
 /* Browser chrome                                                     */
 /* ------------------------------------------------------------------ */
 
-function BrowserChrome({ url, children }: { url: string; children: React.ReactNode }) {
+function BrowserChrome({
+  url,
+  href,
+  children,
+}: {
+  url: string;
+  href?: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-xl">
       <div className="flex items-center gap-2 border-b border-slate-200 bg-slate-50 px-4 py-2.5">
@@ -154,11 +167,148 @@ function BrowserChrome({ url, children }: { url: string; children: React.ReactNo
           <span className="h-3 w-3 rounded-full bg-amber-400" />
           <span className="h-3 w-3 rounded-full bg-emerald-400" />
         </div>
-        <div className="ml-3 flex-1 rounded-md bg-white px-3 py-1 text-xs text-slate-500">
-          {url}
-        </div>
+        {href ? (
+          <a
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="ml-3 flex flex-1 items-center gap-2 rounded-md bg-white px-3 py-1 text-xs text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900"
+          >
+            <span className="truncate">{url}</span>
+            <ExternalLink className="h-3 w-3 shrink-0 text-slate-400" />
+          </a>
+        ) : (
+          <div className="ml-3 flex-1 rounded-md bg-white px-3 py-1 text-xs text-slate-500">
+            {url}
+          </div>
+        )}
       </div>
       {children}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Website — BookedForYou.ie (real client, live site)                 */
+/* ------------------------------------------------------------------ */
+
+function BookedForYouSite() {
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-1">
+        <div className="flex items-center gap-2">
+          <Badge tone="success" className="gap-1">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
+            Live site
+          </Badge>
+          <span className="text-xs text-slate-500">Built by us, shipped and online today</span>
+        </div>
+        <a
+          href="https://bookedforyou.ie"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 rounded-full bg-slate-900 px-3.5 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-slate-700"
+        >
+          Visit bookedforyou.ie
+          <ExternalLink className="h-3 w-3" />
+        </a>
+      </div>
+
+      <BrowserChrome url="bookedforyou.ie" href="https://bookedforyou.ie">
+        <div className="relative">
+          <div className="relative h-[300px] w-full overflow-hidden md:h-[440px]">
+            <div
+              aria-hidden
+              className="absolute inset-0"
+              style={{
+                background:
+                  'radial-gradient(60% 50% at 20% 30%, rgba(72,216,134,0.55), transparent 60%), radial-gradient(60% 50% at 80% 20%, rgba(29,156,161,0.55), transparent 60%), linear-gradient(135deg, #0f2a32, #1D9CA1 55%, #48D886)',
+              }}
+            />
+            <div
+              aria-hidden
+              className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom,rgba(0,0,0,0.35),transparent)]"
+            />
+            <div className="absolute inset-0 flex items-center justify-center px-6 text-center text-white">
+              <div>
+                <p className="text-xs font-medium uppercase tracking-[0.3em] text-[#FFEC3D]">
+                  Bookings, simplified
+                </p>
+                <h3 className="mt-3 text-4xl font-bold tracking-tight md:text-6xl">
+                  Booked<span className="text-[#FFEC3D]">For</span>You
+                </h3>
+                <p className="mx-auto mt-3 max-w-md text-sm text-white/85 md:text-base">
+                  A smarter way for Irish businesses to take bookings online — no
+                  phone tag, no double-bookings.
+                </p>
+                <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">
+                  <span className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-semibold text-slate-900">
+                    <CalendarCheck className="h-3.5 w-3.5" />
+                    Start taking bookings
+                  </span>
+                  <span className="inline-flex items-center gap-2 rounded-full border border-white/60 bg-white/10 px-4 py-2 text-sm font-semibold text-white">
+                    See how it works
+                    <ArrowRight className="h-3.5 w-3.5" />
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 p-6 md:grid-cols-3 md:gap-6 md:p-10">
+            {[
+              {
+                icon: CalendarCheck,
+                title: '24/7 online booking',
+                body: 'Customers book themselves in, day or night. Your calendar stays in sync.',
+              },
+              {
+                icon: Clock,
+                title: 'Automated reminders',
+                body: 'SMS and email reminders cut no-shows without you lifting a finger.',
+              },
+              {
+                icon: Sparkles,
+                title: 'Built for Ireland',
+                body: 'Irish payment methods, VAT-ready invoices, and local support when you need it.',
+              },
+            ].map((s) => (
+              <div key={s.title} className="rounded-2xl border border-slate-200 p-4">
+                <div className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-[#48D886]/15 text-[#1D9CA1]">
+                  <s.icon className="h-4 w-4" />
+                </div>
+                <div className="mt-3 text-sm font-semibold text-slate-900">{s.title}</div>
+                <p className="mt-1 text-xs text-slate-600">{s.body}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="border-t border-slate-100 p-6 md:p-10">
+            <div className="flex flex-col items-start justify-between gap-4 rounded-2xl bg-slate-50 p-5 md:flex-row md:items-center">
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-widest text-[#1D9CA1]">
+                  Want to see it for real?
+                </div>
+                <div className="mt-1 text-sm font-semibold text-slate-900">
+                  The full site is live at bookedforyou.ie
+                </div>
+                <p className="mt-1 text-xs text-slate-600">
+                  Opens in a new tab — poke around, we won&apos;t be offended.
+                </p>
+              </div>
+              <a
+                href="https://bookedforyou.ie"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-slate-700"
+              >
+                Visit site
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            </div>
+          </div>
+        </div>
+      </BrowserChrome>
     </div>
   );
 }

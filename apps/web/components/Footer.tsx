@@ -3,7 +3,6 @@ import { Logo } from '@boost/ui';
 import { Instagram, Linkedin, Twitter } from 'lucide-react';
 
 const PORTAL_URL = process.env.NEXT_PUBLIC_PORTAL_URL ?? 'http://localhost:3001';
-const DASHBOARD_URL = process.env.NEXT_PUBLIC_DASHBOARD_URL ?? 'http://localhost:3002';
 
 export function Footer() {
   return (
@@ -30,8 +29,7 @@ export function Footer() {
             <div className="text-sm font-semibold text-slate-900">Company</div>
             <ul className="mt-3 space-y-2 text-sm text-slate-600">
               <li><a href="mailto:contact@boostmybranding.com" className="hover:text-slate-900">Contact</a></li>
-              <li><Link href={PORTAL_URL} className="hover:text-slate-900">Client login</Link></li>
-              <li><Link href={DASHBOARD_URL} className="hover:text-slate-900">Team login</Link></li>
+              <li><Link href={PORTAL_URL} className="hover:text-slate-900">Login</Link></li>
             </ul>
           </div>
           <div>

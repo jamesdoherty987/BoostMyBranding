@@ -67,7 +67,7 @@ export function Navbar() {
               size="sm"
               className={scrolled ? '' : 'text-slate-700 hover:bg-white/60'}
             >
-              Client login
+              Login
             </Button>
           </Link>
           <Link href="/signup">
@@ -109,7 +109,7 @@ export function Navbar() {
             <div className="mt-3 flex gap-2">
               <Link href={PORTAL_URL} className="flex-1">
                 <Button variant="outline" size="sm" className="w-full">
-                  Client login
+                  Login
                 </Button>
               </Link>
               <Link href="/signup" className="flex-1" onClick={() => setOpen(false)}>

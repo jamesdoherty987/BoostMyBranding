@@ -15,6 +15,7 @@
     "@aws-sdk/s3-request-presigner": "^3.705.0",
     "@boost/core": "workspace:*",
     "@boost/database": "workspace:*",
+    "@boost/video": "workspace:*",
     "@fal-ai/client": "^1.2.2",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",

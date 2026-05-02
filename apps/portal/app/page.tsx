@@ -86,7 +86,19 @@ export default function LoginPage() {
             </Button>
           </form>
         )}
-        <div className="mt-6 text-center text-xs text-slate-500">
+        <div className="mt-6 border-t border-slate-100 pt-4 text-center">
+          <p className="text-xs text-slate-600">
+            New here?{' '}
+            <a
+              href={`${process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'}/signup`}
+              className="font-semibold text-[#1D9CA1] hover:underline"
+            >
+              Create an account
+            </a>
+          </p>
+        </div>
+
+        <div className="mt-4 text-center text-xs text-slate-500">
           Team member?{' '}
           <Link
             href={process.env.NEXT_PUBLIC_DASHBOARD_URL ?? 'http://localhost:3002'}

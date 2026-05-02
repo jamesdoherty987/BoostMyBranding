@@ -20,10 +20,13 @@ import {
   MessageSquare,
   Upload as UploadIcon,
   Calendar,
+  Sparkles,
+  Lock,
 } from 'lucide-react';
 import { Shell } from '@/components/Shell';
 import { api } from '@/lib/api';
 import { handlePortalAuthError, ALLOW_MOCK_FALLBACK } from '@/lib/auth';
+import { useSubscription } from '@/lib/subscription';
 
 /**
  * Client portal home. The client sees what's published and scheduled but
@@ -31,6 +34,7 @@ import { handlePortalAuthError, ALLOW_MOCK_FALLBACK } from '@/lib/auth';
  * here are "upload photos" and "chat with us".
  */
 export default function DashboardPage() {
+  const { subscription } = useSubscription();
   const { data, isLoading } = useSWR('portal:dashboard', async () => {
     try {
       const client = await api.getMyClient();
@@ -74,6 +78,7 @@ export default function DashboardPage() {
     .filter((p) => ['scheduled', 'approved'].includes(p.status))
     .slice(0, 3);
   const noContentYet = posts.length === 0;
+  const isLocked = subscription ? !subscription.active : false;
 
   return (
     <Shell
@@ -87,48 +92,74 @@ export default function DashboardPage() {
         </div>
       }
     >
-      <motion.section
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="rounded-2xl bg-gradient-cta p-5 text-white shadow-brand"
-      >
-        <div className="text-xs font-medium uppercase tracking-widest text-white/80">
-          This month
-        </div>
-        <div className="mt-1 flex items-baseline gap-1">
-          <span className="text-4xl font-bold">
-            {client.stats?.postsThisMonth ?? recentlyPublished.length}
-          </span>
-          <span className="text-white/80">posts published</span>
-        </div>
-        {client.stats?.engagementRate ? (
-          <div className="mt-3 inline-flex items-center gap-1.5 text-sm text-white/90">
-            <TrendingUp className="h-4 w-4" />
-            {client.stats.engagementRate}% engagement
+      {isLocked ? (
+        <motion.section
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="rounded-2xl bg-gradient-cta p-5 text-white shadow-brand"
+        >
+          <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-widest text-white/80">
+            <Sparkles className="h-3.5 w-3.5" />
+            Ready when you are
           </div>
-        ) : null}
-      </motion.section>
+          <div className="mt-1 text-2xl font-bold">Subscribe to start publishing</div>
+          <p className="mt-1 text-sm text-white/90">
+            Have a look around. When you&apos;re set, pick a plan and we&apos;ll start building your
+            first month of content.
+          </p>
+          <Link href="/subscription">
+            <Button
+              size="lg"
+              variant="outline"
+              className="mt-4 w-full border-white/40 bg-white/10 text-white hover:bg-white/20"
+            >
+              See plans
+              <ArrowRight className="h-4 w-4" />
+            </Button>
+          </Link>
+        </motion.section>
+      ) : (
+        <motion.section
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="rounded-2xl bg-gradient-cta p-5 text-white shadow-brand"
+        >
+          <div className="text-xs font-medium uppercase tracking-widest text-white/80">
+            This month
+          </div>
+          <div className="mt-1 flex items-baseline gap-1">
+            <span className="text-4xl font-bold">
+              {client.stats?.postsThisMonth ?? recentlyPublished.length}
+            </span>
+            <span className="text-white/80">posts published</span>
+          </div>
+          {client.stats?.engagementRate ? (
+            <div className="mt-3 inline-flex items-center gap-1.5 text-sm text-white/90">
+              <TrendingUp className="h-4 w-4" />
+              {client.stats.engagementRate}% engagement
+            </div>
+          ) : null}
+        </motion.section>
+      )}
 
       <section className="mt-5 grid grid-cols-2 gap-3">
-        <Link
-          href="/upload"
-          className="group rounded-2xl border border-slate-200 bg-white p-4 transition-all hover:-translate-y-0.5 hover:border-[#48D886] hover:shadow-md"
-        >
-          <ImageIcon className="h-5 w-5 text-[#1D9CA1]" />
-          <div className="mt-2 text-sm font-semibold text-slate-900">Upload photos</div>
-          <div className="text-xs text-slate-500">Drop your latest shots</div>
-        </Link>
-        <Link
+        <QuickAction
+          href={isLocked ? '/subscription' : '/upload'}
+          icon={<ImageIcon className="h-5 w-5 text-[#1D9CA1]" />}
+          title="Upload photos"
+          subtitle={isLocked ? 'Subscribe to share photos' : 'Drop your latest shots'}
+          locked={isLocked}
+        />
+        <QuickAction
           href="/chat"
-          className="group rounded-2xl border border-slate-200 bg-white p-4 transition-all hover:-translate-y-0.5 hover:border-[#48D886] hover:shadow-md"
-        >
-          <MessageSquare className="h-5 w-5 text-[#1D9CA1]" />
-          <div className="mt-2 text-sm font-semibold text-slate-900">Chat with us</div>
-          <div className="text-xs text-slate-500">Questions or updates</div>
-        </Link>
+          icon={<MessageSquare className="h-5 w-5 text-[#1D9CA1]" />}
+          title="Chat with us"
+          subtitle="Questions or updates"
+          locked={false}
+        />
       </section>
 
-      {noContentYet ? (
+      {noContentYet && !isLocked ? (
         <div className="mt-6">
           <EmptyState
             icon={<UploadIcon className="h-5 w-5" />}
@@ -143,6 +174,27 @@ export default function DashboardPage() {
               </Link>
             }
           />
+        </div>
+      ) : null}
+
+      {isLocked ? (
+        <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-4 text-center">
+          <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-500">
+            <Lock className="h-5 w-5" />
+          </div>
+          <h2 className="mt-2 text-sm font-semibold text-slate-900">
+            Publishing is locked
+          </h2>
+          <p className="mt-1 text-xs text-slate-500">
+            You can browse the portal and chat with us anytime. Subscribe to unlock
+            content generation, scheduling, and media uploads.
+          </p>
+          <Link href="/subscription">
+            <Button size="sm" className="mt-3 w-full">
+              Unlock my account
+              <ArrowRight className="h-4 w-4" />
+            </Button>
+          </Link>
         </div>
       ) : null}
 
@@ -243,5 +295,38 @@ export default function DashboardPage() {
         </section>
       ) : null}
     </Shell>
+  );
+}
+
+function QuickAction({
+  href,
+  icon,
+  title,
+  subtitle,
+  locked,
+}: {
+  href: string;
+  icon: React.ReactNode;
+  title: string;
+  subtitle: string;
+  locked: boolean;
+}) {
+  return (
+    <Link
+      href={href}
+      className="group relative rounded-2xl border border-slate-200 bg-white p-4 transition-all hover:-translate-y-0.5 hover:border-[#48D886] hover:shadow-md"
+    >
+      {locked ? (
+        <span
+          className="absolute right-3 top-3 flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 text-slate-500"
+          aria-label="Locked"
+        >
+          <Lock className="h-3 w-3" />
+        </span>
+      ) : null}
+      {icon}
+      <div className="mt-2 text-sm font-semibold text-slate-900">{title}</div>
+      <div className="text-xs text-slate-500">{subtitle}</div>
+    </Link>
   );
 }

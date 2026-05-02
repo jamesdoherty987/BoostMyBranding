@@ -77,6 +77,25 @@ export class BoostApi {
       body: JSON.stringify({ email, redirectTo }),
     });
   }
+  /**
+   * Self-serve signup. Creates a user + client record, sends a magic link,
+   * and lands them in the portal with `subscriptionStatus: 'none'`. They
+   * subscribe from inside the portal.
+   */
+  signup(args: {
+    email: string;
+    businessName: string;
+    contactName: string;
+    industry?: string;
+    websiteUrl?: string;
+    tier?: 'social_only' | 'website_only' | 'full_package';
+    redirectTo?: string;
+  }) {
+    return this.request<{ sent: boolean; devLink?: string }>('/api/v1/auth/signup', {
+      method: 'POST',
+      body: JSON.stringify(args),
+    });
+  }
   me() {
     return this.request<{ id: string; email: string; role: string; name?: string; clientId?: string }>(
       '/api/v1/auth/me',
@@ -129,6 +148,11 @@ export class BoostApi {
       body: JSON.stringify(patch),
     });
   }
+  deletePost(id: string) {
+    return this.request<{ id: string; deleted: boolean }>(`/api/v1/posts/${id}`, {
+      method: 'DELETE',
+    });
+  }
   batchApprove(postIds: string[]) {
     return this.request<{ approved: number }>('/api/v1/posts/batch-approve', {
       method: 'POST',
@@ -139,6 +163,12 @@ export class BoostApi {
   // ----- Images -----
   listImages(clientId: string) {
     return this.request<ClientImage[]>(`/api/v1/images?clientId=${clientId}`);
+  }
+  /** Agency-side delete (or client deleting their own). */
+  deleteImage(id: string) {
+    return this.request<{ id: string; deleted: boolean }>(`/api/v1/images/${id}`, {
+      method: 'DELETE',
+    });
   }
   async uploadImages(clientId: string, files: File[], tags: string[] = []) {
     const form = new FormData();
@@ -173,6 +203,55 @@ export class BoostApi {
     return new Promise<ClientImage[]>((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open('POST', `${this.config.baseUrl}/api/v1/images/upload`);
+      xhr.withCredentials = true;
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && onProgress) {
+          onProgress(Math.min(99, Math.round((e.loaded / e.total) * 100)));
+        }
+      };
+      xhr.onload = () => {
+        try {
+          const payload = JSON.parse(xhr.responseText || '{}') as ApiResponse<ClientImage[]>;
+          if (xhr.status >= 200 && xhr.status < 300 && !payload.error) {
+            onProgress?.(100);
+            resolve(payload.data ?? []);
+          } else {
+            reject(
+              new ApiError(
+                payload.error?.message ?? `Upload failed (${xhr.status})`,
+                xhr.status,
+                payload.error?.code,
+              ),
+            );
+          }
+        } catch (e) {
+          reject(new ApiError('Invalid server response', xhr.status));
+        }
+      };
+      xhr.onerror = () => reject(new ApiError('Network error during upload', 0));
+      xhr.onabort = () => reject(new ApiError('Upload cancelled', 0));
+      xhr.send(form);
+    });
+  }
+
+  /**
+   * Combined media upload — accepts images AND videos. Same XHR-based progress
+   * reporting, but hits `/media/upload` which permits mp4/mov/webm uploads.
+   */
+  uploadMediaWithProgress(
+    clientId: string,
+    files: File[],
+    tags: string[] = [],
+    onProgress?: (percent: number) => void,
+  ): Promise<ClientImage[]> {
+    const form = new FormData();
+    form.append('clientId', clientId);
+    form.append('tags', tags.join(','));
+    files.forEach((f) => form.append('files', f));
+
+    return new Promise<ClientImage[]>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${this.config.baseUrl}/api/v1/images/media/upload`);
       xhr.withCredentials = true;
       xhr.upload.onprogress = (e) => {
         if (e.lengthComputable && onProgress) {
@@ -280,11 +359,123 @@ export class BoostApi {
   }
 
   // ----- Billing -----
-  checkout(tier: 'social_only' | 'website_only' | 'full_package', email: string) {
+  /**
+   * Kick off a Stripe Checkout session for the signed-in client. Server
+   * looks up the customer email and clientId from the session — the caller
+   * just picks the tier.
+   */
+  checkout(tier: 'social_only' | 'website_only' | 'full_package') {
     return this.request<{ url: string; id: string }>('/api/v1/billing/checkout', {
       method: 'POST',
-      body: JSON.stringify({ tier, email }),
+      body: JSON.stringify({ tier }),
     });
+  }
+
+  /** Open the Stripe-hosted customer portal for managing billing. */
+  openBillingPortal() {
+    return this.request<{ url: string }>('/api/v1/billing/portal', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  }
+
+  /** Current subscription state for the signed-in client. */
+  getSubscription() {
+    return this.request<{
+      tier: 'social_only' | 'website_only' | 'full_package';
+      tierName: string;
+      priceCents: number;
+      status: 'none' | 'active' | 'past_due' | 'canceled';
+      statusMeta: { label: string; tone: 'success' | 'warn' | 'danger' | 'default'; description: string };
+      startedAt: string | null;
+      active: boolean;
+      hasCustomer: boolean;
+    }>('/api/v1/billing/subscription');
+  }
+
+  // ----- Videos -----
+  listVideoTemplates() {
+    return this.request<
+      Array<{
+        id: string;
+        name: string;
+        description: string;
+        durationFrames: number;
+        usesImage: boolean;
+        bestFor: readonly string[];
+      }>
+    >('/api/v1/videos/templates');
+  }
+
+  renderVideo(args: {
+    templateId: string;
+    clientId: string;
+    businessName: string;
+    headline: string;
+    subheadline?: string;
+    cta?: string;
+    domain?: string;
+    imageUrl?: string;
+    brand?: {
+      primary?: string;
+      accent?: string;
+      pop?: string;
+      dark?: string;
+      paper?: string;
+    };
+  }) {
+    return this.request<{
+      videoUrl: string;
+      templateId: string;
+      templateName: string;
+      durationSeconds: number;
+      fromMock?: boolean;
+    }>('/api/v1/videos/render', {
+      method: 'POST',
+      body: JSON.stringify(args),
+    });
+  }
+
+  /** Render N videos in one request. Returns per-item success/failure. */
+  batchRenderVideos(args: {
+    templateId: string;
+    clientId: string;
+    businessName: string;
+    headline: string;
+    subheadline?: string;
+    cta?: string;
+    domain?: string;
+    imageUrl?: string;
+    count: number;
+    /** Optional per-item headlines; falls back to the shared `headline`. */
+    headlines?: string[];
+    brand?: {
+      primary?: string;
+      accent?: string;
+      pop?: string;
+      dark?: string;
+      paper?: string;
+    };
+  }) {
+    return this.request<{
+      total: number;
+      succeeded: number;
+      items: Array<{
+        index: number;
+        ok: boolean;
+        headline: string;
+        videoUrl?: string;
+        error?: string;
+      }>;
+    }>('/api/v1/videos/batch', {
+      method: 'POST',
+      body: JSON.stringify(args),
+    });
+  }
+
+  /** List all videos saved to a client's media library. */
+  listClientVideos(clientId: string) {
+    return this.request<ClientImage[]>(`/api/v1/videos?clientId=${encodeURIComponent(clientId)}`);
   }
 }
 

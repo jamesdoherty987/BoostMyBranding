@@ -5,7 +5,7 @@ import Image from 'next/image';
 import { useState } from 'react';
 import useSWR from 'swr';
 import { motion } from 'framer-motion';
-import { mockClients, formatCurrency } from '@boost/core';
+import { mockClients, formatCurrency, getStatusMeta } from '@boost/core';
 import { Badge, Button, Input, Spinner } from '@boost/ui';
 import { Plus, Search } from 'lucide-react';
 import { PageHeader } from '@/components/PageHeader';
@@ -106,6 +106,9 @@ export default function ClientsPage() {
                         {TIER_LABELS[c.subscriptionTier]}
                       </Badge>
                     </div>
+                    <div className="mt-2">
+                      <SubscriptionBadge status={c.subscriptionStatus} />
+                    </div>
                     <div className="mt-4 grid grid-cols-3 gap-2 border-t border-slate-100 pt-4 text-center">
                       <Stat label="Posts" value={c.stats?.postsThisMonth ?? 0} />
                       <Stat label="Waiting" value={c.stats?.pendingApproval ?? 0} />
@@ -129,4 +132,21 @@ function Stat({ label, value }: { label: string; value: string | number }) {
       <div className="text-[10px] uppercase tracking-widest text-slate-400">{label}</div>
     </div>
   );
+}
+
+function SubscriptionBadge({
+  status,
+}: {
+  status: 'none' | 'active' | 'past_due' | 'canceled' | undefined;
+}) {
+  const meta = getStatusMeta(status ?? 'none');
+  const tone: 'success' | 'warning' | 'danger' | 'default' =
+    meta.tone === 'success'
+      ? 'success'
+      : meta.tone === 'warn'
+        ? 'warning'
+        : meta.tone === 'danger'
+          ? 'danger'
+          : 'default';
+  return <Badge tone={tone}>{meta.label}</Badge>;
 }

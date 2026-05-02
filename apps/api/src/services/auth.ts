@@ -13,7 +13,9 @@
 import crypto from 'node:crypto';
 import type { Request, Response, NextFunction } from 'express';
 import { eq, gt, and, isNull } from 'drizzle-orm';
-import { getDb, isDbConfigured, users, magicLinks, sessions } from '@boost/database';
+import { getDb, isDbConfigured, users, magicLinks, sessions, clients } from '@boost/database';
+import { slugify } from '@boost/core';
+import type { SubscriptionTier } from '@boost/core';
 import { env } from '../env.js';
 import { sendEmail, magicLinkEmail } from './resend.js';
 
@@ -116,10 +118,43 @@ export async function consumeMagicLink(token: string): Promise<{ userId: string 
     let [user] = await db.select().from(users).where(eq(users.email, claimed.email));
     if (!user) {
       const role = claimed.email.endsWith('@boostmybranding.com') ? 'agency_admin' : 'client';
+      // If a client record already exists for this email (e.g. they signed
+      // up via /auth/signup which created the client but the user hadn't
+      // clicked the magic link yet), link the new user to it. Without this,
+      // a client-role user lands in the portal with no clientId and every
+      // `/clients/me` call 404s.
+      let linkedClientId: string | undefined;
+      if (role === 'client') {
+        const [existingClient] = await db
+          .select({ id: clients.id })
+          .from(clients)
+          .where(eq(clients.email, claimed.email))
+          .limit(1);
+        linkedClientId = existingClient?.id;
+      }
       [user] = await db
         .insert(users)
-        .values({ email: claimed.email, role, emailVerified: new Date() })
+        .values({
+          email: claimed.email,
+          role,
+          emailVerified: new Date(),
+          clientId: linkedClientId,
+        })
         .returning();
+    } else if (user.role === 'client' && !user.clientId) {
+      // Existing user but never linked to a client — backfill if possible.
+      const [existingClient] = await db
+        .select({ id: clients.id })
+        .from(clients)
+        .where(eq(clients.email, claimed.email))
+        .limit(1);
+      if (existingClient) {
+        await db
+          .update(users)
+          .set({ clientId: existingClient.id })
+          .where(eq(users.id, user.id));
+        user = { ...user, clientId: existingClient.id };
+      }
     }
     if (!user) return null;
     return { userId: user.id };
@@ -136,8 +171,13 @@ export async function consumeMagicLink(token: string): Promise<{ userId: string 
       id: crypto.randomUUID(),
       email: link.email,
       role: link.email.includes('admin') ? 'agency_admin' : 'client',
+      // Dev fallback: without a DB, attach every new client-role user to
+      // the first mock client so the portal has something to render.
+      clientId: link.email.includes('admin') ? undefined : 'c_murphy',
     };
     memUsers.set(user.id, user);
+  } else if (user.role === 'client' && !user.clientId) {
+    user.clientId = 'c_murphy';
   }
   return { userId: user.id };
 }
@@ -258,3 +298,95 @@ export function scopeToOwnClient(getClientIdFromReq: (req: Request) => string | 
 }
 
 export const COOKIE_NAME = SESSION_COOKIE;
+
+/* ------------------------------------------------------------------ */
+/* Self-serve signup (no payment yet)                                 */
+/* ------------------------------------------------------------------ */
+
+interface SignupArgs {
+  email: string;
+  businessName: string;
+  contactName: string;
+  industry?: string;
+  websiteUrl?: string;
+  tier: SubscriptionTier;
+  callbackBase: string;
+  redirectTo?: string;
+}
+
+/**
+ * Create (or reuse) a client record and its matching client-role user for a
+ * self-serve signup — then mail a magic link. Payment happens later inside
+ * the portal once the user is signed in.
+ *
+ * Idempotent: if the email already has a user or client, reuse them. That way
+ * hitting submit twice never creates duplicate records.
+ */
+export async function signupAndSendMagicLink(args: SignupArgs) {
+  const email = args.email.trim().toLowerCase();
+
+  if (isDbConfigured()) {
+    const db = getDb();
+
+    // 1. Find or create the client record (business).
+    let [client] = await db.select().from(clients).where(eq(clients.email, email));
+    if (!client) {
+      const baseSlug = slugify(args.businessName) || 'site';
+      let slug = baseSlug;
+      for (let i = 2; i < 50; i++) {
+        const [existing] = await db
+          .select({ id: clients.id })
+          .from(clients)
+          .where(eq(clients.slug, slug))
+          .limit(1);
+        if (!existing) break;
+        slug = `${baseSlug}-${i}`;
+      }
+      [client] = await db
+        .insert(clients)
+        .values({
+          businessName: args.businessName,
+          contactName: args.contactName,
+          email,
+          slug,
+          industry: args.industry,
+          websiteUrl: args.websiteUrl || null,
+          subscriptionTier: args.tier,
+          subscriptionStatus: 'none',
+          isActive: true,
+        })
+        .returning();
+    }
+
+    // 2. Find or create the user, linked to that client.
+    let [user] = await db.select().from(users).where(eq(users.email, email));
+    if (!user) {
+      [user] = await db
+        .insert(users)
+        .values({
+          email,
+          name: args.contactName,
+          role: 'client',
+          clientId: client?.id,
+        })
+        .returning();
+    } else if (user.role === 'client' && !user.clientId && client) {
+      await db.update(users).set({ clientId: client.id }).where(eq(users.id, user.id));
+    }
+  } else {
+    // Dev / mock path: stash the user in memory so the magic-link callback
+    // can claim it.
+    let user = Array.from(memUsers.values()).find((u) => u.email === email);
+    if (!user) {
+      user = {
+        id: crypto.randomUUID(),
+        email,
+        name: args.contactName,
+        role: 'client',
+      };
+      memUsers.set(user.id, user);
+    }
+  }
+
+  return sendMagicLink({ email, callbackBase: args.callbackBase, redirectTo: args.redirectTo });
+}

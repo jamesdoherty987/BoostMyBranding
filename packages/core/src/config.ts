@@ -118,3 +118,42 @@ export function tierMonthlyPrice(tier: TierConfig): number {
 export function tierSetupPrice(tier: TierConfig): number {
   return tier.setupCents / 100;
 }
+
+/* ------------------------------------------------------------------ */
+/* Subscription status                                                */
+/* ------------------------------------------------------------------ */
+
+import type { SubscriptionStatus } from './types.js';
+
+export interface SubscriptionStatusMeta {
+  label: string;
+  tone: 'success' | 'warn' | 'danger' | 'default';
+  description: string;
+}
+
+export const SUBSCRIPTION_STATUS_META: Record<SubscriptionStatus, SubscriptionStatusMeta> = {
+  none: {
+    label: 'Not subscribed',
+    tone: 'default',
+    description: 'Pick a plan to unlock content generation and publishing.',
+  },
+  active: {
+    label: 'Active',
+    tone: 'success',
+    description: 'Subscription is in good standing.',
+  },
+  past_due: {
+    label: 'Past due',
+    tone: 'warn',
+    description: 'Last payment failed. Update your card to keep features on.',
+  },
+  canceled: {
+    label: 'Canceled',
+    tone: 'danger',
+    description: 'Subscription ended. Resubscribe to restore access.',
+  },
+};
+
+export function getStatusMeta(status: SubscriptionStatus | null | undefined) {
+  return SUBSCRIPTION_STATUS_META[status ?? 'none'];
+}

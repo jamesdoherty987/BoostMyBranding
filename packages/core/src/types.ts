@@ -29,6 +29,15 @@ export type ImageStatus = 'pending' | 'analyzing' | 'approved' | 'rejected' | 'e
 
 export type SubscriptionTier = 'social_only' | 'website_only' | 'full_package';
 
+/**
+ * Lifecycle state of a client's Stripe subscription.
+ * - `none`: signed up but never paid — features locked
+ * - `active`: paying in good standing
+ * - `past_due`: payment failed, grace period
+ * - `canceled`: previously paid, no longer — features locked
+ */
+export type SubscriptionStatus = 'none' | 'active' | 'past_due' | 'canceled';
+
 export interface Client {
   id: string;
   businessName: string;
@@ -41,6 +50,9 @@ export interface Client {
   logoUrl?: string;
   brandColors: { primary: string; secondary: string; accent: string };
   subscriptionTier: SubscriptionTier;
+  subscriptionStatus?: SubscriptionStatus;
+  subscriptionStartedAt?: string | null;
+  stripeCustomerId?: string | null;
   monthlyPriceCents: number;
   isActive: boolean;
   onboardedAt: string;
@@ -52,6 +64,14 @@ export interface Client {
     imagesUploaded: number;
     engagementRate: number;
   };
+}
+
+/** True when a client has paid and is in good standing. */
+export function hasActiveSubscription(
+  c: Pick<Client, 'subscriptionStatus'> | null | undefined,
+): boolean {
+  if (!c) return false;
+  return c.subscriptionStatus === 'active' || c.subscriptionStatus === 'past_due';
 }
 
 export interface ClientImage {

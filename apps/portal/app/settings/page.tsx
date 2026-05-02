@@ -3,12 +3,13 @@
 import { useEffect, useState } from 'react';
 import useSWR from 'swr';
 import { Button, Input, toast, Spinner, Badge, Dialog, EmptyState } from '@boost/ui';
-import { Check, Instagram, Facebook, Linkedin, Music2, Twitter, LogOut, Download } from 'lucide-react';
+import { Check, Instagram, Facebook, Linkedin, Music2, Twitter, LogOut, Download, CreditCard, ArrowRight } from 'lucide-react';
 import Link from 'next/link';
 import { Shell } from '@/components/Shell';
 import { api } from '@/lib/api';
 import { handlePortalAuthError, ALLOW_MOCK_FALLBACK } from '@/lib/auth';
-import { mockClients } from '@boost/core';
+import { mockClients, formatCurrency } from '@boost/core';
+import { useSubscription } from '@/lib/subscription';
 
 const SOCIAL_FIELDS = [
   { key: 'instagram', label: 'Instagram', icon: Instagram, placeholder: '@yourbusiness' },
@@ -19,6 +20,7 @@ const SOCIAL_FIELDS = [
 ] as const;
 
 export default function SettingsPage() {
+  const { subscription } = useSubscription();
   const { data, isLoading } = useSWR('portal:settings', async () => {
     try {
       return await api.getMyClient();
@@ -112,6 +114,41 @@ export default function SettingsPage() {
           </Field>
         </div>
       </section>
+
+      <Link
+        href="/subscription"
+        className="mt-4 flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 transition-colors hover:bg-slate-50"
+      >
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#1D9CA1]/10 text-[#1D9CA1]">
+          <CreditCard className="h-5 w-5" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold text-slate-900">Subscription</span>
+            {subscription ? (
+              <Badge
+                tone={
+                  subscription.statusMeta.tone === 'success'
+                    ? 'success'
+                    : subscription.statusMeta.tone === 'warn'
+                      ? 'warning'
+                      : subscription.statusMeta.tone === 'danger'
+                        ? 'danger'
+                        : 'default'
+                }
+              >
+                {subscription.statusMeta.label}
+              </Badge>
+            ) : null}
+          </div>
+          <div className="truncate text-xs text-slate-500">
+            {subscription
+              ? `${subscription.tierName} · ${formatCurrency(subscription.priceCents)}/mo`
+              : 'Manage your plan'}
+          </div>
+        </div>
+        <ArrowRight className="h-4 w-4 shrink-0 text-slate-400" />
+      </Link>
 
       <section className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
         <h2 className="text-sm font-semibold text-slate-900">Brand colors</h2>

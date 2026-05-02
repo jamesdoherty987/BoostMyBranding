@@ -5,9 +5,9 @@ import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button, Input, Logo, Spinner, toast, Toaster } from '@boost/ui';
-import { ArrowRight, ArrowLeft, CheckCircle2, Sparkles, Globe, CreditCard } from 'lucide-react';
+import { ArrowRight, ArrowLeft, CheckCircle2, Mail, Sparkles, Unlock } from 'lucide-react';
 
-import { TIERS, COMPANY, formatTierPrice } from '@boost/core';
+import { TIERS, formatTierPrice } from '@boost/core';
 import type { SubscriptionTier } from '@boost/core';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
@@ -32,7 +32,7 @@ const SIGNUP_TIERS = TIERS.map((t) => ({
   popular: t.highlight,
 }));
 
-const STEPS = ['Plan', 'Business', 'Pay', 'Done'] as const;
+const STEPS = ['Plan', 'Business', 'Done'] as const;
 
 export default function SignupPage() {
   return (
@@ -54,6 +54,7 @@ function SignupInner() {
     tier: 'full_package',
   });
   const [loading, setLoading] = useState(false);
+  const [devLink, setDevLink] = useState<string | null>(null);
 
   useEffect(() => {
     const plan = params.get('plan') as Tier | null;
@@ -86,27 +87,33 @@ function SignupInner() {
   };
   const back = () => setStep((s) => Math.max(0, s - 1));
 
-  const startCheckout = async () => {
+  const submit = async () => {
+    if (!canProceed()) return;
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/api/v1/billing/checkout`, {
+      const res = await fetch(`${API_URL}/api/v1/auth/signup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
-          tier: form.tier,
           email: form.email,
           businessName: form.businessName,
           contactName: form.contactName,
-          industry: form.industry,
-          websiteUrl: form.websiteUrl,
+          industry: form.industry || undefined,
+          websiteUrl: form.websiteUrl || undefined,
+          tier: form.tier,
+          redirectTo: `${PORTAL_URL}/dashboard`,
         }),
       });
       const payload = await res.json();
-      if (!res.ok || payload.error) throw new Error(payload.error?.message ?? 'Checkout failed');
-      window.location.href = payload.data.url;
+      if (!res.ok || payload.error) {
+        throw new Error(payload.error?.message ?? 'Signup failed');
+      }
+      if (payload.data?.devLink) setDevLink(payload.data.devLink);
+      setStep(2);
     } catch (e) {
-      toast.error('Could not start checkout', (e as Error).message);
+      toast.error('Could not finish signup', (e as Error).message);
+    } finally {
       setLoading(false);
     }
   };
@@ -139,9 +146,11 @@ function SignupInner() {
           >
             {step === 0 ? (
               <>
-                <h1 className="text-2xl font-bold tracking-tight md:text-3xl">Pick your plan</h1>
+                <h1 className="text-2xl font-bold tracking-tight md:text-3xl">
+                  Pick a plan to explore
+                </h1>
                 <p className="mt-1 text-sm text-slate-600">
-                  Cancel monthly after the first {COMPANY.minCommitmentMonths} months.
+                  No card needed yet. Create your account, have a look around, pay when you&apos;re ready to go live.
                 </p>
                 <div className="mt-6 space-y-3">
                   {SIGNUP_TIERS.map((t) => {
@@ -181,8 +190,12 @@ function SignupInner() {
 
             {step === 1 ? (
               <>
-                <h1 className="text-2xl font-bold tracking-tight md:text-3xl">Tell us about the business</h1>
-                <p className="mt-1 text-sm text-slate-600">Takes about 30 seconds.</p>
+                <h1 className="text-2xl font-bold tracking-tight md:text-3xl">
+                  Tell us about the business
+                </h1>
+                <p className="mt-1 text-sm text-slate-600">
+                  Takes about 30 seconds. We&apos;ll email you a sign-in link.
+                </p>
 
                 <div className="mt-6 grid grid-cols-1 gap-3 md:grid-cols-2">
                   <Field label="Business name *">
@@ -227,39 +240,45 @@ function SignupInner() {
                     />
                   </Field>
                 </div>
-              </>
-            ) : null}
 
-            {step === 2 ? (
-              <>
-                <h1 className="text-2xl font-bold tracking-tight md:text-3xl">Confirm &amp; pay</h1>
-                <p className="mt-1 text-sm text-slate-600">
-                  Secure Stripe checkout. You&apos;ll be redirected to confirm.
-                </p>
-                <div className="mt-6 space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm">
-                  <Row k="Plan" v={SIGNUP_TIERS.find((t) => t.id === form.tier)?.name ?? ''} />
-                  <Row k="Business" v={form.businessName} />
-                  <Row k="Contact" v={`${form.contactName} · ${form.email}`} />
-                  {form.industry ? <Row k="Industry" v={form.industry} /> : null}
-                  {form.websiteUrl ? <Row k="Website" v={form.websiteUrl} /> : null}
-                </div>
                 <ul className="mt-6 space-y-2 text-sm text-slate-700">
-                  <li className="flex items-start gap-2"><Sparkles className="mt-0.5 h-4 w-4 text-[#1D9CA1]" /> AI brand-voice doc starts generating once payment clears.</li>
-                  <li className="flex items-start gap-2"><Globe className="mt-0.5 h-4 w-4 text-[#1D9CA1]" /> Portal access emailed to you instantly.</li>
-                  <li className="flex items-start gap-2"><CreditCard className="mt-0.5 h-4 w-4 text-[#1D9CA1]" /> 3-month minimum, cancel any time after.</li>
+                  <li className="flex items-start gap-2">
+                    <Unlock className="mt-0.5 h-4 w-4 text-[#1D9CA1]" />
+                    No credit card required to create your account.
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <Mail className="mt-0.5 h-4 w-4 text-[#1D9CA1]" />
+                    We&apos;ll send a magic link — no password to remember.
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <Sparkles className="mt-0.5 h-4 w-4 text-[#1D9CA1]" />
+                    Subscribe inside the portal when you&apos;re ready to start publishing.
+                  </li>
                 </ul>
               </>
             ) : null}
 
-            {step === 3 ? (
+            {step === 2 ? (
               <div className="text-center">
                 <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-gradient-cta text-white shadow-brand">
-                  <CheckCircle2 className="h-8 w-8" />
+                  <Mail className="h-8 w-8" />
                 </div>
-                <h1 className="mt-5 text-2xl font-bold tracking-tight md:text-3xl">You&apos;re in!</h1>
+                <h1 className="mt-5 text-2xl font-bold tracking-tight md:text-3xl">
+                  Check your inbox
+                </h1>
                 <p className="mt-2 text-slate-600">
-                  We sent a magic link to <span className="font-semibold">{form.email}</span>. Tap it to open your client portal.
+                  We sent a magic link to{' '}
+                  <span className="font-semibold">{form.email}</span>. Tap it to open
+                  your portal. Link expires in 15 minutes.
                 </p>
+                {devLink ? (
+                  <a
+                    href={devLink}
+                    className="mt-6 inline-block rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-xs font-medium text-slate-600 hover:bg-slate-100"
+                  >
+                    Dev link, click to continue
+                  </a>
+                ) : null}
                 <Link href={PORTAL_URL}>
                   <Button size="lg" className="mt-8 w-full">
                     Open client portal
@@ -269,19 +288,19 @@ function SignupInner() {
               </div>
             ) : null}
 
-            {step < 3 ? (
+            {step < 2 ? (
               <div className="mt-8 flex items-center justify-between gap-2">
                 <Button variant="ghost" onClick={back} disabled={step === 0}>
                   <ArrowLeft className="h-4 w-4" /> Back
                 </Button>
-                {step < 2 ? (
+                {step < 1 ? (
                   <Button onClick={next}>
                     Continue <ArrowRight className="h-4 w-4" />
                   </Button>
                 ) : (
-                  <Button onClick={startCheckout} disabled={loading}>
-                    {loading ? <Spinner /> : <CreditCard className="h-4 w-4" />}
-                    Go to secure checkout
+                  <Button onClick={submit} disabled={loading || !canProceed()}>
+                    {loading ? <Spinner /> : <Mail className="h-4 w-4" />}
+                    {loading ? 'Sending…' : 'Send magic link'}
                   </Button>
                 )}
               </div>
@@ -347,14 +366,5 @@ function Field({
       <span className="block text-xs font-medium text-slate-600">{label}</span>
       <span className="mt-1 block">{children}</span>
     </label>
-  );
-}
-
-function Row({ k, v }: { k: string; v: string }) {
-  return (
-    <div className="flex items-center justify-between gap-4">
-      <span className="text-slate-500">{k}</span>
-      <span className="font-medium text-slate-900">{v}</span>
-    </div>
   );
 }

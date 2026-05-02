@@ -197,6 +197,34 @@ postsRouter.patch('/:id/reject', requireAuth, loadPostForUser, async (req, res, 
   }
 });
 
+/**
+ * Delete a post. Agency roles can delete any post they own; client role can
+ * only delete their own posts while they're still in a non-terminal state
+ * (everything except `published` / `publishing`).
+ */
+postsRouter.delete('/:id', requireAuth, loadPostForUser, async (req, res, next) => {
+  try {
+    const id = String(req.params.id);
+    const user = (req as any).user as { role: string };
+    const current = (req as any).post as { status: string };
+    if (user.role === 'client' && (current.status === 'published' || current.status === 'publishing')) {
+      return res
+        .status(400)
+        .json({ error: { message: 'Cannot delete a published post', code: 'BAD_STATE' } });
+    }
+    if (!isDbConfigured()) {
+      broadcast({ type: 'post:deleted', payload: { id } });
+      return res.json({ data: { id, deleted: true } });
+    }
+    const db = getDb();
+    await db.delete(posts).where(eq(posts.id, id));
+    broadcast({ type: 'post:deleted', payload: { id } });
+    res.json({ data: { id, deleted: true } });
+  } catch (e) {
+    next(e);
+  }
+});
+
 const batchSchema = z.object({ postIds: z.array(z.string().min(1)).min(1).max(100) });
 
 /**

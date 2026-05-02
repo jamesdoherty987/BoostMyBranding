@@ -1,0 +1,32 @@
+{
+  "name": "@boost/video",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./templates": "./src/templates/index.ts",
+    "./render": "./src/render.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "studio": "remotion studio src/Root.tsx",
+    "lint": "eslint src --ext .ts,.tsx"
+  },
+  "dependencies": {
+    "@boost/core": "workspace:*",
+    "@remotion/bundler": "^4.0.200",
+    "@remotion/cli": "^4.0.200",
+    "@remotion/renderer": "^4.0.200",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "remotion": "^4.0.200"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "@types/react": "^19.0.0",
+    "typescript": "^5.6.3"
+  }
+}

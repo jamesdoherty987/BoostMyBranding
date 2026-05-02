@@ -27,17 +27,35 @@ import { fireAndForget, withRetry } from '../services/retry.js';
 export const imagesRouter = Router();
 
 const MAX_FILE_BYTES = 15 * 1024 * 1024;
+const MAX_VIDEO_BYTES = 100 * 1024 * 1024; // 100MB cap for video uploads
 const MAX_FILES = 10;
-const ALLOWED_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+const ALLOWED_IMAGE_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+const ALLOWED_VIDEO_MIME = new Set(['video/mp4', 'video/quicktime', 'video/webm']);
 
+// Back-compat: images-only uploader used by the existing /upload route.
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_FILE_BYTES, files: MAX_FILES },
   fileFilter: (_req, file, cb) => {
-    if (ALLOWED_MIME.has(file.mimetype)) cb(null, true);
+    if (ALLOWED_IMAGE_MIME.has(file.mimetype)) cb(null, true);
     else cb(new Error('Only JPG, PNG, WEBP, and GIF uploads are allowed'));
   },
 });
+
+// Combined uploader used by /media/upload — accepts images and videos.
+const mediaUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_VIDEO_BYTES, files: MAX_FILES },
+  fileFilter: (_req, file, cb) => {
+    if (ALLOWED_IMAGE_MIME.has(file.mimetype) || ALLOWED_VIDEO_MIME.has(file.mimetype))
+      cb(null, true);
+    else cb(new Error('Supported: JPG, PNG, WEBP, GIF, MP4, MOV, WEBM'));
+  },
+});
+
+function isVideo(mime: string) {
+  return ALLOWED_VIDEO_MIME.has(mime);
+}
 
 imagesRouter.get('/', requireAuth, async (req, res, next) => {
   try {
@@ -91,7 +109,7 @@ imagesRouter.post(
       }
 
       for (const f of files) {
-        if (f.size > MAX_FILE_BYTES || !ALLOWED_MIME.has(f.mimetype)) {
+        if (f.size > MAX_FILE_BYTES || !ALLOWED_IMAGE_MIME.has(f.mimetype)) {
           return res
             .status(400)
             .json({ error: { message: 'Unsupported file', code: 'BAD_FILE' } });
@@ -235,6 +253,93 @@ imagesRouter.delete('/:id', requireAuth, async (req, res, next) => {
 });
 
 // -------- helpers --------
+
+/**
+ * Combined media upload — accepts images AND videos, saves to R2, and
+ * inserts `clientImages` rows with the correct mime type. Videos skip the
+ * auto-analyze pipeline (we don't run vision on mp4s).
+ */
+imagesRouter.post(
+  '/media/upload',
+  requireAuth,
+  uploadLimiter,
+  mediaUpload.array('files', MAX_FILES),
+  async (req, res, next) => {
+    try {
+      const { clientId, tags } = uploadSchema.parse(req.body);
+      const user = (req as any).user as { role: string; clientId?: string };
+      if (user.role === 'client' && clientId !== user.clientId) {
+        return res.status(403).json({ error: { message: 'Forbidden', code: 'FORBIDDEN' } });
+      }
+      const files = (req.files as Express.Multer.File[]) ?? [];
+      if (files.length === 0) {
+        return res.status(400).json({ error: { message: 'No files uploaded', code: 'NO_FILES' } });
+      }
+
+      for (const f of files) {
+        const allowed = ALLOWED_IMAGE_MIME.has(f.mimetype) || ALLOWED_VIDEO_MIME.has(f.mimetype);
+        const limit = isVideo(f.mimetype) ? MAX_VIDEO_BYTES : MAX_FILE_BYTES;
+        if (!allowed || f.size > limit) {
+          return res
+            .status(400)
+            .json({ error: { message: 'Unsupported file', code: 'BAD_FILE' } });
+        }
+      }
+
+      const tagArr = tags
+        ? tags.split(',').map((t) => t.trim()).filter(Boolean).slice(0, 10)
+        : [];
+      const created: any[] = [];
+
+      for (const file of files) {
+        const { url } = await uploadFile(clientId, file.buffer, file.originalname, file.mimetype);
+        const video = isVideo(file.mimetype);
+
+        if (!isDbConfigured()) {
+          created.push({
+            id: `media_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            clientId,
+            fileUrl: url,
+            fileName: file.originalname,
+            fileSizeBytes: file.size,
+            mimeType: file.mimetype,
+            tags: tagArr,
+            status: video ? 'approved' : 'pending',
+            uploadedAt: new Date().toISOString(),
+          });
+          continue;
+        }
+
+        const db = getDb();
+        const [row] = await db
+          .insert(clientImages)
+          .values({
+            clientId,
+            fileUrl: url,
+            fileName: file.originalname,
+            fileSizeBytes: file.size,
+            mimeType: file.mimetype,
+            tags: tagArr,
+            // Videos land as already-approved; the agency vetted them on upload.
+            status: video ? 'approved' : 'pending',
+          })
+          .returning();
+
+        if (row) {
+          created.push(row);
+          if (!video) {
+            fireAndForget(`analyze:${row.id}`, () => autoAnalyzeImage(row.id));
+          }
+        }
+      }
+
+      broadcast({ type: 'media:uploaded', payload: { clientId, count: created.length } });
+      res.status(201).json({ data: created });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
 
 async function autoAnalyzeImage(imageId: string) {
   try {

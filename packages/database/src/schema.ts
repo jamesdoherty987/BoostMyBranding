@@ -71,6 +71,23 @@ export const subscriptionTierEnum = pgEnum('subscription_tier', [
   'full_package',
 ]);
 
+/**
+ * Subscription lifecycle. Separate from `clients.isActive` (which means "is
+ * this client's generated site live") so that a lapsed subscriber keeps
+ * their data but loses feature access.
+ *
+ *   none      — signed up, never paid. Default for new accounts.
+ *   active    — Stripe subscription in good standing.
+ *   past_due  — payment failed, grace period. Treat as locked.
+ *   canceled  — ended. Locked.
+ */
+export const subscriptionStatusEnum = pgEnum('subscription_status', [
+  'none',
+  'active',
+  'past_due',
+  'canceled',
+]);
+
 export const roleEnum = pgEnum('role', ['agency_admin', 'agency_member', 'client']);
 
 // ----- Users + Auth -----
@@ -149,6 +166,8 @@ export const clients = pgTable(
     stripeCustomerId: text('stripe_customer_id'),
     stripeSubscriptionId: text('stripe_subscription_id'),
     subscriptionTier: subscriptionTierEnum('subscription_tier').default('social_only'),
+    subscriptionStatus: subscriptionStatusEnum('subscription_status').default('none').notNull(),
+    subscriptionStartedAt: timestamp('subscription_started_at'),
     monthlyPriceCents: integer('monthly_price_cents'),
     isActive: boolean('is_active').default(true).notNull(),
     onboardedAt: timestamp('onboarded_at'),

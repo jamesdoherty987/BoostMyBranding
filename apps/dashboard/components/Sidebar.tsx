@@ -15,6 +15,7 @@ import {
   Sparkles,
   BarChart3,
   Globe,
+  Video,
   Settings,
   Menu,
   X,
@@ -31,6 +32,7 @@ const nav = [
   { href: '/calendar', label: 'Scheduler', icon: Calendar },
   { href: '/generate', label: 'Generate', icon: Sparkles },
   { href: '/websites', label: 'Websites', icon: Globe },
+  { href: '/videos', label: 'Videos', icon: Video },
   { href: '/messages', label: 'Messages', icon: MessageSquare },
   { href: '/analytics', label: 'Analytics', icon: BarChart3 },
 ];

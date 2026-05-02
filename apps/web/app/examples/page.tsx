@@ -225,10 +225,10 @@ function BookedForYouSite() {
           href={SITE_URL}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 rounded-full bg-slate-900 px-3.5 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-slate-700"
+          className="inline-flex items-center gap-2 rounded-full bg-white px-5 py-2.5 text-sm font-bold text-slate-900 shadow-md transition-all hover:scale-105 hover:shadow-lg"
         >
           Open in new tab
-          <ExternalLink className="h-3 w-3" />
+          <ExternalLink className="h-4 w-4" />
         </a>
       </div>
 
@@ -239,6 +239,20 @@ function BookedForYouSite() {
           screenshotMobile={SCREENSHOT_MOBILE}
         />
 
+        {/* Mobile: compact CTA below the iframe */}
+        <div className="border-t border-slate-100 p-4 md:hidden">
+          <a
+            href={SITE_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex w-full items-center justify-center gap-2 rounded-full bg-slate-900 px-5 py-3 text-sm font-bold text-white transition-all hover:bg-slate-700"
+          >
+            Visit full site
+            <ExternalLink className="h-4 w-4" />
+          </a>
+        </div>
+
+        {/* Desktop: detailed info panel */}
         <div className="hidden border-t border-slate-100 p-6 md:block md:p-10">
           <div className="flex flex-col items-start justify-between gap-4 rounded-2xl bg-slate-50 p-5 md:flex-row md:items-center">
             <div>

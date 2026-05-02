@@ -4,71 +4,7 @@ import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { Button, SectionWrapper, BorderBeam } from '@boost/ui';
 import { Check } from 'lucide-react';
-
-type Tier = 'social_only' | 'website_only' | 'full_package';
-
-interface TierDef {
-  id: Tier;
-  name: string;
-  price: number;
-  suffix: string;
-  setup?: number;
-  description: string;
-  features: string[];
-  cta: string;
-  highlight?: boolean;
-}
-
-const tiers: TierDef[] = [
-  {
-    id: 'social_only',
-    name: 'Just Socials',
-    price: 250,
-    suffix: '/mo',
-    description: '30 handcrafted posts a month across 4 platforms, run by our team.',
-    features: [
-      '30 posts / month',
-      'Instagram, Facebook, LinkedIn, TikTok',
-      'Written in your brand voice',
-      'Dedicated account manager',
-      'Monthly performance report',
-    ],
-    cta: 'Start social',
-  },
-  {
-    id: 'full_package',
-    name: 'Full Package',
-    price: 200,
-    setup: 800,
-    suffix: '/mo',
-    description: 'Social + a fast, modern website we maintain for you as your business changes.',
-    features: [
-      'Everything in Just Socials',
-      'Custom website + hosting',
-      'Unlimited change requests',
-      'Booking forms + map',
-      'Priority support',
-    ],
-    cta: 'Go full package',
-    highlight: true,
-  },
-  {
-    id: 'website_only',
-    name: 'Website Only',
-    price: 20,
-    setup: 1000,
-    suffix: '/mo',
-    description: 'A modern website, built custom and kept current every month.',
-    features: [
-      'Custom website design',
-      'Fast CDN hosting',
-      'Ongoing content updates',
-      'Booking integration',
-      'Forms + analytics',
-    ],
-    cta: 'Just the website',
-  },
-];
+import { TIERS, COMPANY, tierMonthlyPrice, tierSetupPrice } from '@boost/core';
 
 export function Pricing() {
   return (
@@ -79,13 +15,13 @@ export function Pricing() {
             One monthly price. <span className="text-gradient-brand">No hourly rates.</span>
           </h2>
           <p className="mt-3 text-sm text-slate-600 md:mt-4 md:text-lg">
-            Flat fee, cancel any time after the first 3 months.
+            Flat fee, cancel any time after the first {COMPANY.minCommitmentMonths} months.
           </p>
         </div>
 
-        {/* All three cards equal width — single column on mobile, 3-col on desktop */}
+        {/* All three cards equal width */}
         <div className="mt-8 grid grid-cols-1 gap-4 md:mt-14 md:grid-cols-3 md:gap-6">
-          {tiers.map((t, i) => (
+          {TIERS.map((t, i) => (
             <motion.div
               key={t.id}
               initial={{ opacity: 0, y: 24 }}
@@ -116,14 +52,16 @@ export function Pricing() {
                 </div>
                 <div className="shrink-0 text-right">
                   <div className="flex items-baseline gap-0.5">
-                    <span className="text-3xl font-bold md:text-5xl">€{t.price}</span>
+                    <span className="text-3xl font-bold md:text-5xl">
+                      {COMPANY.currencySymbol}{tierMonthlyPrice(t)}
+                    </span>
                     <span className={`text-xs md:text-sm ${t.highlight ? 'text-white/70' : 'text-slate-500'}`}>
-                      {t.suffix}
+                      /mo
                     </span>
                   </div>
-                  {t.setup ? (
+                  {t.setupCents > 0 ? (
                     <div className={`mt-0.5 text-[11px] md:text-xs ${t.highlight ? 'text-white/70' : 'text-slate-500'}`}>
-                      + €{t.setup} setup
+                      + {COMPANY.currencySymbol}{tierSetupPrice(t).toLocaleString()} setup
                     </div>
                   ) : null}
                 </div>

@@ -6,7 +6,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { runMonthlyGeneration } from '../services/automation.js';
-import { generateWebsite } from '../services/websites.js';
+import { generateWebsite, editWebsiteWithAI } from '../services/websites.js';
 import {
   publishDue,
   analyzePendingImages,
@@ -61,8 +61,10 @@ const generateWebsiteSchema = z.object({
   hasBooking: z.boolean().optional(),
   hasHours: z.boolean().optional(),
   template: z
-    .enum(['service', 'food', 'beauty', 'fitness', 'professional'])
+    .enum(['service', 'food', 'beauty', 'fitness', 'professional', 'retail', 'medical', 'creative', 'realestate', 'education'])
     .optional(),
+  /** Free-text suggestions from the agency to steer the AI output. */
+  suggestions: z.string().max(2000).optional(),
 });
 
 automationRouter.post(
@@ -87,6 +89,27 @@ automationRouter.post(
   async (_req, res, next) => {
     try {
       const result = await analyzePendingImages(20);
+      res.json({ data: result });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+const editWebsiteSchema = z.object({
+  clientId: z.string().min(1).max(100),
+  currentConfig: z.record(z.any()),
+  instruction: z.string().min(1).max(2000),
+});
+
+automationRouter.post(
+  '/edit-website',
+  requireAuth,
+  requireRole('agency_admin', 'agency_member'),
+  async (req, res, next) => {
+    try {
+      const args = editWebsiteSchema.parse(req.body);
+      const result = await editWebsiteWithAI(args);
       res.json({ data: result });
     } catch (e) {
       next(e);

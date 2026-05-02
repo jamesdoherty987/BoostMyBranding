@@ -1,7 +1,7 @@
 'use client';
 
 import useSWR from 'swr';
-import { formatCurrency } from '@boost/core';
+import { formatCurrency, getTier } from '@boost/core';
 import { Badge, Button, Spinner } from '@boost/ui';
 import { Download, CreditCard } from 'lucide-react';
 import { Shell } from '@/components/Shell';
@@ -42,10 +42,11 @@ export default function InvoicesPage() {
   }
 
   const { client } = data;
+  const defaultPrice = getTier('full_package').priceCents;
   const demo = [
-    { id: 'inv_003', month: 'May 2026', amount: 20000, status: 'pending' as const, due: '2026-05-15' },
-    { id: 'inv_002', month: 'April 2026', amount: 20000, status: 'paid' as const, paid: '2026-04-02' },
-    { id: 'inv_001', month: 'March 2026', amount: 20000, status: 'paid' as const, paid: '2026-03-02' },
+    { id: 'inv_003', month: 'May 2026', amount: defaultPrice, status: 'pending' as const, due: '2026-05-15' },
+    { id: 'inv_002', month: 'April 2026', amount: defaultPrice, status: 'paid' as const, paid: '2026-04-02' },
+    { id: 'inv_001', month: 'March 2026', amount: defaultPrice, status: 'paid' as const, paid: '2026-03-02' },
   ];
   const invoices = data.invoices.length ? data.invoices : demo;
 
@@ -56,7 +57,7 @@ export default function InvoicesPage() {
           Current plan
         </div>
         <div className="mt-1 text-2xl font-bold">
-          {formatCurrency(client.monthlyPriceCents ?? 20000)}
+          {formatCurrency(client.monthlyPriceCents ?? defaultPrice)}
           <span className="text-sm font-normal text-white/80"> / month</span>
         </div>
         {invoices[0]?.due ? (

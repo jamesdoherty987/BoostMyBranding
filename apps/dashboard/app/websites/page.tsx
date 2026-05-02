@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Image from 'next/image';
 import { motion, AnimatePresence } from 'framer-motion';
 import useSWR from 'swr';
-import { mockClients, mockWebsiteRequests, slugify, type WebsiteConfig } from '@boost/core';
+import { mockClients, mockWebsiteRequests, slugify, type WebsiteConfig, type SiteTemplate } from '@boost/core';
 import {
   Badge,
   Button,
@@ -28,10 +28,11 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import { PageHeader } from '@/components/PageHeader';
+import { SiteEditor } from '@/components/SiteEditor';
 import { api } from '@/lib/api';
 
 const TEMPLATES: Array<{
-  id: 'service' | 'food' | 'beauty' | 'fitness' | 'professional';
+  id: SiteTemplate;
   name: string;
   description: string;
   seed: string;
@@ -39,32 +40,62 @@ const TEMPLATES: Array<{
   {
     id: 'service',
     name: 'Service business',
-    description: 'Hero + services grid + booking. Great for plumbers, electricians, cleaners.',
+    description: 'Hero + services grid + booking. Plumbers, electricians, cleaners.',
     seed: 'tpl-service',
   },
   {
     id: 'food',
     name: 'Cafe & food',
-    description: 'Menu-led layout with gallery and map. Perfect for cafes and restaurants.',
+    description: 'Menu-led layout with gallery and map. Cafes and restaurants.',
     seed: 'tpl-food',
   },
   {
     id: 'beauty',
     name: 'Beauty & wellness',
-    description: 'Elegant hero + before/after + booking widget.',
+    description: 'Elegant hero + gallery + booking. Salons, spas, aesthetics.',
     seed: 'tpl-beauty',
   },
   {
     id: 'fitness',
     name: 'Fitness & coaching',
-    description: 'Bold stats, class schedule, video hero.',
+    description: 'Bold stats, class schedule. Gyms, PTs, yoga studios.',
     seed: 'tpl-fitness',
   },
   {
     id: 'professional',
     name: 'Professional services',
-    description: 'Trust-first layout for agencies, accountants, consultants.',
+    description: 'Trust-first layout. Agencies, accountants, consultants.',
     seed: 'tpl-pro',
+  },
+  {
+    id: 'retail',
+    name: 'Retail & shop',
+    description: 'Product-focused with gallery. Boutiques, shops, e-commerce.',
+    seed: 'tpl-retail',
+  },
+  {
+    id: 'medical',
+    name: 'Medical & dental',
+    description: 'Clean, trust-driven. Clinics, dentists, physios.',
+    seed: 'tpl-medical',
+  },
+  {
+    id: 'creative',
+    name: 'Creative & studio',
+    description: 'Portfolio-led with bold visuals. Designers, photographers.',
+    seed: 'tpl-creative',
+  },
+  {
+    id: 'realestate',
+    name: 'Property & real estate',
+    description: 'Stats-heavy with listings. Estate agents, lettings.',
+    seed: 'tpl-realestate',
+  },
+  {
+    id: 'education',
+    name: 'Education & training',
+    description: 'Course-focused with trust signals. Schools, tutors, academies.',
+    seed: 'tpl-education',
   },
 ];
 
@@ -105,6 +136,7 @@ export default function WebsitesPage() {
     hasBooking: true,
     hasHours: true,
     template: TEMPLATES[0]!.id,
+    suggestions: '',
   });
   const [running, setRunning] = useState(false);
   const [steps, setSteps] = useState<PipelineStep[]>(PIPELINE);
@@ -159,6 +191,7 @@ export default function WebsitesPage() {
         hasBooking: newSite.hasBooking,
         hasHours: newSite.hasHours,
         template: newSite.template,
+        suggestions: newSite.suggestions || undefined,
       });
       clearInterval(tick);
       setSteps((prev) => prev.map((s) => ({ ...s, status: 'done' })));
@@ -302,6 +335,21 @@ export default function WebsitesPage() {
                   value={newSite.services}
                   onChange={(e) => setNewSite((s) => ({ ...s, services: e.target.value }))}
                   placeholder="Installations, Repairs, Maintenance"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-slate-600">
+                  Suggestions (optional)
+                </label>
+                <Textarea
+                  className="mt-1 no-zoom"
+                  rows={2}
+                  value={newSite.suggestions}
+                  onChange={(e) =>
+                    setNewSite((s) => ({ ...s, suggestions: e.target.value }))
+                  }
+                  placeholder="e.g. Use dark hero, emphasise 24/7 availability, include a map section..."
                 />
               </div>
 
@@ -471,36 +519,40 @@ export default function WebsitesPage() {
                 </a>
               </div>
 
-              <Card>
-                <CardContent className="p-0 overflow-hidden">
-                  {/* Browser chrome wrapping the real renderer output */}
-                  <div className="flex items-center gap-2 border-b border-slate-200 bg-slate-50 px-4 py-2">
-                    <span className="h-2.5 w-2.5 rounded-full bg-rose-300" />
-                    <span className="h-2.5 w-2.5 rounded-full bg-amber-300" />
-                    <span className="h-2.5 w-2.5 rounded-full bg-emerald-300" />
-                    <div className="ml-3 flex-1 rounded-md bg-white px-3 py-1 text-[11px] text-slate-500">
-                      {config.meta.title}
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_360px]">
+                <Card>
+                  <CardContent className="p-0 overflow-hidden">
+                    <div className="flex items-center gap-2 border-b border-slate-200 bg-slate-50 px-4 py-2">
+                      <span className="h-2.5 w-2.5 rounded-full bg-rose-300" />
+                      <span className="h-2.5 w-2.5 rounded-full bg-amber-300" />
+                      <span className="h-2.5 w-2.5 rounded-full bg-emerald-300" />
+                      <div className="ml-3 flex-1 rounded-md bg-white px-3 py-1 text-[11px] text-slate-500">
+                        {config.meta.title}
+                      </div>
                     </div>
-                  </div>
+                    <div className="max-h-[85vh] overflow-y-auto bg-white">
+                      <SiteRenderer
+                        config={config}
+                        businessName={
+                          clients.find((c) => c.id === newSite.clientId)?.businessName ??
+                          'Your Business'
+                        }
+                        images={clientImages}
+                        clientId={newSite.clientId}
+                        embedded
+                      />
+                    </div>
+                  </CardContent>
+                </Card>
 
-                  {/* Scrollable preview region. Blocks automatically switch to
-                      `immediate` rendering inside embedded mode so reveal
-                      animations and parallax don't get stuck on the nested
-                      scroll container's intersection observer. */}
-                  <div className="max-h-[85vh] overflow-y-auto bg-white">
-                    <SiteRenderer
-                      config={config}
-                      businessName={
-                        clients.find((c) => c.id === newSite.clientId)?.businessName ??
-                        'Your Business'
-                      }
-                      images={clientImages}
-                      clientId={newSite.clientId}
-                      embedded
-                    />
-                  </div>
-                </CardContent>
-              </Card>
+                {/* Site editor panel */}
+                <SiteEditor
+                  config={config}
+                  onChange={setConfig}
+                  clientId={newSite.clientId}
+                  images={clientImages}
+                />
+              </div>
 
               {/* Raw config toggle */}
               <details className="rounded-2xl border border-slate-200 bg-white p-4">

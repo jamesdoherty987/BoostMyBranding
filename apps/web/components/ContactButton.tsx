@@ -4,7 +4,9 @@ import { useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Mail, X, Copy, Check, ExternalLink } from 'lucide-react';
 
-const EMAIL = 'contact@boostmybranding.com';
+import { COMPANY } from '@boost/core';
+
+const EMAIL = COMPANY.email;
 
 /**
  * Floating "Get in touch" button with a compact popup.

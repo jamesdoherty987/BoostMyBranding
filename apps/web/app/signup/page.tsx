@@ -7,10 +7,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Button, Input, Logo, Spinner, toast, Toaster } from '@boost/ui';
 import { ArrowRight, ArrowLeft, CheckCircle2, Sparkles, Globe, CreditCard } from 'lucide-react';
 
+import { TIERS, COMPANY, formatTierPrice } from '@boost/core';
+import type { SubscriptionTier } from '@boost/core';
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 const PORTAL_URL = process.env.NEXT_PUBLIC_PORTAL_URL ?? 'http://localhost:3001';
 
-type Tier = 'social_only' | 'website_only' | 'full_package';
+type Tier = SubscriptionTier;
 
 interface Form {
   businessName: string;
@@ -21,17 +24,13 @@ interface Form {
   tier: Tier;
 }
 
-const TIERS: { id: Tier; name: string; price: string; blurb: string; popular?: boolean }[] = [
-  { id: 'social_only', name: 'Just Socials', price: '€250/mo', blurb: '30 posts · 4 platforms · monthly report.' },
-  {
-    id: 'full_package',
-    name: 'Full Package',
-    price: '€200/mo + €800 setup',
-    blurb: 'Social + custom website + unlimited change requests.',
-    popular: true,
-  },
-  { id: 'website_only', name: 'Website Only', price: '€20/mo + €1,000 setup', blurb: 'Custom website + hosting + monthly tweaks.' },
-];
+const SIGNUP_TIERS = TIERS.map((t) => ({
+  id: t.id,
+  name: t.name,
+  price: formatTierPrice(t),
+  blurb: t.description,
+  popular: t.highlight,
+}));
 
 const STEPS = ['Plan', 'Business', 'Pay', 'Done'] as const;
 
@@ -142,10 +141,10 @@ function SignupInner() {
               <>
                 <h1 className="text-2xl font-bold tracking-tight md:text-3xl">Pick your plan</h1>
                 <p className="mt-1 text-sm text-slate-600">
-                  Cancel monthly after the first 3 months.
+                  Cancel monthly after the first {COMPANY.minCommitmentMonths} months.
                 </p>
                 <div className="mt-6 space-y-3">
-                  {TIERS.map((t) => {
+                  {SIGNUP_TIERS.map((t) => {
                     const active = form.tier === t.id;
                     return (
                       <button
@@ -238,7 +237,7 @@ function SignupInner() {
                   Secure Stripe checkout. You&apos;ll be redirected to confirm.
                 </p>
                 <div className="mt-6 space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm">
-                  <Row k="Plan" v={TIERS.find((t) => t.id === form.tier)?.name ?? ''} />
+                  <Row k="Plan" v={SIGNUP_TIERS.find((t) => t.id === form.tier)?.name ?? ''} />
                   <Row k="Business" v={form.businessName} />
                   <Row k="Contact" v={`${form.contactName} · ${form.email}`} />
                   {form.industry ? <Row k="Industry" v={form.industry} /> : null}

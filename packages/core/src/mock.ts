@@ -4,6 +4,7 @@
  */
 
 import type { Client, ClientImage, Message, Post, WebsiteRequest } from './types.js';
+import { getTier } from './config.js';
 
 const now = Date.now();
 const iso = (offsetDays: number) => new Date(now + offsetDays * 86400000).toISOString();
@@ -18,7 +19,7 @@ export const mockClients: Client[] = [
     logoUrl: 'https://api.dicebear.com/9.x/shapes/svg?seed=murphy&backgroundColor=48D886',
     brandColors: { primary: '#0EA5E9', secondary: '#0B1220', accent: '#F59E0B' },
     subscriptionTier: 'full_package',
-    monthlyPriceCents: 20000,
+    monthlyPriceCents: getTier('full_package').priceCents,
     isActive: true,
     onboardedAt: iso(-120),
     stats: { postsThisMonth: 28, pendingApproval: 6, imagesUploaded: 22, engagementRate: 4.2 },
@@ -32,7 +33,7 @@ export const mockClients: Client[] = [
     logoUrl: 'https://api.dicebear.com/9.x/shapes/svg?seed=atlas&backgroundColor=1D9CA1',
     brandColors: { primary: '#EF4444', secondary: '#111827', accent: '#FBBF24' },
     subscriptionTier: 'social_only',
-    monthlyPriceCents: 25000,
+    monthlyPriceCents: getTier('social_only').priceCents,
     isActive: true,
     onboardedAt: iso(-60),
     stats: { postsThisMonth: 30, pendingApproval: 4, imagesUploaded: 35, engagementRate: 6.8 },
@@ -46,7 +47,7 @@ export const mockClients: Client[] = [
     logoUrl: 'https://api.dicebear.com/9.x/shapes/svg?seed=verde&backgroundColor=FFEC3D',
     brandColors: { primary: '#22C55E', secondary: '#1F2937', accent: '#F97316' },
     subscriptionTier: 'full_package',
-    monthlyPriceCents: 20000,
+    monthlyPriceCents: getTier('full_package').priceCents,
     isActive: true,
     onboardedAt: iso(-30),
     stats: { postsThisMonth: 24, pendingApproval: 9, imagesUploaded: 41, engagementRate: 5.4 },
@@ -60,7 +61,7 @@ export const mockClients: Client[] = [
     logoUrl: 'https://api.dicebear.com/9.x/shapes/svg?seed=nova&backgroundColor=48D886',
     brandColors: { primary: '#EC4899', secondary: '#0F172A', accent: '#FBCFE8' },
     subscriptionTier: 'website_only',
-    monthlyPriceCents: 2000,
+    monthlyPriceCents: getTier('website_only').priceCents,
     isActive: true,
     onboardedAt: iso(-15),
     stats: { postsThisMonth: 0, pendingApproval: 0, imagesUploaded: 12, engagementRate: 0 },

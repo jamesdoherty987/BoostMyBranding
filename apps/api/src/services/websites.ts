@@ -20,6 +20,7 @@ import { scrapeWebsite } from './scraper.js';
 import { websiteConfigPrompt } from './prompts.js';
 import { withRetry } from './retry.js';
 import { broadcast } from './realtime.js';
+import { features } from '../env.js';
 
 export type { WebsiteConfig } from '@boost/core';
 
@@ -31,6 +32,8 @@ export interface GenerateWebsiteArgs {
   hasHours?: boolean;
   /** Optional explicit template pick — otherwise inferred from industry. */
   template?: SiteTemplate;
+  /** Free-text suggestions from the agency to steer the AI output. */
+  suggestions?: string;
 }
 
 export async function generateWebsite(args: GenerateWebsiteArgs) {
@@ -98,6 +101,7 @@ export async function generateWebsite(args: GenerateWebsiteArgs) {
     hasHours: args.hasHours,
     imageDescriptions,
     template,
+    suggestions: args.suggestions,
   });
 
   const raw = await withRetry(
@@ -128,6 +132,72 @@ export async function generateWebsite(args: GenerateWebsiteArgs) {
     slug: client.slug,
     clientId: client.id,
   };
+}
+
+/**
+ * AI-powered website config editor. Takes the current config and a natural
+ * language instruction, asks Claude to produce an updated config, and returns
+ * the result with a human-readable summary of what changed.
+ */
+export async function editWebsiteWithAI(args: {
+  clientId: string;
+  currentConfig: Record<string, any>;
+  instruction: string;
+}): Promise<{ config: WebsiteConfig; summary: string }> {
+  const configJson = JSON.stringify(args.currentConfig, null, 2);
+
+  const prompt = `You are a website editor AI. You have a client's current website config JSON and an instruction from the agency about what to change.
+
+CURRENT CONFIG:
+${configJson}
+
+INSTRUCTION: ${args.instruction}
+
+Apply the requested changes to the config. Return ONLY valid JSON with this exact shape:
+{
+  "config": { <the full updated WebsiteConfig> },
+  "summary": "<1-2 sentence description of what you changed>"
+}
+
+RULES:
+- Preserve all existing data that wasn't mentioned in the instruction.
+- If asked to change colors, update the brand object.
+- If asked to add/remove sections, update the layout array.
+- If asked to rewrite copy, update the relevant text fields.
+- If asked to change the hero style, update brand.heroStyle.
+- Keep the same JSON structure — don't add or remove top-level keys.
+- The summary should be concise and specific, e.g. "Changed primary color to navy blue and made the hero dark."`;
+
+  if (!features.claude) {
+    // Mock: just return the config as-is with a mock summary
+    return {
+      config: normalizeConfig(args.currentConfig as Partial<WebsiteConfig>, (args.currentConfig as any).template ?? 'service'),
+      summary: `Mock mode: would apply "${args.instruction}" to the config.`,
+    };
+  }
+
+  const result = await withRetry(
+    () => generateJSON<{ config: Partial<WebsiteConfig>; summary: string }>(prompt, {
+      model: 'sonnet',
+      maxTokens: 4096,
+      temperature: 0.3,
+    }),
+    { label: `edit_website:${args.clientId}`, attempts: 2 },
+  );
+
+  const template = (result.config?.template ?? args.currentConfig.template ?? 'service') as SiteTemplate;
+  const config = normalizeConfig(result.config ?? {}, template);
+
+  // Persist if DB is available
+  if (isDbConfigured()) {
+    const db = getDb();
+    await db
+      .update(clients)
+      .set({ websiteConfig: config, websiteGeneratedAt: new Date() })
+      .where(eq(clients.id, args.clientId));
+  }
+
+  return { config, summary: result.summary ?? 'Config updated.' };
 }
 
 /**
@@ -183,10 +253,15 @@ function normalizeConfig(raw: Partial<WebsiteConfig>, template: SiteTemplate): W
 /** Heuristic industry → template picker. */
 function inferTemplate(industry: string | null | undefined): SiteTemplate {
   const i = (industry ?? '').toLowerCase();
-  if (/food|cafe|restaurant|coffee|bakery|drink|bar/.test(i)) return 'food';
-  if (/beauty|salon|spa|wellness|nail|hair|aesthetic/.test(i)) return 'beauty';
-  if (/fitness|gym|coach|health|yoga|training|sport/.test(i)) return 'fitness';
-  if (/law|accounting|consult|agency|finance|insurance/.test(i)) return 'professional';
+  if (/food|cafe|restaurant|coffee|bakery|drink|bar|catering/.test(i)) return 'food';
+  if (/beauty|salon|spa|wellness|nail|hair|aesthetic|skincare/.test(i)) return 'beauty';
+  if (/fitness|gym|coach|health|yoga|training|sport|pilates/.test(i)) return 'fitness';
+  if (/law|accounting|consult|agency|finance|insurance|advisory/.test(i)) return 'professional';
+  if (/retail|shop|store|boutique|ecommerce|fashion/.test(i)) return 'retail';
+  if (/medical|dental|doctor|clinic|physio|therapy|chiro/.test(i)) return 'medical';
+  if (/design|photo|art|creative|studio|music|film|video/.test(i)) return 'creative';
+  if (/property|real.?estate|letting|estate.?agent|mortgage/.test(i)) return 'realestate';
+  if (/school|tutor|education|training|course|academy|learn/.test(i)) return 'education';
   return 'service';
 }
 
@@ -196,6 +271,11 @@ const TEMPLATE_DEFAULTS: Record<SiteTemplate, { primary: string; accent: string 
   beauty: { primary: '#db2777', accent: '#f9a8d4' },
   fitness: { primary: '#0EA5E9', accent: '#22C55E' },
   professional: { primary: '#0f172a', accent: '#1D9CA1' },
+  retail: { primary: '#7c3aed', accent: '#f59e0b' },
+  medical: { primary: '#0891b2', accent: '#06b6d4' },
+  creative: { primary: '#e11d48', accent: '#f97316' },
+  realestate: { primary: '#1e3a5f', accent: '#48D886' },
+  education: { primary: '#4f46e5', accent: '#818cf8' },
 };
 
 /**

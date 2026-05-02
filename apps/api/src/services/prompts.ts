@@ -96,10 +96,12 @@ Generate a content calendar. Return JSON array:
 ]
 
 RULES:
-- Mix content types; no more than 2 promotional in a row
-- Use real images (imageIndex) for at least 60% of posts
-- Vary platforms, don't post identically on all same day
-- Seasonal references for ${vars.month} where appropriate
+- Use real images (imageIndex) for at least 60% of posts. Match the image subject to the caption — don't pair a food photo with a team post.
+- When no suitable image exists for a post, set imageIndex to null and write a detailed imageGenerationPrompt that describes exactly what the AI should generate (subject, style, mood, colors, composition). Be specific: "A flat-lay of fresh coffee beans on a marble counter, warm morning light, shot from above, minimal style" not "coffee photo".
+- For behind-the-scenes and team posts, prefer real images. For promotional and seasonal posts, AI-generated images are fine.
+- Mix content types; no more than 2 promotional in a row.
+- Vary platforms, don't post identically on all same day.
+- Seasonal references for ${vars.month} where appropriate.
 - Instagram: 150-300 chars + hashtags. LinkedIn: 200-500 chars, professional. TikTok: 50-150 chars, casual. X: under 280 chars.
 - Generate exactly ${vars.postsCount} posts.`;
 }
@@ -144,18 +146,19 @@ export function websiteConfigPrompt(vars: {
   hasHours?: boolean;
   hasBooking?: boolean;
   imageDescriptions?: string;
-  template?: 'service' | 'food' | 'beauty' | 'fitness' | 'professional';
+  template?: 'service' | 'food' | 'beauty' | 'fitness' | 'professional' | 'retail' | 'medical' | 'creative' | 'realestate' | 'education';
+  suggestions?: string;
 }) {
   return `You are a senior brand & web copywriter. Generate a complete website config JSON for "${vars.businessName}", a ${vars.industry} business.
 
 BUSINESS DESCRIPTION:
 ${vars.description}
 
-${vars.existingMarkdown ? `EXISTING SITE CONTENT (for voice + facts):\n${vars.existingMarkdown}\n` : ''}${vars.services?.length ? `KNOWN SERVICES: ${vars.services.join(', ')}\n` : ''}${vars.imageDescriptions ? `AVAILABLE IMAGES:\n${vars.imageDescriptions}\n` : ''}${vars.template ? `TEMPLATE HINT: ${vars.template}\n` : ''}
+${vars.existingMarkdown ? `EXISTING SITE CONTENT (for voice + facts):\n${vars.existingMarkdown}\n` : ''}${vars.services?.length ? `KNOWN SERVICES: ${vars.services.join(', ')}\n` : ''}${vars.imageDescriptions ? `AVAILABLE IMAGES:\n${vars.imageDescriptions}\n` : ''}${vars.template ? `TEMPLATE HINT: ${vars.template}\n` : ''}${vars.suggestions ? `AGENCY SUGGESTIONS:\n${vars.suggestions}\n` : ''}
 
 Return ONLY valid JSON in this exact shape:
 {
-  "template": "<service|food|beauty|fitness|professional>",
+  "template": "<service|food|beauty|fitness|professional|retail|medical|creative|realestate|education>",
   "layout": ["nav","hero","stats","services","about","gallery","reviews","faq","contact","footer"],
   "meta": {
     "title": "<SEO page title, ≤60 chars>",
@@ -225,7 +228,8 @@ RULES:
 - Include 3-4 stats, pick whatever's credible for the industry (years in business, customers served, response time, rating).
 - 3 reviews minimum, 5 max. Make them specific (mention the service).
 - 4-6 FAQ items, based on what a real customer would ask.
-- Colours should fit the industry: food warm terracotta/amber; beauty soft rose/magenta; fitness bold blue/green; service teal/green; professional slate/teal.
+- Colours should fit the industry: food warm terracotta/amber; beauty soft rose/magenta; fitness bold blue/green; service teal/green; professional slate/teal; retail purple/gold; medical calm cyan/teal; creative bold red/orange; realestate navy/green; education indigo/violet.
 - No placeholder text like "Lorem ipsum", always write real copy.
+- If AGENCY SUGGESTIONS are provided, follow them closely — they override defaults.
 - Last 2 words of the hero headline get auto-highlighted in a brand gradient. Write the headline so the last 2 words form a natural punchy phrase.`;
 }

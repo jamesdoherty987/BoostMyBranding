@@ -9,7 +9,17 @@
  */
 
 /** Which visual template the site is based on. Drives defaults for colors + layout. */
-export type SiteTemplate = 'service' | 'food' | 'beauty' | 'fitness' | 'professional';
+export type SiteTemplate =
+  | 'service'
+  | 'food'
+  | 'beauty'
+  | 'fitness'
+  | 'professional'
+  | 'retail'
+  | 'medical'
+  | 'creative'
+  | 'realestate'
+  | 'education';
 
 /** Which blocks are rendered, and in what order. */
 export type SiteBlockKey =
@@ -130,6 +140,11 @@ export const DEFAULT_LAYOUT: Record<SiteTemplate, SiteBlockKey[]> = {
   beauty: ['nav', 'hero', 'services', 'gallery', 'reviews', 'about', 'contact', 'faq', 'footer'],
   fitness: ['nav', 'hero', 'stats', 'services', 'reviews', 'faq', 'contact', 'footer'],
   professional: ['nav', 'hero', 'about', 'services', 'stats', 'reviews', 'faq', 'contact', 'footer'],
+  retail: ['nav', 'hero', 'services', 'gallery', 'stats', 'reviews', 'faq', 'contact', 'footer'],
+  medical: ['nav', 'hero', 'about', 'services', 'stats', 'reviews', 'faq', 'contact', 'footer'],
+  creative: ['nav', 'hero', 'gallery', 'about', 'services', 'reviews', 'contact', 'footer'],
+  realestate: ['nav', 'hero', 'stats', 'services', 'gallery', 'reviews', 'faq', 'contact', 'footer'],
+  education: ['nav', 'hero', 'about', 'stats', 'services', 'reviews', 'faq', 'contact', 'footer'],
 };
 
 /** Brand palette derived from a primary color. Used when the generator misses one. */

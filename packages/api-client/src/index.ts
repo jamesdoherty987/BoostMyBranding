@@ -237,7 +237,8 @@ export class BoostApi {
     services?: string[];
     hasBooking?: boolean;
     hasHours?: boolean;
-    template?: 'service' | 'food' | 'beauty' | 'fitness' | 'professional';
+    template?: 'service' | 'food' | 'beauty' | 'fitness' | 'professional' | 'retail' | 'medical' | 'creative' | 'realestate' | 'education';
+    suggestions?: string;
   }) {
     return this.request<{
       config: WebsiteConfig;
@@ -246,6 +247,20 @@ export class BoostApi {
       slug?: string;
       clientId?: string;
     }>('/api/v1/automation/generate-website', {
+      method: 'POST',
+      body: JSON.stringify(args),
+    });
+  }
+
+  editWebsiteWithAI(args: {
+    clientId: string;
+    currentConfig: Record<string, any>;
+    instruction: string;
+  }) {
+    return this.request<{
+      config: WebsiteConfig;
+      summary: string;
+    }>('/api/v1/automation/edit-website', {
       method: 'POST',
       body: JSON.stringify(args),
     });

@@ -8,6 +8,7 @@ import { Pricing } from '@/components/Pricing';
 import { FAQ } from '@/components/FAQ';
 import { Footer } from '@/components/Footer';
 import { Toaster } from '@boost/ui';
+import { TIERS, COMPANY, tierMonthlyPrice } from '@boost/core';
 
 const BASE = process.env.NEXT_PUBLIC_APP_URL ?? 'https://boostmybranding.com';
 
@@ -17,7 +18,7 @@ const jsonLd = {
     {
       '@type': 'Organization',
       '@id': `${BASE}/#organization`,
-      name: 'BoostMyBranding',
+      name: COMPANY.name,
       url: BASE,
       logo: `${BASE}/favicon.png`,
       sameAs: ['https://instagram.com/boostmybranding'],
@@ -25,7 +26,7 @@ const jsonLd = {
         'A dedicated social media management team for modern local businesses. We plan, write, and publish every post so your brand keeps showing up.',
       contactPoint: {
         '@type': 'ContactPoint',
-        email: 'contact@boostmybranding.com',
+        email: COMPANY.email,
         contactType: 'customer service',
       },
     },
@@ -33,7 +34,7 @@ const jsonLd = {
       '@type': 'WebSite',
       '@id': `${BASE}/#website`,
       url: BASE,
-      name: 'BoostMyBranding',
+      name: COMPANY.name,
       publisher: { '@id': `${BASE}/#organization` },
     },
     {
@@ -43,25 +44,15 @@ const jsonLd = {
       provider: { '@id': `${BASE}/#organization` },
       description:
         'Monthly social media content creation, scheduling, and publishing for local businesses. 30 posts per month across Instagram, Facebook, LinkedIn, TikTok, and more.',
-      areaServed: { '@type': 'Country', name: 'Ireland' },
+      areaServed: { '@type': 'Country', name: COMPANY.country },
       serviceType: 'Social Media Management',
-      offers: [
-        {
-          '@type': 'Offer',
-          name: 'Just Socials',
-          price: '250',
-          priceCurrency: 'EUR',
-          description: '30 posts per month across 4 platforms with monthly reporting.',
-        },
-        {
-          '@type': 'Offer',
-          name: 'Full Package',
-          price: '200',
-          priceCurrency: 'EUR',
-          description:
-            'Social media management plus a custom website with hosting and unlimited change requests. €800 one-time setup.',
-        },
-      ],
+      offers: TIERS.map((t) => ({
+        '@type': 'Offer',
+        name: t.name,
+        price: String(tierMonthlyPrice(t)),
+        priceCurrency: COMPANY.currency,
+        description: t.description,
+      })),
     },
     {
       '@type': 'FAQPage',

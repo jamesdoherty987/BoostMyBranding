@@ -27,20 +27,13 @@ import {
   Zap,
 } from 'lucide-react';
 import { api } from '@/lib/api';
-import { mockClients } from '@boost/core';
 
 export function Commander() {
   const [open, setOpen] = useState(false);
   useCommandPaletteHotkey(setOpen);
   const router = useRouter();
 
-  const { data: clients = mockClients } = useSWR('commander:clients', async () => {
-    try {
-      return await api.listClients();
-    } catch {
-      return mockClients;
-    }
-  });
+  const { data: clients = [] } = useSWR('commander:clients', () => api.listClients());
 
   const items: CommandItem[] = useMemo(() => {
     const goto = (path: string) => () => router.push(path);

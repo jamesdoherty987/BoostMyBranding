@@ -48,7 +48,7 @@ export function Logo({
         <div className="flex flex-col leading-none">
           <span className={cn('font-bold tracking-tight', text)}>
             <span className={boostColor}>Boost</span>
-            <span className="text-[#1D9CA1]">My</span>
+            <span className="text-[#3CC878]">My</span>
             <span className={brandingColor}>Branding</span>
           </span>
           {tagline ? (

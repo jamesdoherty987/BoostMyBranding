@@ -4,6 +4,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { slugify } from '@boost/core';
 import { loadRepoRootEnv } from './load-env.js';
 
 loadRepoRootEnv();
@@ -29,28 +30,34 @@ async function main() {
   const demoClients = [
     {
       businessName: "Murphy's Plumbing",
+      slug: 'murphys-plumbing',
       contactName: 'Sean Murphy',
       email: 'sean@murphysplumbing.ie',
       industry: 'Home Services',
       subscriptionTier: 'full_package' as const,
+      subscriptionStatus: 'active' as const,
       monthlyPriceCents: 20000,
       brandColors: { primary: '#0EA5E9', secondary: '#0B1220', accent: '#F59E0B' },
     },
     {
       businessName: 'Atlas Fitness',
+      slug: 'atlas-fitness',
       contactName: 'Nora Kelly',
       email: 'nora@atlasfitness.co',
       industry: 'Health & Fitness',
       subscriptionTier: 'social_only' as const,
+      subscriptionStatus: 'active' as const,
       monthlyPriceCents: 25000,
       brandColors: { primary: '#EF4444', secondary: '#111827', accent: '#FBBF24' },
     },
     {
       businessName: 'Verde Cafe',
+      slug: 'verde-cafe',
       contactName: 'Luca Romano',
       email: 'luca@verdecafe.com',
       industry: 'Food & Beverage',
       subscriptionTier: 'full_package' as const,
+      subscriptionStatus: 'active' as const,
       monthlyPriceCents: 20000,
       brandColors: { primary: '#22C55E', secondary: '#1F2937', accent: '#F97316' },
     },

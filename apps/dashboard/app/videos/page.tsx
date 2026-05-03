@@ -3,7 +3,6 @@
 import { useState } from 'react';
 import useSWR from 'swr';
 import { motion } from 'framer-motion';
-import { mockClients } from '@boost/core';
 import {
   Button,
   Card,
@@ -32,13 +31,7 @@ interface TemplateMeta {
 }
 
 export default function VideosPage() {
-  const { data: clients = mockClients } = useSWR('videos:clients', async () => {
-    try {
-      return await api.listClients();
-    } catch {
-      return mockClients;
-    }
-  });
+  const { data: clients = [] } = useSWR('videos:clients', () => api.listClients());
 
   const { data: templates = [] } = useSWR('videos:templates', async () => {
     try {
@@ -49,7 +42,7 @@ export default function VideosPage() {
   });
 
   const [selectedTemplate, setSelectedTemplate] = useState<string>('liquid-blob');
-  const [clientId, setClientId] = useState<string>(clients[0]?.id ?? mockClients[0]!.id);
+  const [clientId, setClientId] = useState<string>('');
   const [form, setForm] = useState({
     headline: 'Coffee, slowly.',
     subheadline: 'Small-batch · single origin',
@@ -59,6 +52,12 @@ export default function VideosPage() {
   });
   const [rendering, setRendering] = useState(false);
   const [rendered, setRendered] = useState<{ videoUrl: string; fromMock?: boolean } | null>(null);
+
+  // Sync clientId once real clients load from the API.
+  const firstClientId = clients[0]?.id;
+  if (firstClientId && !clientId) {
+    setClientId(firstClientId);
+  }
 
   const selected = templates.find((t) => t.id === selectedTemplate);
   const client = clients.find((c) => c.id === clientId);

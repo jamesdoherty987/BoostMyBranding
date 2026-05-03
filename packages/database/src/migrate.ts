@@ -19,7 +19,7 @@ async function main() {
     process.exit(1);
   }
   console.log('🚚 Running migrations against', maskUrl(url));
-  const client = postgres(url, { max: 1, onnotice: () => {} });
+  const client = postgres(url, { max: 1, onnotice: () => {}, prepare: false });
   const db = drizzle(client);
   const here = path.dirname(fileURLToPath(import.meta.url));
   await migrate(db, { migrationsFolder: path.resolve(here, '..', 'drizzle') });

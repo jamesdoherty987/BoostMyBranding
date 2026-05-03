@@ -29,17 +29,26 @@ const BASE_STEPS: Step[] = [
 ];
 
 export default function GeneratePage() {
-  const { data: clients = mockClients } = useSWR('generate:clients', async () => {
-    try {
-      return await api.listClients();
-    } catch {
-      return mockClients;
-    }
-  });
+  const { data: clients = [], isLoading: clientsLoading } = useSWR(
+    'generate:clients',
+    async () => {
+      try {
+        return await api.listClients();
+      } catch {
+        return mockClients;
+      }
+    },
+  );
 
-  const [clientId, setClientId] = useState<string>(clients[0]?.id ?? mockClients[0]!.id);
+  // Start blank, sync to first real client once the list arrives. Prevents
+  // mock ids leaking into real API calls if someone smashes Generate while
+  // the list is still loading.
+  const [clientId, setClientId] = useState<string>('');
   useEffect(() => {
-    if (!clients.find((c) => c.id === clientId) && clients[0]) setClientId(clients[0].id);
+    if (!clients.length) return;
+    if (!clientId || !clients.find((c) => c.id === clientId)) {
+      setClientId(clients[0]!.id);
+    }
   }, [clients, clientId]);
 
   const [count, setCount] = useState(30);
@@ -62,6 +71,18 @@ export default function GeneratePage() {
   };
 
   const run = async () => {
+    const isValidUuid =
+      !!clientId &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(clientId);
+    if (!clientId || !isValidUuid) {
+      toast.error(
+        'Pick a client',
+        clients.length === 0
+          ? 'Loading your clients — try again in a moment.'
+          : 'Choose who this is for from the dropdown.',
+      );
+      return;
+    }
     setRunning(true);
     setResult(null);
     setSteps(BASE_STEPS.map((s, i) => ({ ...s, status: i === 0 ? 'doing' : 'idle' })));
@@ -117,13 +138,27 @@ export default function GeneratePage() {
               <select
                 value={clientId}
                 onChange={(e) => setClientId(e.target.value)}
-                className="mt-1.5 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm no-zoom"
+                disabled={clientsLoading || clients.length === 0}
+                className="mt-1.5 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm no-zoom disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {clients.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.businessName} · {c.industry ?? ''}
-                  </option>
-                ))}
+                {clientsLoading ? (
+                  <option>Loading clients…</option>
+                ) : clients.length === 0 ? (
+                  <option>No clients yet — add one from the Clients tab</option>
+                ) : (
+                  <>
+                    {!clientId ? (
+                      <option value="" disabled>
+                        Select a client…
+                      </option>
+                    ) : null}
+                    {clients.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.businessName} · {c.industry ?? ''}
+                      </option>
+                    ))}
+                  </>
+                )}
               </select>
 
               <div className="mt-5 grid grid-cols-2 gap-3">
@@ -186,9 +221,18 @@ export default function GeneratePage() {
                   </span>
                   {' · '}Est. time 4 min
                 </div>
-                <Button onClick={run} loading={running} size="lg" disabled={running}>
+                <Button
+                  onClick={run}
+                  loading={running}
+                  size="lg"
+                  disabled={running || clientsLoading || !clientId}
+                >
                   {running ? <Spinner /> : <Sparkles className="h-4 w-4" />}
-                  {running ? 'Running…' : 'Generate'}
+                  {running
+                    ? 'Running…'
+                    : clientsLoading
+                      ? 'Loading clients…'
+                      : 'Generate'}
                 </Button>
               </div>
             </CardContent>

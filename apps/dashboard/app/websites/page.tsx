@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import useSWR from 'swr';
 import {
@@ -85,16 +85,26 @@ const PIPELINE: PipelineStep[] = [
 type GeneratedConfig = WebsiteConfig;
 
 export default function WebsitesPage() {
-  const { data: clients = mockClients } = useSWR('websites:clients', async () => {
-    try {
-      return await api.listClients();
-    } catch {
-      return mockClients;
-    }
-  });
+  // Live clients from the DB. Only falls back to mock data if the list
+  // request itself throws (network down etc). An empty array from the API
+  // is NOT an error — it just means there are no clients yet.
+  const { data: clients = [], isLoading: clientsLoading } = useSWR(
+    'websites:clients',
+    async () => {
+      try {
+        return await api.listClients();
+      } catch {
+        return mockClients;
+      }
+    },
+  );
 
   const [newSite, setNewSite] = useState({
-    clientId: clients[0]?.id ?? mockClients[0]!.id,
+    // Start blank; the effect below picks the first real client as soon as
+    // SWR settles. Previously we defaulted to `mockClients[0].id` which
+    // leaked mock IDs (e.g. "c_murphy") into real API calls if the user
+    // hit Generate before the list finished loading.
+    clientId: '',
     businessName: '',
     url: '',
     description:
@@ -108,13 +118,28 @@ export default function WebsitesPage() {
     accentColor: '',
     logoUrl: '',
   });
+
+  // Pick a default client once the list arrives. Also re-picks if the
+  // currently-selected id is stale (e.g. someone deleted that client from
+  // another tab) or still pointing at a mock id.
+  const realClientIds = new Set(clients.map((c) => c.id));
+  useEffect(() => {
+    if (!clients.length) return;
+    if (!newSite.clientId || !realClientIds.has(newSite.clientId)) {
+      setNewSite((s) => ({ ...s, clientId: clients[0]!.id }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clients]);
+
   const [templateOverrideOpen, setTemplateOverrideOpen] = useState(false);
   const [running, setRunning] = useState(false);
   const [steps, setSteps] = useState<PipelineStep[]>(PIPELINE);
   const [config, setConfig] = useState<GeneratedConfig | null>(null);
   const [editMode, setEditMode] = useState(false);
 
-  // Fetch approved images for the currently-selected client.
+  // Fetch approved images for the currently-selected client. Skips the
+  // request while clientId is empty so we don't fire a request for
+  // "no client yet" on first render.
   const { data: clientImages = [] } = useSWR(
     newSite.clientId ? `websites:images:${newSite.clientId}` : null,
     async () => {
@@ -130,8 +155,22 @@ export default function WebsitesPage() {
   );
 
   const generate = async () => {
-    if (!newSite.clientId) {
-      toast.error('Pick a client', 'Choose who this site is for.');
+    // Defensive check: a real client id is a UUID. If we ever end up with
+    // a stale mock id (e.g. "c_murphy") because the clients list hasn't
+    // loaded yet, surface a clear error instead of firing an API call
+    // that will 500 with a Postgres query error.
+    const isValidUuid =
+      !!newSite.clientId &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        newSite.clientId,
+      );
+    if (!newSite.clientId || !isValidUuid) {
+      toast.error(
+        'Pick a client',
+        clients.length === 0
+          ? 'Loading your clients — try again in a moment.'
+          : 'Choose who this site is for from the dropdown.',
+      );
       return;
     }
     setRunning(true);
@@ -251,14 +290,30 @@ export default function WebsitesPage() {
                 <label className="text-xs font-medium text-slate-600">Client</label>
                 <select
                   value={newSite.clientId}
-                  onChange={(e) => setNewSite((s) => ({ ...s, clientId: e.target.value }))}
-                  className="mt-1 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm no-zoom"
+                  onChange={(e) =>
+                    setNewSite((s) => ({ ...s, clientId: e.target.value }))
+                  }
+                  disabled={clientsLoading || clients.length === 0}
+                  className="mt-1 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm no-zoom disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {clients.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.businessName} · {c.industry ?? ''}
-                    </option>
-                  ))}
+                  {clientsLoading ? (
+                    <option>Loading clients…</option>
+                  ) : clients.length === 0 ? (
+                    <option>No clients yet — create one from the Clients tab</option>
+                  ) : (
+                    <>
+                      {!newSite.clientId ? (
+                        <option value="" disabled>
+                          Select a client…
+                        </option>
+                      ) : null}
+                      {clients.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.businessName} · {c.industry ?? ''}
+                        </option>
+                      ))}
+                    </>
+                  )}
                 </select>
               </div>
 
@@ -509,9 +564,18 @@ export default function WebsitesPage() {
                 <span className="text-xs text-slate-500">
                   Generation takes ~30–60s (includes AI hero image).
                 </span>
-                <Button onClick={generate} loading={running} size="lg" disabled={running}>
+                <Button
+                  onClick={generate}
+                  loading={running}
+                  size="lg"
+                  disabled={running || clientsLoading || !newSite.clientId}
+                >
                   {running ? <Spinner /> : <Sparkles className="h-4 w-4" />}
-                  {running ? 'Generating…' : 'Generate site'}
+                  {running
+                    ? 'Generating…'
+                    : clientsLoading
+                      ? 'Loading clients…'
+                      : 'Generate site'}
                 </Button>
               </div>
             </CardContent>

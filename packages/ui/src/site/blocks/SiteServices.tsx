@@ -5,6 +5,7 @@ import type { WebsiteConfig } from '@boost/core';
 import { SectionWrapper } from '../../section-wrapper';
 import { useSiteContext } from '../context';
 import { resolveIcon } from '../icon-map';
+import { InlineEditable } from '../InlineEditable';
 
 interface SiteServicesProps {
   config: WebsiteConfig;
@@ -71,8 +72,23 @@ export function SiteServices({ config }: SiteServicesProps) {
                 >
                   <Icon className="h-5 w-5" />
                 </div>
-                <h3 className="mt-5 text-lg font-semibold text-slate-900">{s.title}</h3>
-                <p className="mt-2 text-sm text-slate-600">{s.description}</p>
+                <h3 className="mt-5 text-lg font-semibold text-slate-900">
+                  <InlineEditable
+                    path={`services.${i}.title`}
+                    value={s.title}
+                    as="span"
+                    placeholder="Service title"
+                  />
+                </h3>
+                <p className="mt-2 text-sm text-slate-600">
+                  <InlineEditable
+                    path={`services.${i}.description`}
+                    value={s.description}
+                    as="span"
+                    multiline
+                    placeholder="One or two sentences…"
+                  />
+                </p>
               </motion.div>
             );
           })}

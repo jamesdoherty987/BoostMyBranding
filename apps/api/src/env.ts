@@ -50,6 +50,16 @@ const schema = z.object({
   CONTENTSTUDIO_API_KEY: z.string().optional(),
   CONTENTSTUDIO_WORKSPACE_ID: z.string().optional(),
 
+  /**
+   * Vercel API credentials for programmatic custom-domain management.
+   * When present, the API can add/remove/verify domains on the web project
+   * without the agency touching the Vercel dashboard.
+   */
+  VERCEL_API_TOKEN: z.string().optional(),
+  VERCEL_PROJECT_ID: z.string().optional(),
+  /** Optional team id — required if the project lives in a team, not a personal account. */
+  VERCEL_TEAM_ID: z.string().optional(),
+
   CRON_SECRET: z.string().optional(),
 });
 
@@ -85,6 +95,7 @@ export const features = {
   stripe: Boolean(env.STRIPE_SECRET_KEY),
   resend: Boolean(env.RESEND_API_KEY),
   contentStudio: Boolean(env.CONTENTSTUDIO_API_KEY),
+  vercel: Boolean(env.VERCEL_API_TOKEN && env.VERCEL_PROJECT_ID),
 };
 
 /**

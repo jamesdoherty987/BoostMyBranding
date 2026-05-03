@@ -1,10 +1,15 @@
 'use client';
 
-import { useState } from 'react';
-import Image from 'next/image';
+import { useCallback, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import useSWR from 'swr';
-import { mockClients, mockWebsiteRequests, slugify, type WebsiteConfig, type SiteTemplate } from '@boost/core';
+import {
+  mockClients,
+  mockWebsiteRequests,
+  slugify,
+  type WebsiteConfig,
+  type SiteTemplate,
+} from '@boost/core';
 import {
   Badge,
   Button,
@@ -26,77 +31,37 @@ import {
   Loader2,
   Wand2,
   ArrowRight,
+  ChevronDown,
 } from 'lucide-react';
 import { PageHeader } from '@/components/PageHeader';
 import { SiteEditor } from '@/components/SiteEditor';
 import { api } from '@/lib/api';
 
+/**
+ * Optional template override panel. The AI now auto-detects the right
+ * template from the business description, so the picker is collapsed by
+ * default. Expand it when you want to force a specific layout.
+ */
 const TEMPLATES: Array<{
   id: SiteTemplate;
   name: string;
   description: string;
-  seed: string;
 }> = [
-  {
-    id: 'service',
-    name: 'Service business',
-    description: 'Hero + services grid + booking. Plumbers, electricians, cleaners.',
-    seed: 'tpl-service',
-  },
-  {
-    id: 'food',
-    name: 'Cafe & food',
-    description: 'Menu-led layout with gallery and map. Cafes and restaurants.',
-    seed: 'tpl-food',
-  },
-  {
-    id: 'beauty',
-    name: 'Beauty & wellness',
-    description: 'Elegant hero + gallery + booking. Salons, spas, aesthetics.',
-    seed: 'tpl-beauty',
-  },
-  {
-    id: 'fitness',
-    name: 'Fitness & coaching',
-    description: 'Bold stats, class schedule. Gyms, PTs, yoga studios.',
-    seed: 'tpl-fitness',
-  },
-  {
-    id: 'professional',
-    name: 'Professional services',
-    description: 'Trust-first layout. Agencies, accountants, consultants.',
-    seed: 'tpl-pro',
-  },
-  {
-    id: 'retail',
-    name: 'Retail & shop',
-    description: 'Product-focused with gallery. Boutiques, shops, e-commerce.',
-    seed: 'tpl-retail',
-  },
-  {
-    id: 'medical',
-    name: 'Medical & dental',
-    description: 'Clean, trust-driven. Clinics, dentists, physios.',
-    seed: 'tpl-medical',
-  },
-  {
-    id: 'creative',
-    name: 'Creative & studio',
-    description: 'Portfolio-led with bold visuals. Designers, photographers.',
-    seed: 'tpl-creative',
-  },
-  {
-    id: 'realestate',
-    name: 'Property & real estate',
-    description: 'Stats-heavy with listings. Estate agents, lettings.',
-    seed: 'tpl-realestate',
-  },
-  {
-    id: 'education',
-    name: 'Education & training',
-    description: 'Course-focused with trust signals. Schools, tutors, academies.',
-    seed: 'tpl-education',
-  },
+  { id: 'service', name: 'Service business', description: 'Plumbers, electricians, cleaners.' },
+  { id: 'food', name: 'Cafe & food', description: 'Cafes, restaurants, bars.' },
+  { id: 'beauty', name: 'Beauty & wellness', description: 'Salons, spas, aesthetics.' },
+  { id: 'fitness', name: 'Fitness & coaching', description: 'Gyms, PTs, yoga.' },
+  { id: 'professional', name: 'Professional', description: 'Agencies, accountants.' },
+  { id: 'retail', name: 'Retail & shop', description: 'Boutiques, shops, ecom.' },
+  { id: 'medical', name: 'Medical & dental', description: 'Clinics, dentists.' },
+  { id: 'creative', name: 'Creative & studio', description: 'Designers, photographers.' },
+  { id: 'realestate', name: 'Property & real estate', description: 'Estate agents.' },
+  { id: 'education', name: 'Education & training', description: 'Schools, tutors.' },
+  { id: 'automotive', name: 'Automotive', description: 'Mechanics, garages, body shops.' },
+  { id: 'hospitality', name: 'Hospitality', description: 'Hotels, B&Bs, guesthouses.' },
+  { id: 'legal', name: 'Legal', description: 'Solicitors, law firms, barristers.' },
+  { id: 'nonprofit', name: 'Non-profit', description: 'Charities, foundations, community.' },
+  { id: 'tech', name: 'Tech & SaaS', description: 'Software, apps, startups.' },
 ];
 
 interface PipelineStep {
@@ -109,6 +74,7 @@ const PIPELINE: PipelineStep[] = [
   { key: 'scrape_site', label: 'Reading your existing site', status: 'idle' },
   { key: 'fetch_images', label: 'Collecting your photos', status: 'idle' },
   { key: 'write_copy', label: 'Writing hero + services copy', status: 'idle' },
+  { key: 'gen_hero_image', label: 'Generating hero illustration', status: 'idle' },
   { key: 'assemble_config', label: 'Assembling site config', status: 'idle' },
   { key: 'save', label: 'Saving for review', status: 'idle' },
 ];
@@ -116,8 +82,6 @@ const PIPELINE: PipelineStep[] = [
 type GeneratedConfig = WebsiteConfig;
 
 export default function WebsitesPage() {
-  // Prefer real clients list when the API is reachable, otherwise fall back
-  // to the deterministic mock set so the page is never empty in dev.
   const { data: clients = mockClients } = useSWR('websites:clients', async () => {
     try {
       return await api.listClients();
@@ -135,16 +99,16 @@ export default function WebsitesPage() {
     services: 'Installations, Repairs, Maintenance',
     hasBooking: true,
     hasHours: true,
-    template: TEMPLATES[0]!.id,
+    template: undefined as SiteTemplate | undefined,
     suggestions: '',
   });
+  const [templateOverrideOpen, setTemplateOverrideOpen] = useState(false);
   const [running, setRunning] = useState(false);
   const [steps, setSteps] = useState<PipelineStep[]>(PIPELINE);
   const [config, setConfig] = useState<GeneratedConfig | null>(null);
+  const [editMode, setEditMode] = useState(false);
 
-  // Fetch approved images for the currently-selected client so the live
-  // preview uses real photos the same way the public site will. Fails silently
-  // in mock mode (api.listImages throws without a client).
+  // Fetch approved images for the currently-selected client.
   const { data: clientImages = [] } = useSWR(
     newSite.clientId ? `websites:images:${newSite.clientId}` : null,
     async () => {
@@ -168,8 +132,6 @@ export default function WebsitesPage() {
     setConfig(null);
     setSteps(PIPELINE.map((s, i) => ({ ...s, status: i === 0 ? 'doing' : 'idle' })));
 
-    // Visual pipeline cadence — the real call is a single roundtrip so we
-    // drive a simulated step-through that completes at the same moment.
     let idx = 0;
     const tick = setInterval(() => {
       idx = Math.min(PIPELINE.length - 1, idx + 1);
@@ -178,7 +140,7 @@ export default function WebsitesPage() {
           i === idx ? { ...s, status: 'doing' } : i < idx ? { ...s, status: 'done' } : s,
         ),
       );
-    }, 650);
+    }, 800);
 
     try {
       const result = await api.generateWebsite({
@@ -190,7 +152,7 @@ export default function WebsitesPage() {
           .filter(Boolean),
         hasBooking: newSite.hasBooking,
         hasHours: newSite.hasHours,
-        template: newSite.template,
+        template: newSite.template, // may be undefined → Claude auto-detects
         suggestions: newSite.suggestions || undefined,
       });
       clearInterval(tick);
@@ -211,6 +173,47 @@ export default function WebsitesPage() {
     }
   };
 
+  /**
+   * Inline edit handler. Patches the local config optimistically, then
+   * persists via the update-field endpoint. If the API fails we roll back
+   * to the previous value so the UI stays consistent with server state.
+   */
+  const handleFieldChange = useCallback(
+    async (path: string, value: unknown) => {
+      if (!config || !newSite.clientId) return;
+
+      // Optimistic local patch so the preview updates instantly.
+      const segments = path.split('.').filter((s) => s.length > 0);
+      const prev = structuredClone(config) as any;
+      const next = structuredClone(config) as any;
+      let cursor = next;
+      for (let i = 0; i < segments.length - 1; i++) {
+        const k = segments[i]!;
+        if (cursor[k] == null) {
+          const nk = segments[i + 1]!;
+          cursor[k] = /^\d+$/.test(nk) ? [] : {};
+        }
+        cursor = cursor[k];
+      }
+      cursor[segments[segments.length - 1]!] = value;
+      setConfig(next);
+
+      try {
+        await api.updateWebsiteField({
+          clientId: newSite.clientId,
+          path,
+          value,
+        });
+      } catch (e) {
+        setConfig(prev);
+        toast.error('Save failed', (e as Error).message);
+      }
+    },
+    [config, newSite.clientId],
+  );
+
+  const selectedClient = clients.find((c) => c.id === newSite.clientId);
+
   return (
     <>
       <PageHeader
@@ -225,51 +228,15 @@ export default function WebsitesPage() {
       />
 
       <div className="px-4 py-4 md:px-10 md:py-6 space-y-8">
-        <section>
-          <h2 className="mb-4 text-sm font-semibold text-slate-900">Start from a template</h2>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            {TEMPLATES.map((t, i) => (
-              <motion.button
-                key={t.id}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.05 }}
-                onClick={() => setNewSite((s) => ({ ...s, template: t.id }))}
-                className={`text-left overflow-hidden rounded-2xl border transition-all ${
-                  newSite.template === t.id
-                    ? 'border-[#48D886] ring-2 ring-[#48D886]/20'
-                    : 'border-slate-200 hover:border-slate-300'
-                }`}
-              >
-                <div className="relative aspect-[4/3] overflow-hidden bg-slate-100">
-                  <Image
-                    src={`https://picsum.photos/seed/${t.seed}/600/450`}
-                    alt=""
-                    fill
-                    className="object-cover"
-                    unoptimized
-                  />
-                  {newSite.template === t.id ? (
-                    <div className="absolute inset-0 bg-gradient-to-t from-[#48D886]/30 to-transparent" />
-                  ) : null}
-                </div>
-                <div className="bg-white p-4">
-                  <div className="font-semibold text-slate-900">{t.name}</div>
-                  <div className="mt-1 text-xs text-slate-500">{t.description}</div>
-                </div>
-              </motion.button>
-            ))}
-          </div>
-        </section>
-
         <section className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_360px]">
           <Card>
             <CardContent className="p-6 space-y-4">
               <div>
                 <h2 className="text-sm font-semibold text-slate-900">New site details</h2>
                 <p className="mt-1 text-xs text-slate-500">
-                  We scrape the reference URL if you have one, pull the client&apos;s approved
-                  photos, and draft the whole config: hero, services, reviews, FAQ.
+                  Tell us about the business in plain English. The AI auto-detects the
+                  right industry template, picks the best hero style, and generates
+                  a custom illustration — all from what you write here.
                 </p>
               </div>
 
@@ -317,12 +284,12 @@ export default function WebsitesPage() {
                 <label className="text-xs font-medium text-slate-600">Description</label>
                 <Textarea
                   className="mt-1 no-zoom"
-                  rows={3}
+                  rows={4}
                   value={newSite.description}
                   onChange={(e) =>
                     setNewSite((s) => ({ ...s, description: e.target.value }))
                   }
-                  placeholder="Tell us what the business does, who they serve, and the tone you want."
+                  placeholder="Who they are, who they serve, their vibe. The more you write, the better the AI matches the look and tone."
                 />
               </div>
 
@@ -349,7 +316,7 @@ export default function WebsitesPage() {
                   onChange={(e) =>
                     setNewSite((s) => ({ ...s, suggestions: e.target.value }))
                   }
-                  placeholder="e.g. Use dark hero, emphasise 24/7 availability, include a map section..."
+                  placeholder="e.g. Use dark hero, beams variant, emphasise 24/7 availability..."
                 />
               </div>
 
@@ -378,13 +345,83 @@ export default function WebsitesPage() {
                 </label>
               </div>
 
+              {/* Collapsed template override */}
+              <div className="border-t border-slate-100 pt-4">
+                <button
+                  onClick={() => setTemplateOverrideOpen((o) => !o)}
+                  className="flex w-full items-center justify-between text-left"
+                >
+                  <span className="text-xs font-medium text-slate-600">
+                    Advanced: force a specific template
+                    {newSite.template ? (
+                      <span className="ml-2 rounded-full bg-[#1D9CA1]/10 px-2 py-0.5 text-[10px] font-semibold text-[#1D9CA1]">
+                        {newSite.template}
+                      </span>
+                    ) : null}
+                  </span>
+                  <ChevronDown
+                    className={`h-4 w-4 text-slate-400 transition-transform ${
+                      templateOverrideOpen ? 'rotate-180' : ''
+                    }`}
+                  />
+                </button>
+                <AnimatePresence>
+                  {templateOverrideOpen ? (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="overflow-hidden"
+                    >
+                      <p className="mt-2 text-[11px] text-slate-500">
+                        Leave this off to let the AI pick. Only override when you
+                        know the business doesn&apos;t match any obvious industry keyword.
+                      </p>
+                      <div className="mt-2 grid grid-cols-2 gap-1.5 md:grid-cols-3">
+                        <button
+                          onClick={() =>
+                            setNewSite((s) => ({ ...s, template: undefined }))
+                          }
+                          className={`rounded-lg border p-2 text-left text-[11px] transition-all ${
+                            newSite.template === undefined
+                              ? 'border-[#1D9CA1] bg-[#1D9CA1]/5 text-[#1D9CA1]'
+                              : 'border-slate-200 text-slate-600 hover:border-slate-300'
+                          }`}
+                        >
+                          <span className="font-semibold">Auto-detect</span>
+                          <span className="block text-slate-400">
+                            Recommended
+                          </span>
+                        </button>
+                        {TEMPLATES.map((t) => (
+                          <button
+                            key={t.id}
+                            onClick={() => setNewSite((s) => ({ ...s, template: t.id }))}
+                            className={`rounded-lg border p-2 text-left text-[11px] transition-all ${
+                              newSite.template === t.id
+                                ? 'border-[#1D9CA1] bg-[#1D9CA1]/5 text-[#1D9CA1]'
+                                : 'border-slate-200 text-slate-600 hover:border-slate-300'
+                            }`}
+                          >
+                            <span className="font-semibold">{t.name}</span>
+                            <span className="block truncate text-slate-400">
+                              {t.description}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </motion.div>
+                  ) : null}
+                </AnimatePresence>
+              </div>
+
               <div className="flex flex-col items-stretch gap-3 border-t border-slate-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
                 <span className="text-xs text-slate-500">
-                  Generation usually takes under 30s.
+                  Generation takes ~30–60s (includes AI hero image).
                 </span>
                 <Button onClick={generate} loading={running} size="lg" disabled={running}>
                   {running ? <Spinner /> : <Sparkles className="h-4 w-4" />}
-                  {running ? 'Generating…' : 'Generate site config'}
+                  {running ? 'Generating…' : 'Generate site'}
                 </Button>
               </div>
             </CardContent>
@@ -504,11 +541,18 @@ export default function WebsitesPage() {
               className="space-y-4"
             >
               <div className="flex items-center justify-between">
-                <h2 className="text-sm font-semibold text-slate-900">Live preview</h2>
+                <div className="flex items-center gap-3">
+                  <h2 className="text-sm font-semibold text-slate-900">Live preview</h2>
+                  {editMode ? (
+                    <Badge tone="info">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider">
+                        Edit mode
+                      </span>
+                    </Badge>
+                  ) : null}
+                </div>
                 <a
-                  href={`/sites/${slugify(
-                    clients.find((c) => c.id === newSite.clientId)?.businessName ?? '',
-                  )}`}
+                  href={`/sites/${slugify(selectedClient?.businessName ?? '')}`}
                   target="_blank"
                   rel="noopener noreferrer"
                 >
@@ -519,7 +563,7 @@ export default function WebsitesPage() {
                 </a>
               </div>
 
-              <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_360px]">
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_380px]">
                 <Card>
                   <CardContent className="p-0 overflow-hidden">
                     <div className="flex items-center gap-2 border-b border-slate-200 bg-slate-50 px-4 py-2">
@@ -533,28 +577,27 @@ export default function WebsitesPage() {
                     <div className="max-h-[85vh] overflow-y-auto bg-white">
                       <SiteRenderer
                         config={config}
-                        businessName={
-                          clients.find((c) => c.id === newSite.clientId)?.businessName ??
-                          'Your Business'
-                        }
+                        businessName={selectedClient?.businessName ?? 'Your Business'}
                         images={clientImages}
                         clientId={newSite.clientId}
                         embedded
+                        editMode={editMode}
+                        onFieldChange={handleFieldChange}
                       />
                     </div>
                   </CardContent>
                 </Card>
 
-                {/* Site editor panel */}
                 <SiteEditor
                   config={config}
                   onChange={setConfig}
                   clientId={newSite.clientId}
                   images={clientImages}
+                  editMode={editMode}
+                  onEditModeChange={setEditMode}
                 />
               </div>
 
-              {/* Raw config toggle */}
               <details className="rounded-2xl border border-slate-200 bg-white p-4">
                 <summary className="cursor-pointer text-sm font-semibold text-slate-900">
                   View raw config JSON

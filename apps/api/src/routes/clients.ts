@@ -151,6 +151,65 @@ clientsRouter.get('/public/by-slug/:slug/site', publicLimiter, async (req, res, 
   }
 });
 
+/**
+ * Public endpoint: resolve a host (e.g. `murphysplumbing.com`) to the client
+ * that owns it, returning just the slug. The apps/web middleware uses this
+ * to rewrite custom-domain requests to the internal `/sites/[slug]` path
+ * without needing a direct DB connection from the edge.
+ *
+ * Deliberately minimal response — no site data, no images — so this can
+ * be called on every request without paying a cold-start cost.
+ */
+clientsRouter.get('/public/by-host/:host', publicLimiter, async (req, res, next) => {
+  try {
+    const host = String(req.params.host).toLowerCase().replace(/^www\./, '');
+    if (!host || host.length > 253) {
+      return res
+        .status(404)
+        .json({ error: { message: 'Unknown host', code: 'NOT_FOUND' } });
+    }
+
+    if (!isDbConfigured()) {
+      // Mock: pretend the first client owns the requested host.
+      const first = mockClients[0]!;
+      return res.json({
+        data: {
+          slug: slugify(first.businessName),
+          clientId: first.id,
+        },
+      });
+    }
+
+    const db = getDb();
+    const [match] = await db
+      .select({
+        id: clients.id,
+        slug: clients.slug,
+        status: clients.customDomainStatus,
+        isActive: clients.isActive,
+      })
+      .from(clients)
+      .where(eq(clients.customDomain, host))
+      .limit(1);
+
+    if (!match || !match.isActive) {
+      return res
+        .status(404)
+        .json({ error: { message: 'Unknown host', code: 'NOT_FOUND' } });
+    }
+
+    res.json({
+      data: {
+        slug: match.slug,
+        clientId: match.id,
+        verified: match.status === 'verified',
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
 clientsRouter.get('/:id', requireAuth, async (req, res, next) => {
   try {
     const id = String(req.params.id);

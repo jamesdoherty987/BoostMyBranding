@@ -3,7 +3,9 @@
  *   1. Scrape the client's existing site (if they have one) for voice + facts.
  *   2. Pull their recent images and pass short descriptions for hero-image hints.
  *   3. Ask Claude for a structured website config JSON (see prompts.ts).
- *   4. Persist the result on the client row so the front-end can render it.
+ *   4. Generate a custom hero illustration via fal.ai (kicked off in parallel
+ *      with the config call when no client image will be used).
+ *   5. Persist the result on the client row so the front-end can render it.
  *
  * Every step is retryable. If the scrape fails the pipeline still runs — we
  * just produce a simpler config from description + images alone. The shape
@@ -13,13 +15,14 @@
 
 import { eq, desc } from 'drizzle-orm';
 import { getDb, isDbConfigured, clients, clientImages } from '@boost/database';
-import type { WebsiteConfig, SiteTemplate } from '@boost/core';
-import { DEFAULT_LAYOUT } from '@boost/core';
+import type { WebsiteConfig, SiteTemplate, HeroVariant } from '@boost/core';
+import { DEFAULT_LAYOUT, DEFAULT_HERO_VARIANT } from '@boost/core';
 import { generateJSON } from './claude.js';
 import { scrapeWebsite } from './scraper.js';
 import { websiteConfigPrompt } from './prompts.js';
 import { withRetry } from './retry.js';
 import { broadcast } from './realtime.js';
+import { generateHeroImage } from './heroImage.js';
 import { features } from '../env.js';
 
 export type { WebsiteConfig } from '@boost/core';
@@ -34,6 +37,11 @@ export interface GenerateWebsiteArgs {
   template?: SiteTemplate;
   /** Free-text suggestions from the agency to steer the AI output. */
   suggestions?: string;
+  /**
+   * When true (default), generate an AI hero image if no client image is
+   * used. Set to false in tests or when the agency explicitly skips it.
+   */
+  generateHeroImage?: boolean;
 }
 
 export async function generateWebsite(args: GenerateWebsiteArgs) {
@@ -85,7 +93,8 @@ export async function generateWebsite(args: GenerateWebsiteArgs) {
           .join('\n')
       : undefined;
 
-  const template = args.template ?? inferTemplate(client.industry);
+  // Template still passed as a HINT — Claude is free to pick a better one.
+  const templateHint = args.template ?? inferTemplate(client.industry);
 
   // 3. Generate config. Retryable because Claude occasionally returns malformed JSON.
   const prompt = websiteConfigPrompt({
@@ -100,18 +109,49 @@ export async function generateWebsite(args: GenerateWebsiteArgs) {
     hasBooking: args.hasBooking,
     hasHours: args.hasHours,
     imageDescriptions,
-    template,
+    template: templateHint,
     suggestions: args.suggestions,
   });
 
   const raw = await withRetry(
-    () => generateJSON<Partial<WebsiteConfig>>(prompt, { model: 'sonnet', maxTokens: 4096 }),
+    () => generateJSON<Partial<WebsiteConfig>>(prompt, { model: 'sonnet', maxTokens: 5120 }),
     { label: `website_config:${client.id}`, attempts: 3 },
   );
 
-  const config = normalizeConfig(raw, template);
+  // Claude picks the template — fall back to the hint if it didn't.
+  const chosenTemplate = (raw.template ?? templateHint) as SiteTemplate;
+  const config = normalizeConfig(raw, chosenTemplate);
 
-  // 4. Persist for the front-end to render.
+  // 4. Generate AI hero image if no client image is selected. Runs after the
+  // config so we can pass the chosen variant to the image prompt.
+  const shouldGenerateImage =
+    (args.generateHeroImage ?? true) &&
+    config.hero.imageIndex == null &&
+    // Skip when Claude already supplied an AI prompt+URL (shouldn't happen
+    // on a fresh generation, but defensive).
+    !config.hero.aiImageUrl;
+
+  if (shouldGenerateImage) {
+    try {
+      const { imageUrl, prompt: imagePrompt } = await generateHeroImage({
+        clientId: client.id,
+        businessName: client.businessName,
+        industry: client.industry ?? 'Local Business',
+        description: args.description ?? client.brandVoice ?? undefined,
+        heroVariant: config.hero.variant,
+      });
+      config.hero.aiImageUrl = imageUrl;
+      config.hero.aiImagePrompt = imagePrompt;
+    } catch (e) {
+      console.warn(
+        `[websites] hero image generation failed for ${client.id}:`,
+        (e as Error).message,
+      );
+      // Non-fatal — hero variants all have non-image fallbacks.
+    }
+  }
+
+  // 5. Persist for the front-end to render.
   await db
     .update(clients)
     .set({
@@ -165,6 +205,8 @@ RULES:
 - If asked to add/remove sections, update the layout array.
 - If asked to rewrite copy, update the relevant text fields.
 - If asked to change the hero style, update brand.heroStyle.
+- If asked to change the hero look/variant, update hero.variant to one of: spotlight, beams, floating-icons, parallax-layers, gradient-mesh.
+- If asked for different floating icons, update hero.floatingIcons (Lucide names or emoji strings).
 - Keep the same JSON structure — don't add or remove top-level keys.
 - The summary should be concise and specific, e.g. "Changed primary color to navy blue and made the hero dark."`;
 
@@ -179,7 +221,7 @@ RULES:
   const result = await withRetry(
     () => generateJSON<{ config: Partial<WebsiteConfig>; summary: string }>(prompt, {
       model: 'sonnet',
-      maxTokens: 4096,
+      maxTokens: 5120,
       temperature: 0.3,
     }),
     { label: `edit_website:${args.clientId}`, attempts: 2 },
@@ -201,6 +243,53 @@ RULES:
 }
 
 /**
+ * Targeted edit of a single field. Used by the inline section editor so a
+ * single headline change doesn't round-trip through Claude.
+ */
+export async function updateWebsiteField(args: {
+  clientId: string;
+  path: string[];
+  value: unknown;
+}): Promise<WebsiteConfig> {
+  if (!isDbConfigured()) {
+    throw new Error('Database not configured');
+  }
+  const db = getDb();
+  const [row] = await db
+    .select({ websiteConfig: clients.websiteConfig })
+    .from(clients)
+    .where(eq(clients.id, args.clientId));
+  if (!row?.websiteConfig) throw new Error('No website config for this client');
+
+  // Deep clone so we don't mutate the cached JSONB reference.
+  const next = structuredClone(row.websiteConfig) as Record<string, any>;
+  setPath(next, args.path, args.value);
+
+  await db
+    .update(clients)
+    .set({ websiteConfig: next as any, websiteGeneratedAt: new Date() })
+    .where(eq(clients.id, args.clientId));
+
+  return next as WebsiteConfig;
+}
+
+/** Set a nested value by path, creating intermediate objects/arrays as needed. */
+function setPath(target: Record<string, any>, path: string[], value: unknown) {
+  if (path.length === 0) return;
+  let cursor: any = target;
+  for (let i = 0; i < path.length - 1; i++) {
+    const key = path[i]!;
+    // Numeric key → treat current level as an array.
+    if (cursor[key] == null) {
+      const nextKey = path[i + 1]!;
+      cursor[key] = /^\d+$/.test(nextKey) ? [] : {};
+    }
+    cursor = cursor[key];
+  }
+  cursor[path[path.length - 1]!] = value;
+}
+
+/**
  * Normalize a raw model response into a complete `WebsiteConfig`. Fills in
  * sensible defaults for any missing field so the renderer never sees a
  * partial config.
@@ -215,6 +304,19 @@ function normalizeConfig(raw: Partial<WebsiteConfig>, template: SiteTemplate): W
     darkColor: raw.brand?.darkColor ?? '#0B1220',
     heroStyle: raw.brand?.heroStyle ?? (template === 'fitness' ? 'dark' : 'light'),
   } satisfies WebsiteConfig['brand'];
+
+  // Clamp hero.variant to a known value — unknown strings fall back to the
+  // template's default variant so the dispatcher never hits a dead branch.
+  const validVariants: HeroVariant[] = [
+    'spotlight',
+    'beams',
+    'floating-icons',
+    'parallax-layers',
+    'gradient-mesh',
+  ];
+  const variant: HeroVariant = validVariants.includes(raw.hero?.variant as HeroVariant)
+    ? (raw.hero!.variant as HeroVariant)
+    : DEFAULT_HERO_VARIANT[template];
 
   return {
     template: raw.template ?? template,
@@ -231,8 +333,12 @@ function normalizeConfig(raw: Partial<WebsiteConfig>, template: SiteTemplate): W
       eyebrow: raw.hero?.eyebrow,
       ctaPrimary: raw.hero?.ctaPrimary ?? { label: 'Get in touch', href: '#contact' },
       ctaSecondary: raw.hero?.ctaSecondary,
-      imageIndex: raw.hero?.imageIndex ?? 0,
-      effects: raw.hero?.effects ?? { aurora: true, particles: true, grid: true },
+      imageIndex: raw.hero?.imageIndex ?? null,
+      variant,
+      floatingIcons: raw.hero?.floatingIcons,
+      aiImageUrl: raw.hero?.aiImageUrl ?? null,
+      aiImagePrompt: raw.hero?.aiImagePrompt,
+      effects: raw.hero?.effects,
     },
     about: raw.about,
     stats: raw.stats,
@@ -250,18 +356,23 @@ function normalizeConfig(raw: Partial<WebsiteConfig>, template: SiteTemplate): W
   };
 }
 
-/** Heuristic industry → template picker. */
+/** Heuristic industry → template picker. Used as a hint only — Claude chooses. */
 function inferTemplate(industry: string | null | undefined): SiteTemplate {
   const i = (industry ?? '').toLowerCase();
-  if (/food|cafe|restaurant|coffee|bakery|drink|bar|catering/.test(i)) return 'food';
-  if (/beauty|salon|spa|wellness|nail|hair|aesthetic|skincare/.test(i)) return 'beauty';
-  if (/fitness|gym|coach|health|yoga|training|sport|pilates/.test(i)) return 'fitness';
-  if (/law|accounting|consult|agency|finance|insurance|advisory/.test(i)) return 'professional';
-  if (/retail|shop|store|boutique|ecommerce|fashion/.test(i)) return 'retail';
-  if (/medical|dental|doctor|clinic|physio|therapy|chiro/.test(i)) return 'medical';
-  if (/design|photo|art|creative|studio|music|film|video/.test(i)) return 'creative';
-  if (/property|real.?estate|letting|estate.?agent|mortgage/.test(i)) return 'realestate';
-  if (/school|tutor|education|training|course|academy|learn/.test(i)) return 'education';
+  if (/food|cafe|restaurant|coffee|bakery|drink|bar|catering|kitchen|dining/.test(i)) return 'food';
+  if (/beauty|salon|spa|wellness|nail|hair|aesthetic|skincare|barber/.test(i)) return 'beauty';
+  if (/fitness|gym|coach|yoga|pilates|crossfit|bootcamp|personal.?train/.test(i)) return 'fitness';
+  if (/law|solicitor|attorney|legal|barrister|court/.test(i)) return 'legal';
+  if (/accounting|consult|agency|finance|insurance|advisory|audit|bookkeep/.test(i)) return 'professional';
+  if (/retail|shop|store|boutique|ecommerce|fashion|clothing|gift/.test(i)) return 'retail';
+  if (/medical|dental|doctor|clinic|physio|therapy|chiro|health.?care/.test(i)) return 'medical';
+  if (/design|photo|art|creative|studio|music|film|video|brand/.test(i)) return 'creative';
+  if (/property|real.?estate|letting|estate.?agent|mortgage|rental/.test(i)) return 'realestate';
+  if (/school|tutor|education|training|course|academy|learn|college|university/.test(i)) return 'education';
+  if (/auto|mechanic|garage|car|vehicle|tire|tyre|mot|body.?shop/.test(i)) return 'automotive';
+  if (/hotel|bnb|b&b|guest.?house|resort|hostel|hospitality|inn|lodge/.test(i)) return 'hospitality';
+  if (/charity|nonprofit|non.?profit|foundation|ngo|community|volunteer/.test(i)) return 'nonprofit';
+  if (/tech|software|saas|startup|app|platform|ai|ml|digital|dev/.test(i)) return 'tech';
   return 'service';
 }
 
@@ -276,6 +387,11 @@ const TEMPLATE_DEFAULTS: Record<SiteTemplate, { primary: string; accent: string 
   creative: { primary: '#e11d48', accent: '#f97316' },
   realestate: { primary: '#1e3a5f', accent: '#48D886' },
   education: { primary: '#4f46e5', accent: '#818cf8' },
+  automotive: { primary: '#1e293b', accent: '#dc2626' },
+  hospitality: { primary: '#78350f', accent: '#d97706' },
+  legal: { primary: '#1e3a8a', accent: '#b45309' },
+  nonprofit: { primary: '#059669', accent: '#f59e0b' },
+  tech: { primary: '#4338ca', accent: '#06b6d4' },
 };
 
 /**
@@ -307,8 +423,14 @@ function demoConfig(name: string, industry: string, template: SiteTemplate): Web
       subheadline: `${name} has been serving the community for years. Book online in under a minute.`,
       ctaPrimary: { label: 'Book now', href: '#contact' },
       ctaSecondary: { label: 'See what we do', href: '#services' },
-      imageIndex: 0,
-      effects: { aurora: true, particles: true, grid: true },
+      imageIndex: null,
+      variant: DEFAULT_HERO_VARIANT[template],
+      floatingIcons:
+        template === 'food'
+          ? ['Coffee', 'Utensils', 'Leaf', 'Flame', 'Star', 'Award']
+          : template === 'beauty'
+            ? ['Scissors', 'Sparkles', 'HeartPulse', 'Sun', 'Star', 'Leaf']
+            : undefined,
     },
     stats: [
       { value: 500, suffix: '+', label: 'Happy customers' },

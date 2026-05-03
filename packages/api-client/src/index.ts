@@ -316,7 +316,22 @@ export class BoostApi {
     services?: string[];
     hasBooking?: boolean;
     hasHours?: boolean;
-    template?: 'service' | 'food' | 'beauty' | 'fitness' | 'professional' | 'retail' | 'medical' | 'creative' | 'realestate' | 'education';
+    template?:
+      | 'service'
+      | 'food'
+      | 'beauty'
+      | 'fitness'
+      | 'professional'
+      | 'retail'
+      | 'medical'
+      | 'creative'
+      | 'realestate'
+      | 'education'
+      | 'automotive'
+      | 'hospitality'
+      | 'legal'
+      | 'nonprofit'
+      | 'tech';
     suggestions?: string;
   }) {
     return this.request<{
@@ -346,6 +361,36 @@ export class BoostApi {
   }
 
   /**
+   * Targeted single-field update. Used by the inline editor — a headline
+   * tweak shouldn't round-trip through Claude. `path` is dotted
+   * (e.g. `hero.headline`, `services.0.title`).
+   */
+  updateWebsiteField(args: {
+    clientId: string;
+    path: string;
+    value: unknown;
+  }) {
+    return this.request<{ config: WebsiteConfig }>(
+      '/api/v1/automation/update-website-field',
+      {
+        method: 'POST',
+        body: JSON.stringify(args),
+      },
+    );
+  }
+
+  /** Regenerate (or first-generate) the AI hero image for a client. */
+  generateHeroImage(args: { clientId: string; overridePrompt?: string }) {
+    return this.request<{ imageUrl: string; prompt: string; fromMock?: boolean }>(
+      '/api/v1/automation/generate-hero-image',
+      {
+        method: 'POST',
+        body: JSON.stringify(args),
+      },
+    );
+  }
+
+  /**
    * Public, unauthenticated: fetch a generated site by slug to render it
    * at /sites/[slug]. Returns null config when no site has been generated yet.
    */
@@ -356,6 +401,73 @@ export class BoostApi {
       config: WebsiteConfig | null;
       images: string[];
     }>(`/api/v1/clients/public/by-slug/${encodeURIComponent(slug)}/site`);
+  }
+
+  // ----- Custom Domains -----
+  /**
+   * Public, unauthenticated: resolve a host (e.g. `murphysplumbing.com`) to
+   * the internal slug. Called by the apps/web middleware for every custom-
+   * domain request, so the response is intentionally minimal.
+   */
+  resolveHost(host: string) {
+    return this.request<{ slug: string; clientId: string; verified: boolean }>(
+      `/api/v1/clients/public/by-host/${encodeURIComponent(host)}`,
+    );
+  }
+
+  attachDomain(clientId: string, domain: string) {
+    return this.request<{
+      clientId: string;
+      customDomain: string;
+      status: 'pending' | 'provisioning' | 'verified' | 'failed';
+      verification: {
+        name: string;
+        verified: boolean;
+        requiredRecords: Array<{ type: string; name: string; value: string }>;
+        error?: string;
+      };
+    }>(`/api/v1/domains/${encodeURIComponent(clientId)}`, {
+      method: 'POST',
+      body: JSON.stringify({ domain }),
+    });
+  }
+
+  getDomain(clientId: string) {
+    return this.request<{
+      clientId: string;
+      customDomain: string;
+      status: string;
+      error: string | null;
+      verifiedAt: string | null;
+      verification: {
+        name: string;
+        verified: boolean;
+        requiredRecords: Array<{ type: string; name: string; value: string }>;
+        error?: string;
+      };
+    } | null>(`/api/v1/domains/${encodeURIComponent(clientId)}`);
+  }
+
+  verifyDomain(clientId: string) {
+    return this.request<{
+      status: 'provisioning' | 'verified';
+      verification: {
+        name: string;
+        verified: boolean;
+        requiredRecords: Array<{ type: string; name: string; value: string }>;
+        error?: string;
+      };
+    }>(`/api/v1/domains/${encodeURIComponent(clientId)}/verify`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  }
+
+  detachDomain(clientId: string) {
+    return this.request<{ removed: true }>(
+      `/api/v1/domains/${encodeURIComponent(clientId)}`,
+      { method: 'DELETE' },
+    );
   }
 
   // ----- Billing -----

@@ -19,7 +19,12 @@ export type SiteTemplate =
   | 'medical'
   | 'creative'
   | 'realestate'
-  | 'education';
+  | 'education'
+  | 'automotive'
+  | 'hospitality'
+  | 'legal'
+  | 'nonprofit'
+  | 'tech';
 
 /** Which blocks are rendered, and in what order. */
 export type SiteBlockKey =
@@ -33,6 +38,31 @@ export type SiteBlockKey =
   | 'faq'
   | 'contact'
   | 'footer';
+
+/**
+ * High-level hero layout. Each variant is a fundamentally different visual
+ * treatment, not just a toggle on the same layout. Claude picks one per
+ * business — what feels right for a cafe is not what feels right for a
+ * consultancy.
+ *
+ *   spotlight        — Centered copy, mouse-following spotlight glow.
+ *                      Premium, confident. Great for professional / medical.
+ *   beams            — Animated SVG beams in brand colors behind centered
+ *                      copy. Energetic. Great for fitness / creative.
+ *   floating-icons   — Grid of parallax-drifting industry icons/emojis
+ *                      behind the copy. Playful. Great for food / beauty.
+ *   parallax-layers  — Split layout with a client image that parallaxes
+ *                      deep on scroll + accent orbs. Photo-heavy use cases.
+ *   gradient-mesh    — Slow-shifting animated gradient mesh, no image needed.
+ *                      Minimal + bold. Great for retail / creative / when the
+ *                      client has no photos yet.
+ */
+export type HeroVariant =
+  | 'spotlight'
+  | 'beams'
+  | 'floating-icons'
+  | 'parallax-layers'
+  | 'gradient-mesh';
 
 export interface WebsiteConfig {
   /** Which visual template to use. Defaults to `service` if omitted. */
@@ -70,7 +100,30 @@ export interface WebsiteConfig {
     ctaSecondary?: { label: string; href: string };
     /** Index into the provided `images` array. */
     imageIndex: number | null;
-    /** Visual effects layered behind the hero copy. */
+    /**
+     * Which visual treatment the hero uses. Claude picks one per business.
+     * If omitted, falls back to a sensible default for the template.
+     */
+    variant?: HeroVariant;
+    /**
+     * Lucide icon names (or emoji strings like "☕") that populate the
+     * `floating-icons` variant. 6–10 suggested. Claude chooses icons that
+     * represent what the business does.
+     */
+    floatingIcons?: string[];
+    /**
+     * AI-generated hero illustration URL. Populated by fal.ai when no
+     * client image is suitable for the hero. Used as a fallback image by
+     * any variant that supports a hero image (spotlight, parallax-layers).
+     */
+    aiImageUrl?: string | null;
+    /**
+     * Prompt that was used (or should be used) to generate `aiImageUrl`.
+     * Stored so the agency can regenerate or tweak the image without a
+     * full site regeneration.
+     */
+    aiImagePrompt?: string;
+    /** Legacy per-effect toggles. Kept for backwards compatibility. */
     effects?: {
       aurora?: boolean;
       particles?: boolean;
@@ -145,7 +198,43 @@ export const DEFAULT_LAYOUT: Record<SiteTemplate, SiteBlockKey[]> = {
   creative: ['nav', 'hero', 'gallery', 'about', 'services', 'reviews', 'contact', 'footer'],
   realestate: ['nav', 'hero', 'stats', 'services', 'gallery', 'reviews', 'faq', 'contact', 'footer'],
   education: ['nav', 'hero', 'about', 'stats', 'services', 'reviews', 'faq', 'contact', 'footer'],
+  automotive: ['nav', 'hero', 'services', 'stats', 'gallery', 'reviews', 'faq', 'contact', 'footer'],
+  hospitality: ['nav', 'hero', 'gallery', 'about', 'services', 'reviews', 'contact', 'footer'],
+  legal: ['nav', 'hero', 'about', 'services', 'reviews', 'faq', 'contact', 'footer'],
+  nonprofit: ['nav', 'hero', 'about', 'stats', 'services', 'reviews', 'contact', 'footer'],
+  tech: ['nav', 'hero', 'stats', 'services', 'about', 'reviews', 'faq', 'contact', 'footer'],
 };
+
+/**
+ * Default hero variant per template — picked when the generator omits one.
+ * Matched to the psychology of each industry.
+ */
+export const DEFAULT_HERO_VARIANT: Record<SiteTemplate, HeroVariant> = {
+  service: 'parallax-layers',
+  food: 'floating-icons',
+  beauty: 'parallax-layers',
+  fitness: 'beams',
+  professional: 'spotlight',
+  retail: 'gradient-mesh',
+  medical: 'spotlight',
+  creative: 'gradient-mesh',
+  realestate: 'parallax-layers',
+  education: 'beams',
+  automotive: 'beams',
+  hospitality: 'parallax-layers',
+  legal: 'spotlight',
+  nonprofit: 'floating-icons',
+  tech: 'beams',
+};
+
+/** All hero variants the generator can pick from. */
+export const HERO_VARIANTS: HeroVariant[] = [
+  'spotlight',
+  'beams',
+  'floating-icons',
+  'parallax-layers',
+  'gradient-mesh',
+];
 
 /** Brand palette derived from a primary color. Used when the generator misses one. */
 export const BRAND_FALLBACK = {

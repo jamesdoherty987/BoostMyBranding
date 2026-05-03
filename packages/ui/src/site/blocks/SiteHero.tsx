@@ -1,12 +1,26 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { motion, useScroll, useTransform, useReducedMotion } from 'framer-motion';
-import type { WebsiteConfig } from '@boost/core';
-import { hexToRgbTuple } from '@boost/core';
-import { AuroraBg } from '../../aurora-bg';
-import { Particles } from '../../particles';
-import { brandGradient } from '../theme';
+/**
+ * Hero dispatcher. Picks one of five visual variants based on the config's
+ * `hero.variant` field (or a template-appropriate default). Each variant is
+ * a fundamentally different treatment — spotlight, beams, floating icons,
+ * parallax layers, gradient mesh — not just toggles on the same layout.
+ *
+ * Variants are implemented as separate components in ./hero/* so they can
+ * be worked on independently and shared with other surfaces later. The
+ * generator prompt is expected to pick a variant that matches the
+ * business personality; we fall back by template when it doesn't.
+ */
+
+import type { WebsiteConfig, HeroVariant, SiteTemplate } from '@boost/core';
+import { DEFAULT_HERO_VARIANT } from '@boost/core';
+import {
+  HeroSpotlight,
+  HeroBeams,
+  HeroFloatingIcons,
+  HeroParallaxLayers,
+  HeroGradientMesh,
+} from './hero';
 
 interface SiteHeroProps {
   config: WebsiteConfig;
@@ -17,341 +31,59 @@ interface SiteHeroProps {
 }
 
 /**
- * Full-bleed hero with optional aurora blobs, particles, grid texture, and a
- * parallax image tile. Matches the landing-page hero quality bar: scroll-linked
- * motion, reduced-motion fallbacks, and brand-driven color without hard-coded
- * tokens. All motion is opt-out via `prefers-reduced-motion` and the entire
- * image layer uses `hidden md:block` so it doesn't squash the mobile hero.
+ * Thin dispatcher — no rendering logic, just pick the variant and pass the
+ * right props. Keeping this small means new variants can be added without
+ * touching the blocks that already exist.
+ *
+ * Defensive: if `template` or `variant` contain a value the schema doesn't
+ * recognise (e.g. an older config from before we added variants, or a
+ * corrupted JSON blob), we fall back to `parallax-layers` rather than crash.
  */
 export function SiteHero({ config, images, businessName, embedded }: SiteHeroProps) {
-  const ref = useRef<HTMLDivElement>(null);
-  const reduced = useReducedMotion();
+  const template: SiteTemplate = (config.template ?? 'service') as SiteTemplate;
+  const templateDefault = DEFAULT_HERO_VARIANT[template] ?? 'parallax-layers';
+  const variant: HeroVariant = config.hero?.variant ?? templateDefault;
 
-  // Defer mount of Particles until after hydration. Prevents a hydration
-  // mismatch caused by `useReducedMotion` returning different values on the
-  // server vs client.
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
-
-  const { scrollYProgress } = useScroll({
-    target: ref,
-    offset: ['start start', 'end start'],
-  });
-
-  const copyY = useTransform(scrollYProgress, [0, 1], ['0px', '-60px']);
-  const copyOpacity = useTransform(scrollYProgress, [0, 0.6, 1], [1, 1, 0]);
-  const imageY = useTransform(scrollYProgress, [0, 1], ['0px', '-120px']);
-  const imageScale = useTransform(scrollYProgress, [0, 1], [1, 1.06]);
-
-  const fx = config.hero?.effects ?? { aurora: true, particles: true, grid: true };
-  const dark = config.brand.heroStyle === 'dark';
-  const heroHeadline = config.hero?.headline ?? 'Welcome.';
-  const heroSubhead = config.hero?.subheadline ?? '';
-  const heroImage =
+  // Resolve which image (if any) the hero should use. Precedence:
+  //   1. Explicit client image index
+  //   2. AI-generated hero image
+  //   3. Nothing — variant falls back to its own visual treatment
+  const clientImage =
     config.hero?.imageIndex != null ? images[config.hero.imageIndex] : undefined;
+  const heroImage = clientImage ?? config.hero?.aiImageUrl ?? undefined;
 
-  const primaryRgb = hexToRgbTuple(config.brand.primaryColor);
-  const accentRgb = hexToRgbTuple(config.brand.accentColor);
+  switch (variant) {
+    case 'spotlight':
+      return <HeroSpotlight config={config} heroImage={heroImage} embedded={embedded} />;
 
-  const ctaPrimary = config.hero?.ctaPrimary ?? { label: 'Get in touch', href: '#contact' };
-  const motionDisabled = reduced || embedded;
+    case 'beams':
+      return <HeroBeams config={config} embedded={embedded} />;
 
-  return (
-    <section
-      ref={ref}
-      id="home"
-      className={`relative isolate overflow-hidden ${dark ? 'text-white' : 'text-slate-900'}`}
-      style={{
-        background: dark
-          ? 'linear-gradient(180deg, var(--bmb-site-dark) 0%, #0b1220 100%)'
-          : 'linear-gradient(180deg, #ffffff 0%, #f8fafc 60%, #eef2f7 100%)',
-      }}
-    >
-      {fx.aurora ? <AuroraBg /> : null}
+    case 'floating-icons':
+      return <HeroFloatingIcons config={config} embedded={embedded} />;
 
-      {fx.grid ? (
-        <div
-          aria-hidden
-          className="absolute inset-0 -z-[1]"
-          style={{
-            backgroundImage: dark
-              ? 'linear-gradient(rgba(255,255,255,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.06) 1px, transparent 1px)'
-              : 'linear-gradient(rgba(15,23,42,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(15,23,42,0.06) 1px, transparent 1px)',
-            backgroundSize: '56px 56px',
-            maskImage: 'radial-gradient(ellipse 80% 70% at 50% 40%, black 45%, transparent 100%)',
-            WebkitMaskImage:
-              'radial-gradient(ellipse 80% 70% at 50% 40%, black 45%, transparent 100%)',
-          }}
+    case 'gradient-mesh':
+      return <HeroGradientMesh config={config} embedded={embedded} />;
+
+    case 'parallax-layers':
+      return (
+        <HeroParallaxLayers
+          config={config}
+          heroImage={heroImage}
+          businessName={businessName}
+          embedded={embedded}
         />
-      ) : null}
+      );
 
-      {fx.particles && mounted && !reduced ? (
-        <Particles
-          quantity={60}
-          color={[
-            config.brand.primaryColor,
-            config.brand.accentColor,
-            config.brand.popColor ?? '#FFEC3D',
-          ]}
-          speed={3}
-          maxSize={3}
-          className="absolute inset-0 -z-[1]"
+    default:
+      // Unknown variant — safe fallback.
+      return (
+        <HeroParallaxLayers
+          config={config}
+          heroImage={heroImage}
+          businessName={businessName}
+          embedded={embedded}
         />
-      ) : null}
-
-      <div className="mx-auto grid max-w-6xl grid-cols-1 items-center gap-10 px-4 py-20 md:py-28 lg:grid-cols-2 lg:gap-14 lg:py-32">
-        <motion.div
-          className="relative z-10"
-          style={motionDisabled ? undefined : { y: copyY, opacity: copyOpacity }}
-        >
-          {config.hero?.eyebrow ? (
-            <p
-              className="mb-4 text-xs font-semibold uppercase tracking-[0.25em]"
-              style={{ color: dark ? '#fff' : 'var(--bmb-site-primary)' }}
-            >
-              {config.hero.eyebrow}
-            </p>
-          ) : null}
-
-          <h1 className="text-balance text-4xl font-bold leading-[1.05] tracking-tight sm:text-5xl md:text-6xl lg:text-7xl">
-            {splitHeadline(heroHeadline).map((chunk, i) =>
-              chunk.accent ? (
-                <span
-                  key={i}
-                  className="bg-clip-text text-transparent"
-                  style={{ backgroundImage: brandGradient(config.brand, 90) }}
-                >
-                  {chunk.text}
-                </span>
-              ) : (
-                <span key={i}>{chunk.text}</span>
-              ),
-            )}
-          </h1>
-
-          {heroSubhead ? (
-            <p
-              className={`mt-5 max-w-xl text-base md:mt-6 md:text-lg ${
-                dark ? 'text-white/80' : 'text-slate-600'
-              }`}
-            >
-              {heroSubhead}
-            </p>
-          ) : null}
-
-          <div className="mt-8 flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
-            <a
-              href={ctaPrimary.href}
-              className="inline-flex items-center justify-center gap-2 rounded-full px-6 py-3 text-sm font-semibold text-white shadow-lg transition-transform hover:scale-[1.02]"
-              style={{ background: brandGradient(config.brand, 120) }}
-            >
-              {ctaPrimary.label}
-            </a>
-            {config.hero?.ctaSecondary ? (
-              <a
-                href={config.hero.ctaSecondary.href}
-                className={`inline-flex items-center justify-center gap-2 rounded-full border px-6 py-3 text-sm font-semibold transition-colors ${
-                  dark
-                    ? 'border-white/30 bg-white/5 text-white hover:bg-white/10'
-                    : 'border-slate-200 bg-white text-slate-900 hover:bg-slate-50'
-                }`}
-              >
-                {config.hero.ctaSecondary.label}
-              </a>
-            ) : null}
-          </div>
-        </motion.div>
-
-        {/* Visual tile on the right. Hidden below `md` so the mobile hero stays
-            focused on copy; on tablet it rejoins the grid to add depth. */}
-        <motion.div
-          className="relative z-10 mx-auto hidden w-full max-w-lg md:block"
-          style={motionDisabled ? undefined : { y: imageY, scale: imageScale }}
-        >
-          <div
-            className="relative aspect-[4/5] overflow-hidden rounded-[2rem] shadow-2xl"
-            style={{ boxShadow: `0 40px 80px -20px rgba(${primaryRgb}, 0.35)` }}
-          >
-            {heroImage ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={heroImage}
-                alt={`${businessName}, ${config.brand.tagline}`}
-                className="h-full w-full object-cover"
-                loading="eager"
-              />
-            ) : (
-              /* Brand-themed abstract SVG when no hero image is available.
-                 Creates a premium geometric pattern using the client's brand
-                 colors — similar in quality to the landing page rocket. */
-              <BrandHeroSvg brand={config.brand} businessName={businessName} />
-            )}
-            <div
-              aria-hidden
-              className="absolute inset-0"
-              style={{
-                background:
-                  'linear-gradient(180deg, transparent 40%, rgba(0,0,0,0.4) 100%)',
-              }}
-            />
-            <div className="absolute bottom-5 left-5 right-5 rounded-2xl bg-white/90 p-4 shadow-lg backdrop-blur">
-              <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">
-                {config.brand.tagline}
-              </p>
-              <p className="mt-1 line-clamp-2 text-sm font-semibold text-slate-900">
-                {config.meta?.description ?? businessName}
-              </p>
-            </div>
-          </div>
-
-          {/* Floating accent orbs for depth */}
-          <div
-            aria-hidden
-            className="absolute -left-6 -top-6 h-24 w-24 rounded-full blur-2xl"
-            style={{ background: `rgba(${accentRgb}, 0.7)` }}
-          />
-          <div
-            aria-hidden
-            className="absolute -bottom-10 -right-8 h-36 w-36 rounded-full blur-3xl"
-            style={{ background: `rgba(${primaryRgb}, 0.55)` }}
-          />
-        </motion.div>
-      </div>
-    </section>
-  );
-}
-
-/**
- * Brand-themed abstract SVG illustration for the hero tile when no client
- * image is available. Uses the brand's primary, accent, and pop colors to
- * create a premium geometric pattern with layered shapes, gradients, and
- * subtle animation. Designed to look as polished as a custom illustration.
- */
-function BrandHeroSvg({
-  brand,
-  businessName,
-}: {
-  brand: WebsiteConfig['brand'];
-  businessName: string;
-}) {
-  const p = brand.primaryColor;
-  const a = brand.accentColor;
-  const pop = brand.popColor ?? '#FFEC3D';
-
-  return (
-    <svg
-      viewBox="0 0 400 500"
-      className="h-full w-full"
-      role="img"
-      aria-label={`${businessName} brand illustration`}
-    >
-      <defs>
-        <linearGradient id="svgBg" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor={p} />
-          <stop offset="50%" stopColor={a} />
-          <stop offset="100%" stopColor={pop} />
-        </linearGradient>
-        <linearGradient id="svgAccent" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={a} />
-          <stop offset="100%" stopColor={p} />
-        </linearGradient>
-        <radialGradient id="svgGlow" cx="0.5" cy="0.4" r="0.6">
-          <stop offset="0%" stopColor="#fff" stopOpacity="0.15" />
-          <stop offset="100%" stopColor="#fff" stopOpacity="0" />
-        </radialGradient>
-        <filter id="svgBlur">
-          <feGaussianBlur stdDeviation="20" />
-        </filter>
-      </defs>
-
-      {/* Background */}
-      <rect width="400" height="500" fill={p} />
-
-      {/* Large gradient orbs */}
-      <circle cx="100" cy="120" r="160" fill={a} opacity="0.4" filter="url(#svgBlur)" />
-      <circle cx="320" cy="380" r="140" fill={pop} opacity="0.3" filter="url(#svgBlur)" />
-      <circle cx="200" cy="250" r="100" fill={p} opacity="0.5" filter="url(#svgBlur)" />
-
-      {/* Geometric shapes */}
-      <rect x="60" y="80" width="120" height="120" rx="24" fill={a} opacity="0.6" transform="rotate(-12 120 140)" />
-      <rect x="220" y="200" width="100" height="100" rx="20" fill={pop} opacity="0.5" transform="rotate(8 270 250)" />
-      <circle cx="160" cy="320" r="60" fill="url(#svgAccent)" opacity="0.7" />
-      <rect x="280" y="60" width="80" height="80" rx="16" fill={p} opacity="0.4" transform="rotate(15 320 100)" />
-
-      {/* Grid pattern overlay */}
-      <g opacity="0.08">
-        {Array.from({ length: 8 }).map((_, i) => (
-          <line key={`h${i}`} x1="0" y1={i * 62.5} x2="400" y2={i * 62.5} stroke="#fff" strokeWidth="1" />
-        ))}
-        {Array.from({ length: 7 }).map((_, i) => (
-          <line key={`v${i}`} x1={i * 57} y1="0" x2={i * 57} y2="500" stroke="#fff" strokeWidth="1" />
-        ))}
-      </g>
-
-      {/* Floating circles */}
-      <circle cx="80" cy="400" r="8" fill="#fff" opacity="0.3" />
-      <circle cx="340" cy="140" r="6" fill="#fff" opacity="0.25" />
-      <circle cx="200" cy="60" r="10" fill={pop} opacity="0.6" />
-      <circle cx="300" cy="420" r="5" fill="#fff" opacity="0.2" />
-
-      {/* Central diamond accent */}
-      <polygon
-        points="200,160 260,250 200,340 140,250"
-        fill="none"
-        stroke="#fff"
-        strokeWidth="2"
-        opacity="0.15"
-      />
-      <polygon
-        points="200,190 240,250 200,310 160,250"
-        fill="url(#svgGlow)"
-        opacity="0.6"
-      />
-
-      {/* Business initial */}
-      <text
-        x="200"
-        y="265"
-        textAnchor="middle"
-        fontFamily="ui-sans-serif, system-ui, sans-serif"
-        fontSize="48"
-        fontWeight="800"
-        fill="#fff"
-        opacity="0.9"
-      >
-        {businessName.charAt(0).toUpperCase()}
-      </text>
-    </svg>
-  );
-}
-
-/**
- * Split a headline on the last 2-word phrase so we can gradient-highlight it.
- * Produces either one plain chunk (short headlines) or a plain + accent pair.
- * Trailing punctuation is kept OUT of the accent chunk so the gradient text
- * doesn't capture commas or periods.
- */
-function splitHeadline(headline: string): Array<{ text: string; accent?: boolean }> {
-  const cleaned = headline.trim();
-  if (!cleaned) return [{ text: '' }];
-  const words = cleaned.split(/\s+/);
-  if (words.length <= 3) return [{ text: cleaned }];
-
-  // Pull trailing punctuation off the last word so it renders in the plain span.
-  const last = words[words.length - 1] ?? '';
-  const match = last.match(/^([^\p{P}\s]+)([\p{P}]*)$/u);
-  let accentWords: string;
-  let tail = '';
-  if (match) {
-    accentWords = `${words[words.length - 2]} ${match[1]}`;
-    tail = match[2] ?? '';
-  } else {
-    accentWords = words.slice(-2).join(' ');
+      );
   }
-  const leadWords = words.slice(0, -2).join(' ');
-  return [
-    { text: leadWords + ' ' },
-    { text: accentWords, accent: true },
-    ...(tail ? [{ text: tail }] : []),
-  ];
 }

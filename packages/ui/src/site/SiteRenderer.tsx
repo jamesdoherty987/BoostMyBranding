@@ -28,6 +28,16 @@ interface SiteRendererProps {
   /** If true, the renderer uses scroll-independent positioning for iframe
    *  / dashboard previews. Disables sticky nav, parallax, and reveal animations. */
   embedded?: boolean;
+  /**
+   * When true, `InlineEditable` fields render as click-to-edit controls.
+   * Only set in the dashboard preview. Requires `onFieldChange` to persist.
+   */
+  editMode?: boolean;
+  /**
+   * Called with (path, value) when a user commits an inline edit. The
+   * dashboard wires this to the `updateWebsiteField` API.
+   */
+  onFieldChange?: (path: string, value: unknown) => void;
 }
 
 /**
@@ -46,6 +56,8 @@ export function SiteRenderer({
   clientId,
   apiUrl,
   embedded = false,
+  editMode = false,
+  onFieldChange,
 }: SiteRendererProps) {
   const template = config.template ?? 'service';
   const layout: SiteBlockKey[] =
@@ -78,7 +90,9 @@ export function SiteRenderer({
   };
 
   return (
-    <SiteContext.Provider value={{ embedded, apiUrl, clientId, businessName }}>
+    <SiteContext.Provider
+      value={{ embedded, apiUrl, clientId, businessName, editMode, onFieldChange }}
+    >
       <div
         id="top"
         style={style}

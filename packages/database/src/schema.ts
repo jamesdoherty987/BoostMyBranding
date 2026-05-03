@@ -174,11 +174,28 @@ export const clients = pgTable(
     /** Generated site config (see services/websites.ts::WebsiteConfig). */
     websiteConfig: jsonb('website_config'),
     websiteGeneratedAt: timestamp('website_generated_at'),
+    /**
+     * Custom domain the client wants their site served on (e.g. `murphysplumbing.com`).
+     * Lowercase, no protocol, no trailing slash. When set, the `apps/web`
+     * middleware rewrites matching hostnames to `/sites/[slug]` internally.
+     */
+    customDomain: text('custom_domain'),
+    /**
+     * Lifecycle of the custom domain:
+     *   pending       — row saved, waiting for the agency to add it to Vercel.
+     *   provisioning  — added to Vercel, waiting for DNS to propagate.
+     *   verified      — Vercel confirmed the domain is serving traffic.
+     *   failed        — DNS/verification failed. Check customDomainError.
+     */
+    customDomainStatus: text('custom_domain_status'),
+    customDomainVerifiedAt: timestamp('custom_domain_verified_at'),
+    customDomainError: text('custom_domain_error'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
   },
   (table) => ({
     slugIdx: uniqueIndex('clients_slug_idx').on(table.slug),
+    customDomainIdx: uniqueIndex('clients_custom_domain_idx').on(table.customDomain),
   }),
 );
 

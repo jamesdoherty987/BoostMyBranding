@@ -146,19 +146,34 @@ export function websiteConfigPrompt(vars: {
   hasHours?: boolean;
   hasBooking?: boolean;
   imageDescriptions?: string;
-  template?: 'service' | 'food' | 'beauty' | 'fitness' | 'professional' | 'retail' | 'medical' | 'creative' | 'realestate' | 'education';
+  template?:
+    | 'service'
+    | 'food'
+    | 'beauty'
+    | 'fitness'
+    | 'professional'
+    | 'retail'
+    | 'medical'
+    | 'creative'
+    | 'realestate'
+    | 'education'
+    | 'automotive'
+    | 'hospitality'
+    | 'legal'
+    | 'nonprofit'
+    | 'tech';
   suggestions?: string;
 }) {
-  return `You are a senior brand & web copywriter. Generate a complete website config JSON for "${vars.businessName}", a ${vars.industry} business.
+  return `You are a senior brand & web designer + copywriter. Generate a complete, high-quality website config JSON for "${vars.businessName}", a ${vars.industry} business.
 
 BUSINESS DESCRIPTION:
 ${vars.description}
 
-${vars.existingMarkdown ? `EXISTING SITE CONTENT (for voice + facts):\n${vars.existingMarkdown}\n` : ''}${vars.services?.length ? `KNOWN SERVICES: ${vars.services.join(', ')}\n` : ''}${vars.imageDescriptions ? `AVAILABLE IMAGES:\n${vars.imageDescriptions}\n` : ''}${vars.template ? `TEMPLATE HINT: ${vars.template}\n` : ''}${vars.suggestions ? `AGENCY SUGGESTIONS:\n${vars.suggestions}\n` : ''}
+${vars.existingMarkdown ? `EXISTING SITE CONTENT (for voice + facts):\n${vars.existingMarkdown}\n` : ''}${vars.services?.length ? `KNOWN SERVICES: ${vars.services.join(', ')}\n` : ''}${vars.imageDescriptions ? `AVAILABLE IMAGES:\n${vars.imageDescriptions}\n` : ''}${vars.template ? `TEMPLATE HINT (may override if a different one fits better): ${vars.template}\n` : ''}${vars.suggestions ? `AGENCY SUGGESTIONS:\n${vars.suggestions}\n` : ''}
 
 Return ONLY valid JSON in this exact shape:
 {
-  "template": "<service|food|beauty|fitness|professional|retail|medical|creative|realestate|education>",
+  "template": "<service|food|beauty|fitness|professional|retail|medical|creative|realestate|education|automotive|hospitality|legal|nonprofit|tech>",
   "layout": ["nav","hero","stats","services","about","gallery","reviews","faq","contact","footer"],
   "meta": {
     "title": "<SEO page title, ≤60 chars>",
@@ -180,8 +195,9 @@ Return ONLY valid JSON in this exact shape:
     "subheadline": "<1-2 sentences>",
     "ctaPrimary": { "label": "<action verb>", "href": "<#section or url>" },
     "ctaSecondary": { "label": "...", "href": "..." },
-    "imageIndex": <number or null>,
-    "effects": { "aurora": true, "particles": true, "grid": true }
+    "imageIndex": <index from AVAILABLE IMAGES, or null if none suit the hero>,
+    "variant": "<spotlight|beams|floating-icons|parallax-layers|gradient-mesh>",
+    "floatingIcons": ["<6-8 Lucide icon names OR emoji strings — only when variant is floating-icons>"]
   },
   "stats": [
     { "value": <number>, "suffix": "<optional>", "prefix": "<optional>", "label": "<label>" }
@@ -223,13 +239,42 @@ Return ONLY valid JSON in this exact shape:
 }
 
 RULES:
+- Detect the real template from the business description — don't blindly follow the TEMPLATE HINT if another fits better.
 - Write everything in the client's voice, not generic marketing speak.
 - 3-6 services max. Pick icon names ONLY from the list above.
 - Include 3-4 stats, pick whatever's credible for the industry (years in business, customers served, response time, rating).
 - 3 reviews minimum, 5 max. Make them specific (mention the service).
 - 4-6 FAQ items, based on what a real customer would ask.
-- Colours should fit the industry: food warm terracotta/amber; beauty soft rose/magenta; fitness bold blue/green; service teal/green; professional slate/teal; retail purple/gold; medical calm cyan/teal; creative bold red/orange; realestate navy/green; education indigo/violet.
+- Colours should fit the industry:
+  * food → warm terracotta/amber
+  * beauty → soft rose/magenta
+  * fitness → bold blue/green (often dark hero)
+  * service → teal/green
+  * professional → slate/teal
+  * retail → purple/gold
+  * medical → calm cyan/teal
+  * creative → bold red/orange
+  * realestate → navy/green
+  * education → indigo/violet
+  * automotive → dark slate/red (often dark hero, bold)
+  * hospitality → warm brown/amber
+  * legal → deep navy/gold
+  * nonprofit → emerald/amber
+  * tech → indigo/cyan
 - No placeholder text like "Lorem ipsum", always write real copy.
 - If AGENCY SUGGESTIONS are provided, follow them closely — they override defaults.
-- Last 2 words of the hero headline get auto-highlighted in a brand gradient. Write the headline so the last 2 words form a natural punchy phrase.`;
+- Last 2 words of the hero headline get auto-highlighted in a brand gradient. Write the headline so the last 2 words form a natural punchy phrase.
+
+HERO VARIANT GUIDE — pick the one that matches the business personality:
+- "spotlight": Centered copy with a mouse-following glow. Premium, confident, minimal. Best for professional services, medical, consultancies, high-end brands.
+- "beams": Animated SVG beams sweeping across in brand colors. Energetic, forward-moving. Best for fitness, coaching, creative studios, education, tech-adjacent trades.
+- "floating-icons": Left copy with parallax icons/emojis drifting behind it. Playful, warm. Best for food (coffee ☕ utensils 🍴), beauty (scissors ✂️ sparkles ✨), retail. When you pick this variant you MUST populate floatingIcons with 6–8 entries — mix of Lucide icon names from the services list and emojis relevant to the business.
+- "parallax-layers": Split layout with hero image parallaxing deeper than copy. Classic, works with photography. Best for service trades, real estate, beauty with good photos.
+- "gradient-mesh": Slow-shifting gradient mesh, no image needed. Bold, minimal, confident. Best for retail, creative, or any client without great photography.
+
+IMAGE GUIDANCE:
+- Set hero.imageIndex to a number ONLY if an AVAILABLE IMAGE looks like a strong hero (wide, high-quality, representative). Otherwise null — the system will generate a custom AI illustration.
+- Prefer the "parallax-layers" variant when a hero image IS set.
+- Prefer "gradient-mesh", "beams", or "spotlight" when no hero image is set.
+- Prefer "floating-icons" for warm, personality-driven businesses regardless of image availability.`;
 }

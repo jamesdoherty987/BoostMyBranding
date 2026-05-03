@@ -15,8 +15,8 @@
 
 import { eq, desc } from 'drizzle-orm';
 import { getDb, isDbConfigured, clients, clientImages } from '@boost/database';
-import type { WebsiteConfig, SiteTemplate, HeroVariant } from '@boost/core';
-import { DEFAULT_LAYOUT, DEFAULT_HERO_VARIANT, HERO_VARIANTS } from '@boost/core';
+import type { WebsiteConfig, SiteTemplate, HeroVariant, SiteBlockKey } from '@boost/core';
+import { DEFAULT_LAYOUT, DEFAULT_HERO_VARIANT, HERO_VARIANTS, slugify } from '@boost/core';
 import { generateJSON } from './claude.js';
 import { scrapeWebsite } from './scraper.js';
 import { websiteConfigPrompt } from './prompts.js';
@@ -207,6 +207,8 @@ RULES:
 - If asked to change the hero style, update brand.heroStyle.
 - If asked to change the hero look/variant, update hero.variant to one of: spotlight, beams, floating-icons, parallax-layers, gradient-mesh.
 - If asked for different floating icons, update hero.floatingIcons (Lucide names or emoji strings).
+- If asked to add or remove a page (e.g. "add a Menu page", "remove the About page"), update the "pages" array. Pages have {slug, title, layout, hero?, blocks?}. Use URL-safe slugs. The first page MUST be the homepage with slug "home". Max 4 pages total.
+- If asked to edit a sub-page's content ("change the About page headline"), locate the matching page in "pages" by slug and edit its hero/blocks.
 - Keep the same JSON structure — don't add or remove top-level keys.
 - The summary should be concise and specific, e.g. "Changed primary color to navy blue and made the hero dark."`;
 
@@ -292,7 +294,9 @@ function setPath(target: Record<string, any>, path: string[], value: unknown) {
 /**
  * Normalize a raw model response into a complete `WebsiteConfig`. Fills in
  * sensible defaults for any missing field so the renderer never sees a
- * partial config.
+ * partial config. Also validates the `pages` array — Claude occasionally
+ * returns a page with an invalid slug or missing layout, which we
+ * sanitize here rather than crashing in the renderer.
  */
 function normalizeConfig(raw: Partial<WebsiteConfig>, template: SiteTemplate): WebsiteConfig {
   const brand = {
@@ -313,9 +317,12 @@ function normalizeConfig(raw: Partial<WebsiteConfig>, template: SiteTemplate): W
       ? rawVariant
       : DEFAULT_HERO_VARIANT[template];
 
+  const rootLayout =
+    raw.layout && raw.layout.length > 0 ? raw.layout : DEFAULT_LAYOUT[template];
+
   return {
     template: raw.template ?? template,
-    layout: raw.layout && raw.layout.length > 0 ? raw.layout : DEFAULT_LAYOUT[template],
+    layout: rootLayout,
     meta: {
       title: raw.meta?.title ?? 'Local business',
       description: raw.meta?.description ?? 'Welcome to our site.',
@@ -347,7 +354,110 @@ function normalizeConfig(raw: Partial<WebsiteConfig>, template: SiteTemplate): W
       showHours: false,
     },
     navigation: raw.navigation ?? ['Home', 'Services', 'About', 'Contact'],
+    pages: normalizePages(raw.pages, rootLayout),
   };
+}
+
+/**
+ * Clean up the `pages` array the model returned. Guarantees there's always
+ * a `home` page with a valid layout — if Claude produced garbage, we fall
+ * back to a single-page site whose home page uses the root layout.
+ *
+ * Validation per page:
+ *   - slug must be URL-safe; coerced through slugify(). Falls back to a
+ *     generated one if the slug becomes empty after cleaning.
+ *   - layout must be a non-empty array of valid block keys; defaults to
+ *     `['nav','hero','contact','footer']` if invalid.
+ *   - title is trimmed to 100 chars.
+ */
+function normalizePages(
+  raw: WebsiteConfig['pages'] | undefined,
+  rootLayout: SiteBlockKey[],
+): WebsiteConfig['pages'] | undefined {
+  if (!raw || !Array.isArray(raw) || raw.length === 0) {
+    // Single-page site — no `pages` array needed. The renderer falls back
+    // to the root layout automatically.
+    return undefined;
+  }
+
+  const validBlockKeys: SiteBlockKey[] = [
+    'nav',
+    'hero',
+    'stats',
+    'services',
+    'about',
+    'gallery',
+    'reviews',
+    'faq',
+    'contact',
+    'footer',
+  ];
+
+  const seenSlugs = new Set<string>();
+  const pages: NonNullable<WebsiteConfig['pages']> = [];
+
+  for (const rawPage of raw.slice(0, 4)) {
+    if (!rawPage || typeof rawPage !== 'object') continue;
+
+    let slug = slugify(String(rawPage.slug ?? ''));
+    if (!slug) slug = pages.length === 0 ? 'home' : `page-${pages.length + 1}`;
+    if (seenSlugs.has(slug)) continue; // no duplicates
+    seenSlugs.add(slug);
+
+    const title = String(rawPage.title ?? '').trim().slice(0, 100) || toTitleCase(slug);
+
+    const rawLayout = Array.isArray(rawPage.layout) ? rawPage.layout : [];
+    const layout = rawLayout.filter((k: unknown): k is SiteBlockKey =>
+      validBlockKeys.includes(k as SiteBlockKey),
+    );
+    // Every page must start with nav and end with footer. Enforce that
+    // even if Claude forgot — otherwise the page has no nav/footer and
+    // looks broken.
+    if (layout[0] !== 'nav') layout.unshift('nav');
+    if (layout[layout.length - 1] !== 'footer') layout.push('footer');
+
+    pages.push({
+      slug,
+      title,
+      meta:
+        rawPage.meta && typeof rawPage.meta === 'object'
+          ? {
+              title: rawPage.meta.title,
+              description: rawPage.meta.description,
+            }
+          : undefined,
+      layout,
+      hero: rawPage.hero ?? undefined,
+      blocks: rawPage.blocks ?? undefined,
+    });
+  }
+
+  // Must have at least one page, and the first must be `home`. If we lost
+  // the home page during validation, synthesize one from the root layout
+  // so the site still renders.
+  if (pages.length === 0 || !pages.some((p) => p.slug === 'home')) {
+    pages.unshift({
+      slug: 'home',
+      title: 'Home',
+      layout: rootLayout,
+    });
+  }
+
+  // Single-page case: if the only page is Home and its layout matches the
+  // root layout exactly, skip `pages` altogether to keep the payload lean.
+  if (pages.length === 1 && pages[0]!.slug === 'home') {
+    return undefined;
+  }
+
+  return pages;
+}
+
+/** "practice-areas" → "Practice Areas". Used to derive a nav title from a slug. */
+function toTitleCase(slug: string): string {
+  return slug
+    .split('-')
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
 }
 
 /** Heuristic industry → template picker. Used as a hint only — Claude chooses. */

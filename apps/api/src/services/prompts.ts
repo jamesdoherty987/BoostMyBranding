@@ -138,6 +138,12 @@ Return ONLY JSON:
  * Website config generator. Produces a structured JSON blob that drives a
  * marketing site from a small set of client inputs. Intentionally opinionated
  * about shape so the front-end can render it deterministically.
+ *
+ * The output can describe either a single-page site OR a multi-page site
+ * — Claude decides based on the business. Most small service businesses
+ * just need one scroll-able page; restaurants often benefit from a
+ * separate Menu page; professional services sometimes want Practice
+ * Areas / About / Contact as distinct pages.
  */
 export function websiteConfigPrompt(vars: {
   businessName: string;
@@ -222,8 +228,56 @@ Return ONLY valid JSON in this exact shape:
     "showBookingForm": ${vars.hasBooking ?? false},
     "showHours": ${vars.hasHours ?? true}
   },
-  "navigation": ["Home", "Services", "About", "Contact"]
+  "navigation": ["Home", "Services", "About", "Contact"],
+  "pages": [
+    {
+      "slug": "home",
+      "title": "Home",
+      "layout": ["nav","hero","stats","services","about","reviews","contact","footer"]
+    }
+  ]
 }
+
+PAGES — SINGLE-PAGE vs MULTI-PAGE:
+You MUST decide whether this business needs 1 page or 2–3 pages and populate the "pages" array accordingly. Rules of thumb:
+
+- 1 page (just "home"): small local service businesses, single-location fitness studios, solo beauty professionals, small retail shops, most creative studios. Their whole story fits on one scrolling page.
+
+- 2 pages: hospitality and realestate benefit from a separate dedicated page. Examples:
+  * Hotel → Home + Rooms
+  * Realestate agent → Home + Listings
+  * Cafe with a menu worth showing off → Home + Menu
+  * Gym with a class schedule → Home + Classes
+
+- 3 pages: legal, professional, medical, and larger practices. Examples:
+  * Law firm → Home + Practice Areas + About
+  * Dental clinic → Home + Services + About
+  * Consulting firm → Home + Services + Team
+
+NEVER more than 4 pages total. A "Contact" page is usually unnecessary because every page has a footer with contact info AND the top-right CTA goes to the contact section.
+
+PAGES SHAPE — each entry in "pages" looks like:
+{
+  "slug": "<lowercase-dashed url slug, use 'home' for the homepage>",
+  "title": "<Human title for the nav, e.g. 'Our Menu'>",
+  "meta": { "title": "<optional SEO override>", "description": "<optional>" },
+  "layout": ["nav","hero","services","gallery","contact","footer"],
+  "hero": {
+    "eyebrow": "<optional, different from home>",
+    "headline": "<page-specific headline>",
+    "subheadline": "<page-specific subhead>"
+  },
+  "blocks": {
+    "services": [<page-specific services if different from the home featured list>]
+  }
+}
+
+When you include multiple pages:
+- The HOME page layout normally includes hero + stats + services (featured) + about + reviews + contact sections to give an overview.
+- Sub-pages are more focused: e.g. a Menu page is typically ["nav","hero","services","gallery","contact","footer"]. An About page is ["nav","hero","about","stats","reviews","footer"]. A Practice Areas page is ["nav","hero","services","faq","contact","footer"].
+- Sub-page hero headlines must match the page topic. "Our Menu." for a menu page, "About the team." for an about page — never recycle the homepage hero.
+- Sub-page "blocks" can override services/gallery/etc. with page-specific content. Example: a law firm's homepage services list shows 4 featured practice areas; the Practice Areas sub-page's services list shows all 8.
+- If a sub-page doesn't need a hero, omit it from the layout.
 
 RULES:
 - Detect the real template from the business description — don't blindly follow the TEMPLATE HINT if another fits better.

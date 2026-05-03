@@ -10,15 +10,21 @@
  * handed to the context's `onFieldChange` callback, which the dashboard
  * wires to the API. Escape cancels without persisting.
  *
+ * Multipage routing:
+ *   When the active page is a sub-page (`currentPageSlug !== 'home'`),
+ *   per-page block paths are automatically rewritten to point at the
+ *   page's override. Example on an About sub-page: typing in an
+ *   InlineEditable with `path="hero.headline"` writes to
+ *   `pages.<N>.hero.headline`, not to the root `hero.headline`.
+ *
+ *   Global fields (brand.*, meta.*, navigation) are never remapped.
+ *
  * IMPORTANT — why we don't use `dangerouslySetInnerHTML` + contentEditable:
  *   Setting innerHTML on a contenteditable on every render nukes the
  *   browser selection (cursor jumps to start mid-typing, selection lost,
  *   IME composition breaks). Instead we render text content ONCE on mount
  *   and whenever the external value changes AND we're not currently
  *   editing. Inside the editing session, the DOM is the source of truth.
- *
- * Safe for SSR: the contenteditable only activates when `editMode` is
- * true, which only happens in the dashboard preview.
  */
 
 import {
@@ -48,6 +54,68 @@ interface InlineEditableProps {
   maxLength?: number;
 }
 
+/**
+ * Block keys that live inside a `PageConfig.blocks` override. These are
+ * the per-page data sections — everything else (brand, meta, navigation)
+ * is global across pages and stays at the root.
+ */
+const PER_PAGE_BLOCK_KEYS = new Set([
+  'about',
+  'stats',
+  'services',
+  'gallery',
+  'reviews',
+  'faq',
+  'contact',
+]);
+
+/**
+ * Remap a local field path to the right place in the config when the user
+ * is editing a sub-page.
+ *
+ *   currentPageSlug = 'home' (or undefined)  → path unchanged
+ *   currentPageSlug = 'menu', path = 'hero.headline'
+ *     → 'pages.{N}.hero.headline'     (where N is the index of the menu page)
+ *   currentPageSlug = 'menu', path = 'services.0.title'
+ *     → 'pages.{N}.blocks.services.0.title'
+ *
+ * Global fields (brand.*, meta.*, navigation, template) are never remapped.
+ */
+function remapPathForPage(
+  path: string,
+  currentPageSlug: string | undefined,
+  pageIndex: number | undefined,
+): string {
+  if (!currentPageSlug || currentPageSlug === 'home') return path;
+  if (pageIndex == null || pageIndex < 0) return path;
+
+  // Global keys stay at the root.
+  if (
+    path.startsWith('brand.') ||
+    path.startsWith('meta.') ||
+    path.startsWith('navigation') ||
+    path === 'template'
+  ) {
+    return path;
+  }
+
+  // hero.* → pages.N.hero.*
+  if (path.startsWith('hero.')) {
+    return `pages.${pageIndex}.${path}`;
+  }
+
+  // {block}.* (services.0.title, about.heading, etc) → pages.N.blocks.{block}.*
+  const firstDot = path.indexOf('.');
+  const head = firstDot === -1 ? path : path.slice(0, firstDot);
+  if (PER_PAGE_BLOCK_KEYS.has(head)) {
+    return `pages.${pageIndex}.blocks.${path}`;
+  }
+
+  // Unknown path — leave it alone. Better to write nothing unexpected than
+  // to silently drop an edit into pages.N.blocks.something_we_dont_know.
+  return path;
+}
+
 export function InlineEditable({
   path,
   value,
@@ -57,18 +125,11 @@ export function InlineEditable({
   multiline = false,
   maxLength = 2000,
 }: InlineEditableProps) {
-  const { editMode, onFieldChange } = useSiteContext();
+  const { editMode, onFieldChange, currentPageSlug, pageIndex } = useSiteContext();
   const Tag: ElementType = (as ?? 'span') as ElementType;
   const ref = useRef<HTMLElement | null>(null);
   const [editing, setEditing] = useState(false);
 
-  // When the external value changes AND we're not editing, sync the DOM.
-  // This handles:
-  //   - AI-driven config updates while the panel is idle
-  //   - initial mount (React sets textContent from JSX children anyway, but
-  //     we re-run this so the contenteditable starts in the right state)
-  // We deliberately DO NOT write to the DOM while `editing` is true — that
-  // would clobber the user's cursor and composition state.
   useEffect(() => {
     if (editing) return;
     const el = ref.current;
@@ -78,8 +139,7 @@ export function InlineEditable({
     }
   }, [value, editing]);
 
-  // Non-edit mode: plain element, no extras. We render `value` here and
-  // React will reconcile text content on future updates normally.
+  // Non-edit mode: plain element, no extras. React reconciles normally.
   if (!editMode) {
     return <Tag className={className}>{value}</Tag>;
   }
@@ -87,15 +147,16 @@ export function InlineEditable({
   const commit = (next: string) => {
     const trimmed = next.slice(0, maxLength);
     setEditing(false);
-    if (trimmed !== value) {
-      onFieldChange?.(path, trimmed);
-    }
+    if (trimmed === value) return;
+    // Rewrite the path so edits on a sub-page land in that page's override
+    // rather than stomping the homepage's root field.
+    const writePath = remapPathForPage(path, currentPageSlug, pageIndex);
+    onFieldChange?.(writePath, trimmed);
   };
 
   const onKeyDown = (e: ReactKeyboardEvent<HTMLElement>) => {
     if (e.key === 'Escape') {
       e.preventDefault();
-      // Reset the DOM to the original value and bail out of editing.
       if (ref.current) ref.current.textContent = value;
       setEditing(false);
       (e.target as HTMLElement).blur();
@@ -111,8 +172,6 @@ export function InlineEditable({
     ? 'outline outline-2 outline-offset-2 outline-[#1D9CA1] bg-[#1D9CA1]/5 rounded-md'
     : 'hover:outline hover:outline-2 hover:outline-offset-2 hover:outline-[#1D9CA1]/40 hover:bg-[#1D9CA1]/5 cursor-text rounded-md transition-all';
 
-  // Show placeholder when empty via a data attribute + CSS `::before` hook.
-  // We keep the element empty so the cursor-can-land-here UX still works.
   const isEmpty = !value || value.trim().length === 0;
 
   return (
@@ -133,8 +192,6 @@ export function InlineEditable({
       }
       onKeyDown={onKeyDown}
     >
-      {/* Initial render — after this, the effect above keeps DOM in sync
-          without re-rendering children (which would break the cursor). */}
       {value}
     </Tag>
   );

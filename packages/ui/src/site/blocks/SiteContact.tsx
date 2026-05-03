@@ -255,7 +255,36 @@ export function SiteContact({ config, clientId: clientIdProp, apiUrl: apiUrlProp
             ) : null}
           </div>
         </div>
+
+        {/* Map embed — shown when the client provided an address. Uses the
+            maps.google.com search URL so no API key or geocoding is needed;
+            the iframe picks up the address string and renders the pin. */}
+        {c.address ? <SiteContactMap address={c.address} /> : null}
       </div>
     </SectionWrapper>
+  );
+}
+
+/**
+ * Lightweight Google Maps embed. No API key required — we build a
+ * `maps.google.com/maps?q=...&output=embed` URL, which returns an
+ * interactive map centered on the search query. Lazy-loaded so it
+ * doesn't block the rest of the contact section on first paint.
+ */
+function SiteContactMap({ address }: { address: string }) {
+  const query = encodeURIComponent(address);
+  const src = `https://maps.google.com/maps?q=${query}&t=&z=14&ie=UTF8&iwloc=&output=embed`;
+
+  return (
+    <div className="mt-6 overflow-hidden rounded-[2rem] border border-slate-200 shadow-sm">
+      <iframe
+        src={src}
+        title={`Map of ${address}`}
+        loading="lazy"
+        referrerPolicy="no-referrer-when-downgrade"
+        className="block h-72 w-full md:h-96"
+        style={{ border: 0 }}
+      />
+    </div>
   );
 }

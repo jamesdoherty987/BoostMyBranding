@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import useSWR from 'swr';
 import {
@@ -33,6 +33,7 @@ import {
   ArrowRight,
   ChevronDown,
   Trash2,
+  Edit3,
 } from 'lucide-react';
 import { PageHeader } from '@/components/PageHeader';
 import { SiteEditor } from '@/components/SiteEditor';
@@ -136,6 +137,38 @@ export default function WebsitesPage() {
   const [steps, setSteps] = useState<PipelineStep[]>(PIPELINE);
   const [config, setConfig] = useState<GeneratedConfig | null>(null);
   const [editMode, setEditMode] = useState(false);
+  /**
+   * Which page of a multipage site the preview is currently showing.
+   * Resets to 'home' whenever a new site is generated or picked.
+   */
+  const [previewPageSlug, setPreviewPageSlug] = useState<string>('home');
+
+  // Load the selected client's existing site config (if any) into the
+  // preview + editor. This way you can pick Murphy's Plumbing from the
+  // dropdown and immediately edit the site that's already saved for them,
+  // without needing to click Generate first.
+  //
+  // Keyed by clientId so switching clients pulls the new one's config.
+  // `running` guard: don't clobber state mid-generation.
+  const selectedClientRow = clients.find((c) => c.id === newSite.clientId);
+  useEffect(() => {
+    if (running) return;
+    // If the currently-loaded config already belongs to this client, leave
+    // it alone — the user might be mid-edit and we don't want to drop their
+    // work when SWR revalidates.
+    const existing = (selectedClientRow?.websiteConfig ?? null) as WebsiteConfig | null;
+    if (existing) {
+      setConfig(existing);
+      setPreviewPageSlug('home');
+    } else {
+      // Client has no saved site yet — clear any stale preview from a prior
+      // client selection.
+      setConfig(null);
+      setPreviewPageSlug('home');
+    }
+    // Deliberately only runs when the client changes; `running` checked inside.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [newSite.clientId]);
 
   // Fetch approved images for the currently-selected client. Skips the
   // request while clientId is empty so we don't fire a request for
@@ -210,6 +243,10 @@ export default function WebsitesPage() {
       clearInterval(tick);
       setSteps((prev) => prev.map((s) => ({ ...s, status: 'done' })));
       setConfig(result.config);
+      // Jump the preview back to the homepage when a fresh generation
+      // lands, otherwise a stale preview page slug might not exist in
+      // the new config and we'd render the fallback.
+      setPreviewPageSlug('home');
       toast.success(
         'Site generated',
         result.fromMock ? 'Preview ready (demo mode).' : 'Config saved to the client record.',
@@ -426,13 +463,12 @@ export default function WebsitesPage() {
                 </div>
                 <div>
                   <label className="text-xs font-medium text-slate-600">
-                    Logo URL <span className="text-slate-400">(optional)</span>
+                    Logo <span className="text-slate-400">(optional)</span>
                   </label>
-                  <Input
-                    className="mt-1 h-9 text-xs"
+                  <LogoPicker
                     value={newSite.logoUrl}
-                    onChange={(e) => setNewSite((s) => ({ ...s, logoUrl: e.target.value }))}
-                    placeholder="https://..."
+                    onChange={(url) => setNewSite((s) => ({ ...s, logoUrl: url }))}
+                    clientId={newSite.clientId}
                   />
                 </div>
               </div>
@@ -734,7 +770,22 @@ export default function WebsitesPage() {
                     </Badge>
                   ) : null}
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* Inline edit toggle — exposed here so it's discoverable
+                      without diving into the editor panel. */}
+                  <Button
+                    size="sm"
+                    variant={editMode ? 'primary' : 'outline'}
+                    onClick={() => setEditMode((v) => !v)}
+                    title={
+                      editMode
+                        ? 'Turn off inline editing'
+                        : 'Click any text in the preview to edit it'
+                    }
+                  >
+                    <Edit3 className="h-3 w-3" />
+                    {editMode ? 'Editing' : 'Edit content'}
+                  </Button>
                   <Button
                     size="sm"
                     variant="outline"
@@ -788,14 +839,30 @@ export default function WebsitesPage() {
               <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_380px]">
                 <Card>
                   <CardContent className="p-0 overflow-hidden">
-                    <div className="flex items-center gap-2 border-b border-slate-200 bg-slate-50 px-4 py-2">
+                    {/* Browser chrome + page switcher for multipage sites */}
+                    <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-slate-50 px-4 py-2">
                       <span className="h-2.5 w-2.5 rounded-full bg-rose-300" />
                       <span className="h-2.5 w-2.5 rounded-full bg-amber-300" />
                       <span className="h-2.5 w-2.5 rounded-full bg-emerald-300" />
-                      <div className="ml-3 flex-1 rounded-md bg-white px-3 py-1 text-[11px] text-slate-500">
+                      <div className="ml-3 flex-1 truncate rounded-md bg-white px-3 py-1 text-[11px] text-slate-500">
                         {config.meta.title}
                       </div>
+                      {(config.pages?.length ?? 0) > 1 ? (
+                        <PagePicker
+                          pages={config.pages!}
+                          current={previewPageSlug}
+                          onSelect={setPreviewPageSlug}
+                        />
+                      ) : null}
                     </div>
+                    {/* Inline-edit hint — shows when edit mode is on so the
+                        user knows they can click any text in the preview. */}
+                    {editMode ? (
+                      <div className="flex items-center gap-2 border-b border-amber-200 bg-amber-50 px-4 py-2 text-[11px] text-amber-800">
+                        <Edit3 className="h-3 w-3" />
+                        Click any headline, subheading, or service card in the preview below to edit. Press Enter to save, Esc to cancel.
+                      </div>
+                    ) : null}
                     <div className="max-h-[85vh] overflow-y-auto bg-white">
                       <SiteRenderer
                         config={config}
@@ -805,6 +872,7 @@ export default function WebsitesPage() {
                         embedded
                         editMode={editMode}
                         onFieldChange={handleFieldChange}
+                        pageSlug={previewPageSlug}
                       />
                     </div>
                   </CardContent>
@@ -817,6 +885,8 @@ export default function WebsitesPage() {
                   images={clientImages}
                   editMode={editMode}
                   onEditModeChange={setEditMode}
+                  activePageSlug={previewPageSlug}
+                  onActivePageSlugChange={setPreviewPageSlug}
                 />
               </div>
 
@@ -833,5 +903,154 @@ export default function WebsitesPage() {
         </AnimatePresence>
       </div>
     </>
+  );
+}
+
+/**
+ * Logo input: accepts either a pasted URL or a file upload from the user's
+ * laptop. Uploads reuse the existing `uploadImages` endpoint with a
+ * `logo` tag so the logo lives in the same media library as the client's
+ * other assets, and we just echo back the resulting URL.
+ *
+ * Needs a real (DB-backed) clientId to upload. If no client is selected
+ * yet we disable the upload button with a hint.
+ */
+function LogoPicker({
+  value,
+  onChange,
+  clientId,
+}: {
+  value: string;
+  onChange: (url: string) => void;
+  clientId: string;
+}) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+
+  const onFile = async (file: File) => {
+    if (!clientId) {
+      toast.error('Pick a client first');
+      return;
+    }
+    if (!file.type.startsWith('image/')) {
+      toast.error('Pick an image file', 'PNG, JPG, SVG, or WebP.');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Too large', 'Keep logos under 5MB.');
+      return;
+    }
+    setUploading(true);
+    try {
+      const rows = await api.uploadImages(clientId, [file], ['logo']);
+      const url = rows[0]?.fileUrl;
+      if (!url) throw new Error('Upload returned no URL');
+      onChange(url);
+      toast.success('Logo uploaded');
+    } catch (e) {
+      toast.error('Upload failed', (e as Error).message);
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  return (
+    <div className="mt-1 space-y-1.5">
+      <div className="flex items-center gap-2">
+        {value ? (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img
+            src={value}
+            alt="Logo preview"
+            className="h-9 w-9 shrink-0 rounded-lg border border-slate-200 object-contain bg-slate-50"
+          />
+        ) : (
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 text-slate-400">
+            <Globe className="h-3.5 w-3.5" />
+          </div>
+        )}
+        <Input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="h-9 flex-1 text-xs"
+          placeholder="Paste URL or upload →"
+        />
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading || !clientId}
+          className="flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          title={!clientId ? 'Pick a client first' : 'Upload from your computer'}
+        >
+          {uploading ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <ArrowRight className="h-3.5 w-3.5 rotate-[-45deg]" />
+          )}
+          {uploading ? 'Uploading…' : 'Upload'}
+        </button>
+      </div>
+      {value ? (
+        <button
+          type="button"
+          onClick={() => onChange('')}
+          className="text-[10px] text-slate-500 hover:text-slate-700"
+        >
+          Remove logo
+        </button>
+      ) : null}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp,image/svg+xml"
+        hidden
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) onFile(file);
+        }}
+      />
+    </div>
+  );
+}
+
+/**
+ * Tab-style picker for switching the preview between pages of a multipage
+ * site. Rendered in the browser-chrome bar above the preview so it feels
+ * like the browser's tab strip, reinforcing "these are separate pages".
+ *
+ * Only rendered when `config.pages` has more than one entry — single-page
+ * sites don't need a picker.
+ */
+function PagePicker({
+  pages,
+  current,
+  onSelect,
+}: {
+  pages: NonNullable<WebsiteConfig['pages']>;
+  current: string;
+  onSelect: (slug: string) => void;
+}) {
+  return (
+    <div className="flex items-center gap-1 overflow-x-auto">
+      {pages.map((p) => {
+        const active = p.slug === current;
+        return (
+          <button
+            key={p.slug}
+            type="button"
+            onClick={() => onSelect(p.slug)}
+            aria-pressed={active}
+            className={`shrink-0 rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors ${
+              active
+                ? 'bg-slate-900 text-white'
+                : 'bg-white text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            {p.title}
+          </button>
+        );
+      })}
+    </div>
   );
 }

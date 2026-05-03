@@ -1,47 +1,7 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { SiteRenderer } from '@boost/ui/site';
-import type { WebsiteConfig } from '@boost/core';
-
-// Server-side fetch, so we need the absolute API URL (relative won't
-// work from a Node environment). In prod, API_UPSTREAM points at the
-// Render deployment; in dev, NEXT_PUBLIC_API_URL is the localhost:4000
-// fallback.
-const API_URL =
-  process.env.API_UPSTREAM ??
-  process.env.NEXT_PUBLIC_API_URL ??
-  'http://localhost:4000';
-
-interface SiteData {
-  businessName: string;
-  slug: string;
-  clientId?: string;
-  config: WebsiteConfig | null;
-  images: string[];
-  status?: 'pending' | 'ready';
-}
-
-/**
- * Fetch the site payload from the API. Runs on the server so the rendered
- * HTML ships pre-populated with the correct meta tags. Returns null if the
- * slug doesn't resolve so the page can 404 cleanly.
- *
- * We use `no-store` so a fresh generation is visible immediately — a client's
- * first site is too high-signal to wait for cache invalidation.
- */
-async function loadSite(slug: string): Promise<SiteData | null> {
-  try {
-    const res = await fetch(
-      `${API_URL}/api/v1/clients/public/by-slug/${encodeURIComponent(slug)}/site`,
-      { cache: 'no-store' },
-    );
-    if (!res.ok) return null;
-    const payload = (await res.json()) as { data?: SiteData };
-    return payload.data ?? null;
-  } catch {
-    return null;
-  }
-}
+import { API_URL, buildPageMetadata, loadSite } from '@/lib/site-loader';
 
 export async function generateMetadata({
   params,
@@ -53,25 +13,14 @@ export async function generateMetadata({
   if (!site) {
     return { title: 'Site not found' };
   }
-  if (!site.config) {
-    return {
-      title: site.businessName,
-      description: `${site.businessName} - site coming soon.`,
-    };
-  }
-  return {
-    title: site.config.meta.title,
-    description: site.config.meta.description,
-    keywords: site.config.meta.keywords,
-    openGraph: {
-      title: site.config.meta.title,
-      description: site.config.meta.description,
-      type: 'website',
-    },
-  };
+  return buildPageMetadata(site, 'home');
 }
 
-export default async function ClientSitePage({
+/**
+ * Client-site home page. Handles both single-page configs (the original
+ * flow) and multipage configs (homepage rendered with `pageSlug: 'home'`).
+ */
+export default async function ClientSiteHomePage({
   params,
 }: {
   params: Promise<{ slug: string }>;
@@ -101,6 +50,7 @@ export default async function ClientSitePage({
       images={site.images}
       clientId={site.clientId}
       apiUrl={API_URL}
+      pageSlug="home"
     />
   );
 }

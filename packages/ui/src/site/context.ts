@@ -27,6 +27,18 @@ export interface SiteContextValue {
    * patches the config without a full Claude round-trip.
    */
   onFieldChange?: (path: string, value: unknown) => void;
+  /**
+   * Which page of a multipage site is currently rendering. Used by the nav
+   * to mark the active link and by `InlineEditable` to route edits to the
+   * right page override. `'home'` for the homepage.
+   */
+  currentPageSlug?: string;
+  /**
+   * Index of the active page in `config.pages`. `InlineEditable` uses this
+   * to build paths like `pages.2.hero.headline`. Set alongside
+   * `currentPageSlug`; undefined for single-page sites.
+   */
+  pageIndex?: number;
 }
 
 export const SiteContext = createContext<SiteContextValue>({

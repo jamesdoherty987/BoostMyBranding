@@ -2,8 +2,13 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { Reorder } from 'framer-motion';
-import type { WebsiteConfig, SiteBlockKey, HeroVariant } from '@boost/core';
-import { DEFAULT_LAYOUT, HERO_VARIANTS } from '@boost/core';
+import type {
+  WebsiteConfig,
+  SiteBlockKey,
+  HeroVariant,
+  PageConfig,
+} from '@boost/core';
+import { DEFAULT_LAYOUT, HERO_VARIANTS, slugify } from '@boost/core';
 import {
   Button,
   Card,
@@ -32,6 +37,8 @@ import {
   AlertCircle,
   ExternalLink,
   Edit3,
+  FileText,
+  X,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 
@@ -86,12 +93,20 @@ interface SiteEditorProps {
    */
   editMode: boolean;
   onEditModeChange: (v: boolean) => void;
+  /**
+   * Slug of the page the preview is currently showing. The Sections tab
+   * scopes edits to this page in multipage sites so drag-reorder and
+   * add-section affect only the active page's layout.
+   */
+  activePageSlug: string;
+  onActivePageSlugChange: (slug: string) => void;
 }
 
 /**
  * Visual website editor. Tabs:
- *   Sections   — drag-reorder, add/remove.
  *   Content    — inline edit toggle + content hints.
+ *   Pages      — (multipage only) add/remove/rename pages.
+ *   Sections   — per-page drag-reorder, add/remove.
  *   Hero       — pick variant, regenerate AI image.
  *   Brand      — colors, tagline, tone.
  *   AI Edit    — natural-language config edits.
@@ -104,24 +119,30 @@ export function SiteEditor({
   images,
   editMode,
   onEditModeChange,
+  activePageSlug,
+  onActivePageSlugChange,
 }: SiteEditorProps) {
   const [tab, setTab] = useState<
-    'sections' | 'content' | 'hero' | 'brand' | 'ai' | 'domain'
+    'sections' | 'content' | 'pages' | 'hero' | 'brand' | 'ai' | 'domain'
   >('content');
+
+  const hasPages = (config.pages?.length ?? 0) > 0;
+  const tabs = [
+    { id: 'content' as const, label: 'Content', icon: Edit3 },
+    ...(hasPages ? [{ id: 'pages' as const, label: 'Pages', icon: FileText }] : []),
+    { id: 'sections' as const, label: 'Sections', icon: Layers },
+    { id: 'hero' as const, label: 'Hero', icon: Sparkles },
+    { id: 'brand' as const, label: 'Brand', icon: Palette },
+    { id: 'ai' as const, label: 'AI Edit', icon: Wand2 },
+    { id: 'domain' as const, label: 'Domain', icon: Globe },
+  ];
 
   return (
     <Card>
       <CardContent className="p-0">
         {/* Tab bar */}
         <div className="flex flex-wrap border-b border-slate-200">
-          {[
-            { id: 'content' as const, label: 'Content', icon: Edit3 },
-            { id: 'sections' as const, label: 'Sections', icon: Layers },
-            { id: 'hero' as const, label: 'Hero', icon: Sparkles },
-            { id: 'brand' as const, label: 'Brand', icon: Palette },
-            { id: 'ai' as const, label: 'AI Edit', icon: Wand2 },
-            { id: 'domain' as const, label: 'Domain', icon: Globe },
-          ].map((t) => (
+          {tabs.map((t) => (
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
@@ -145,8 +166,20 @@ export function SiteEditor({
               images={images}
             />
           )}
+          {tab === 'pages' && hasPages && (
+            <PagesManager
+              config={config}
+              onChange={onChange}
+              activePageSlug={activePageSlug}
+              onActivePageSlugChange={onActivePageSlugChange}
+            />
+          )}
           {tab === 'sections' && (
-            <SectionManager config={config} onChange={onChange} />
+            <SectionManager
+              config={config}
+              onChange={onChange}
+              activePageSlug={activePageSlug}
+            />
           )}
           {tab === 'hero' && (
             <HeroEditor
@@ -247,15 +280,37 @@ function ContentEditor({
 function SectionManager({
   config,
   onChange,
+  activePageSlug,
 }: {
   config: WebsiteConfig;
   onChange: (c: WebsiteConfig) => void;
+  activePageSlug: string;
 }) {
-  const layout = config.layout ?? DEFAULT_LAYOUT[config.template ?? 'service'];
+  // In a multipage site, `Sections` edits the active page's layout. In a
+  // single-page site, it edits the root `layout`. We keep both code paths
+  // but give the user a clear banner telling them which page they're
+  // editing so they understand why reordering "Services" only changes one
+  // page at a time.
+  const pages = config.pages ?? [];
+  const activePage = pages.find((p) => p.slug === activePageSlug);
+  const isMultipage = pages.length > 1;
+
+  const layout: SiteBlockKey[] = isMultipage
+    ? activePage?.layout ?? pages[0]?.layout ?? DEFAULT_LAYOUT[config.template ?? 'service']
+    : config.layout ?? DEFAULT_LAYOUT[config.template ?? 'service'];
   const available = ALL_BLOCKS.filter((b) => !layout.includes(b));
 
   const setLayout = (newLayout: SiteBlockKey[]) => {
-    onChange({ ...config, layout: newLayout });
+    if (isMultipage && activePage) {
+      onChange({
+        ...config,
+        pages: pages.map((p) =>
+          p.slug === activePage.slug ? { ...p, layout: newLayout } : p,
+        ),
+      });
+    } else {
+      onChange({ ...config, layout: newLayout });
+    }
   };
 
   const removeBlock = (block: SiteBlockKey) => {
@@ -284,6 +339,12 @@ function SectionManager({
 
   return (
     <div className="space-y-4">
+      {isMultipage && activePage ? (
+        <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
+          Editing sections on <strong className="text-slate-900">{activePage.title}</strong>.
+          Use the page tabs above the preview to switch.
+        </div>
+      ) : null}
       <div className="flex items-center justify-between">
         <p className="text-xs text-slate-500">Drag to reorder. Click × to remove.</p>
         <button
@@ -699,6 +760,249 @@ function HeroVariantPreview({
         </>
       )}
     </svg>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Pages Manager — add/remove/rename pages for multipage sites         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Per-page editor for multipage sites. Lets the agency:
+ *   - Reorder pages (drag) — the homepage always stays first.
+ *   - Rename a page's title (appears in the nav).
+ *   - Edit the per-page hero headline / subheadline (what the sub-page
+ *     says at the top).
+ *   - Add a new blank page with a sensible default layout.
+ *   - Remove a page (home cannot be removed).
+ *
+ * Single-page sites don't render this tab — the SiteEditor hides it
+ * when `config.pages` is empty or has only one entry.
+ */
+function PagesManager({
+  config,
+  onChange,
+  activePageSlug,
+  onActivePageSlugChange,
+}: {
+  config: WebsiteConfig;
+  onChange: (c: WebsiteConfig) => void;
+  activePageSlug: string;
+  onActivePageSlugChange: (slug: string) => void;
+}) {
+  const pages = config.pages ?? [];
+  const activePage = pages.find((p) => p.slug === activePageSlug);
+  const MAX_PAGES = 4;
+
+  const updatePage = (slug: string, patch: Partial<PageConfig>) => {
+    onChange({
+      ...config,
+      pages: pages.map((p) => (p.slug === slug ? { ...p, ...patch } : p)),
+    });
+  };
+
+  const updatePageHero = (slug: string, patch: Partial<WebsiteConfig['hero']>) => {
+    onChange({
+      ...config,
+      pages: pages.map((p) =>
+        p.slug === slug ? { ...p, hero: { ...(p.hero ?? {}), ...patch } } : p,
+      ),
+    });
+  };
+
+  const addPage = () => {
+    if (pages.length >= MAX_PAGES) {
+      toast.info(`Maximum ${MAX_PAGES} pages`, 'Remove one to add another.');
+      return;
+    }
+    // Pick a slug that isn't in use. Users can rename after.
+    const base = 'new-page';
+    let slug = base;
+    let i = 2;
+    while (pages.some((p) => p.slug === slug)) slug = `${base}-${i++}`;
+    const newPage: PageConfig = {
+      slug,
+      title: 'New page',
+      layout: ['nav', 'hero', 'services', 'contact', 'footer'],
+      hero: {
+        headline: 'Something we want to say.',
+        subheadline: 'Edit this sub-page to fit the business.',
+      },
+    };
+    onChange({ ...config, pages: [...pages, newPage] });
+    onActivePageSlugChange(slug);
+    toast.success('Page added', 'Give it a title and edit its content.');
+  };
+
+  const removePage = async (slug: string) => {
+    if (slug === 'home') {
+      toast.info('Home page is required');
+      return;
+    }
+    if (
+      !(await confirmDialog({
+        title: `Delete "${pages.find((p) => p.slug === slug)?.title ?? slug}"?`,
+        description: 'The nav link and all content on this page will be removed.',
+        confirmLabel: 'Delete page',
+        danger: true,
+      }))
+    )
+      return;
+    const next = pages.filter((p) => p.slug !== slug);
+    onChange({ ...config, pages: next });
+    if (slug === activePageSlug) onActivePageSlugChange('home');
+    toast.success('Page removed');
+  };
+
+  const renamePage = (slug: string, title: string) => {
+    updatePage(slug, { title: title.slice(0, 100) });
+  };
+
+  /**
+   * When the user edits a page slug we regenerate it through slugify to
+   * keep URLs clean. The home page's slug is locked — you can't rename
+   * `home` because its URL maps to `/sites/[slug]` not `/sites/[slug]/home`.
+   */
+  const reslugPage = (oldSlug: string, draft: string) => {
+    if (oldSlug === 'home') return;
+    const cleaned = slugify(draft);
+    if (!cleaned) {
+      toast.error('Slug cannot be empty');
+      return;
+    }
+    if (pages.some((p) => p.slug === cleaned && p.slug !== oldSlug)) {
+      toast.error('Another page already uses that URL', 'Pick a different one.');
+      return;
+    }
+    onChange({
+      ...config,
+      pages: pages.map((p) =>
+        p.slug === oldSlug ? { ...p, slug: cleaned } : p,
+      ),
+    });
+    if (activePageSlug === oldSlug) onActivePageSlugChange(cleaned);
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
+        This is a multipage site. Each page gets its own URL in the nav.
+        Max {MAX_PAGES} pages. Delete unused ones to add more.
+      </div>
+
+      <div className="space-y-2">
+        {pages.map((p) => {
+          const isActive = p.slug === activePageSlug;
+          const isHome = p.slug === 'home';
+          return (
+            <div
+              key={p.slug}
+              className={`rounded-xl border transition-all ${
+                isActive
+                  ? 'border-[#1D9CA1] bg-[#1D9CA1]/5 ring-1 ring-[#1D9CA1]/30'
+                  : 'border-slate-200 bg-white'
+              }`}
+            >
+              <button
+                type="button"
+                onClick={() => onActivePageSlugChange(p.slug)}
+                className="flex w-full items-center gap-2 px-3 py-2.5 text-left"
+              >
+                <FileText className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-medium text-slate-900">
+                    {p.title}
+                  </div>
+                  <div className="truncate text-[10px] text-slate-500">
+                    /{isHome ? '' : p.slug}
+                  </div>
+                </div>
+                {!isHome ? (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removePage(p.slug);
+                    }}
+                    className="rounded-lg p-1 text-slate-400 hover:bg-red-50 hover:text-red-500"
+                    aria-label={`Delete ${p.title}`}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                ) : null}
+              </button>
+              {isActive ? (
+                <div className="space-y-2 border-t border-slate-200 p-3">
+                  <label className="block">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                      Nav title
+                    </span>
+                    <Input
+                      className="mt-0.5 h-9 text-xs"
+                      value={p.title}
+                      onChange={(e) => renamePage(p.slug, e.target.value)}
+                      maxLength={100}
+                    />
+                  </label>
+                  {!isHome ? (
+                    <label className="block">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                        URL slug
+                      </span>
+                      <Input
+                        className="mt-0.5 h-9 font-mono text-xs"
+                        defaultValue={p.slug}
+                        onBlur={(e) => reslugPage(p.slug, e.target.value)}
+                        placeholder="about"
+                      />
+                    </label>
+                  ) : null}
+                  <label className="block">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                      Page hero headline
+                    </span>
+                    <Input
+                      className="mt-0.5 h-9 text-xs"
+                      value={p.hero?.headline ?? ''}
+                      onChange={(e) => updatePageHero(p.slug, { headline: e.target.value })}
+                      placeholder={isHome ? 'Leave blank to use homepage hero' : 'Our menu.'}
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                      Page subheadline
+                    </span>
+                    <Textarea
+                      className="mt-0.5 text-xs no-zoom"
+                      rows={2}
+                      value={p.hero?.subheadline ?? ''}
+                      onChange={(e) =>
+                        updatePageHero(p.slug, { subheadline: e.target.value })
+                      }
+                      placeholder={
+                        isHome ? 'Leave blank to use homepage subhead' : 'Fresh daily. Local suppliers.'
+                      }
+                    />
+                  </label>
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+
+      {pages.length < MAX_PAGES ? (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={addPage}
+          className="w-full"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          Add a page
+        </Button>
+      ) : null}
+    </div>
   );
 }
 

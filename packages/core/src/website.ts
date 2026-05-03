@@ -64,6 +64,48 @@ export type HeroVariant =
   | 'parallax-layers'
   | 'gradient-mesh';
 
+/**
+ * A single page in a multipage site. `slug` is the URL segment (`about`,
+ * `menu`, etc.) — the Home page uses slug `'home'` by convention and is
+ * served at the root URL (e.g. `/sites/murphys-plumbing`). Other pages
+ * live at `/sites/murphys-plumbing/[slug]`.
+ *
+ * Each page has its own `layout` (blocks) and its own `hero` override —
+ * sub-pages usually want a smaller hero with a different headline
+ * ("About us" / "Our services") rather than the homepage's full-bleed
+ * marketing hero. `hero` is optional; when omitted, the page shows no
+ * hero block at all (typical for a Contact or Menu page).
+ */
+export interface PageConfig {
+  /** URL segment. Use `'home'` for the homepage. Must be URL-safe. */
+  slug: string;
+  /** Human-readable page title used in the nav and <title>. */
+  title: string;
+  /** SEO meta for this specific page. Inherits from root meta when omitted. */
+  meta?: {
+    title?: string;
+    description?: string;
+  };
+  /** Block order for this page. */
+  layout: SiteBlockKey[];
+  /** Optional per-page hero override — smaller/different than the home hero. */
+  hero?: Partial<WebsiteConfig['hero']>;
+  /**
+   * Page-specific block data. Overrides the root config's block data when
+   * rendering this page — e.g. a Menu page might have its own `services`
+   * list that differs from the homepage's featured services.
+   */
+  blocks?: {
+    about?: WebsiteConfig['about'];
+    stats?: WebsiteConfig['stats'];
+    services?: WebsiteConfig['services'];
+    gallery?: WebsiteConfig['gallery'];
+    reviews?: WebsiteConfig['reviews'];
+    faq?: WebsiteConfig['faq'];
+    contact?: WebsiteConfig['contact'];
+  };
+}
+
 export interface WebsiteConfig {
   /** Which visual template to use. Defaults to `service` if omitted. */
   template?: SiteTemplate;
@@ -175,6 +217,59 @@ export interface WebsiteConfig {
   };
 
   navigation?: string[];
+
+  /**
+   * Multipage sites. When present and length > 1, the renderer treats the
+   * site as multipage: the homepage lives at `/sites/[slug]` using the
+   * page with `slug: 'home'` (or the first entry if none), and other
+   * pages are served at `/sites/[slug]/[pageSlug]`.
+   *
+   * When `pages` is omitted or has a single entry, the site is
+   * single-page and behaves exactly as it did before multipage support
+   * was added — the top-level `layout` + block fields drive the render.
+   *
+   * Claude decides how many pages a business needs. Most service
+   * businesses just need one. Restaurants often want Home + Menu + About.
+   * Law firms often want Home + Practice Areas + About + Contact.
+   */
+  pages?: PageConfig[];
+}
+
+/**
+ * Resolve the active page for a given slug. Returns the matching `PageConfig`
+ * if `pages` is present, or a synthetic single-page config derived from the
+ * top-level `layout` when the site is single-page. `pageSlug === undefined`
+ * (or `'home'`) returns the homepage.
+ */
+export function resolvePage(
+  config: WebsiteConfig,
+  pageSlug?: string,
+): PageConfig {
+  const pages = config.pages ?? [];
+  if (pages.length > 0) {
+    const wanted = pageSlug && pageSlug !== 'home' ? pageSlug : 'home';
+    const match = pages.find((p) => p.slug === wanted);
+    if (match) return match;
+    // Fallback: homepage if `wanted` not found (user typed a bad slug).
+    const home = pages.find((p) => p.slug === 'home') ?? pages[0];
+    if (home) return home;
+  }
+  // Single-page: synthesize a home page from root layout.
+  const template = config.template ?? 'service';
+  return {
+    slug: 'home',
+    title: 'Home',
+    layout: config.layout && config.layout.length > 0 ? config.layout : DEFAULT_LAYOUT[template],
+  };
+}
+
+/**
+ * List every page in a config for nav purposes. Returns an empty array if
+ * the site is single-page — nav components can check `.length > 1` to decide
+ * whether to render a multipage menu.
+ */
+export function listPages(config: WebsiteConfig): PageConfig[] {
+  return config.pages ?? [];
 }
 
 /**

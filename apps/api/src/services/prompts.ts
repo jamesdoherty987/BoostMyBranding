@@ -195,12 +195,15 @@ Return ONLY valid JSON in this exact shape:
   "stats": [
     { "value": <number>, "suffix": "<optional>", "prefix": "<optional>", "label": "<label>" }
   ],
+  "statsSection": { "eyebrow": "<optional, uppercase kicker above stats>", "heading": "<optional, e.g. 'The numbers behind the craft.'>" },
   "about": {
+    "eyebrow": "<optional eyebrow, e.g. 'About us', 'Our story'>",
     "heading": "...",
     "body": "<2-3 short paragraphs separated by blank lines>",
     "bullets": ["<3-5 short proof points>"],
     "imageIndex": <number or null>
   },
+  "servicesSection": { "eyebrow": "<short uppercase kicker, e.g. 'What we do'>", "heading": "<punchy, e.g. 'Every job, done properly.'>", "tagline": "<1 short sentence under the heading>" },
   "services": [
     {
       "title": "...",
@@ -209,16 +212,20 @@ Return ONLY valid JSON in this exact shape:
     }
   ],
   "gallery": {
-    "heading": "<optional>",
+    "eyebrow": "<optional eyebrow, e.g. 'Gallery'>",
+    "heading": "<optional, e.g. 'A look around.'>",
     "imageIndices": [<indices from AVAILABLE IMAGES above>]
   },
+  "reviewsSection": { "eyebrow": "<short kicker, e.g. 'Reviews', 'Loved locally'>", "heading": "<e.g. 'What customers say.'>" },
   "reviews": [
     { "text": "<realistic-sounding testimonial>", "author": "<first name + last initial>", "rating": 5 }
   ],
+  "faqSection": { "eyebrow": "<short kicker, e.g. 'FAQ'>", "heading": "<e.g. 'Questions, answered.'>" },
   "faq": [
     { "question": "...", "answer": "..." }
   ],
   "contact": {
+    "eyebrow": "<optional, e.g. 'Contact', 'Get in touch'>",
     "heading": "...",
     "body": "...",
     "address": "<optional>",
@@ -228,6 +235,7 @@ Return ONLY valid JSON in this exact shape:
     "showBookingForm": ${vars.hasBooking ?? false},
     "showHours": ${vars.hasHours ?? true}
   },
+  "footer": { "tagline": "<optional footer tagline. Leave empty to reuse brand.tagline>" },
   "navigation": ["Home", "Services", "About", "Contact"],
   "pages": [
     {
@@ -305,6 +313,15 @@ RULES:
 - No placeholder text like "Lorem ipsum", always write real copy.
 - If AGENCY SUGGESTIONS are provided, follow them closely — they override defaults.
 - Last 2 words of the hero headline get auto-highlighted in a brand gradient. Write the headline so the last 2 words form a natural punchy phrase.
+- Section eyebrows (the tiny uppercase kicker above each section heading) should feel natural for the business. Prefer short, specific kickers over generic ones:
+  * services → "What we do" / "Services" / "The menu" / "Our practice areas"
+  * reviews → "Reviews" / "Loved locally" / "Client stories"
+  * faq → "FAQ" / "Common questions" / "Before you book"
+  * about → "About us" / "Our story" / "Meet the team"
+  * contact → "Contact" / "Get in touch" / "Stop by"
+  * gallery → "Gallery" / "Recent work" / "Behind the scenes"
+  Omit the field entirely (or use an empty string) if the default ("What we do" / "Reviews" / etc.) is already perfect for the business.
+- Section headings should be short, warm, and specific. Not "Our Services" — prefer "Every job, done properly." or "Small menu, done well.".
 
 HERO VARIANT GUIDE — pick the one that matches the business personality:
 - "spotlight": Centered copy with a mouse-following glow. Premium, confident, minimal. Best for professional services, medical, consultancies, high-end brands.

@@ -6,6 +6,7 @@ import type { WebsiteConfig } from '@boost/core';
 import { SectionWrapper } from '../../section-wrapper';
 import { useSiteContext } from '../context';
 import { brandGradient } from '../theme';
+import { InlineEditable } from '../InlineEditable';
 
 interface SiteContactProps {
   config: WebsiteConfig;
@@ -102,40 +103,91 @@ export function SiteContact({ config, clientId: clientIdProp, apiUrl: apiUrlProp
         >
           <div className="grid grid-cols-1 gap-0 lg:grid-cols-2">
             <div className="p-8 text-white md:p-12">
-              <p className="text-xs font-semibold uppercase tracking-[0.25em] text-white/70">
-                Contact
-              </p>
+              <InlineEditable
+                path="contact.eyebrow"
+                value={c.eyebrow ?? 'Contact'}
+                as="p"
+                className="text-xs font-semibold uppercase tracking-[0.25em] text-white/70"
+                placeholder="Section eyebrow…"
+              />
               <h2 className="mt-2 text-3xl font-bold tracking-tight md:text-5xl">
-                {c.heading}
+                <InlineEditable
+                  path="contact.heading"
+                  value={c.heading}
+                  as="span"
+                  placeholder="Contact heading…"
+                />
               </h2>
-              <p className="mt-4 text-base text-white/85 md:text-lg">{c.body}</p>
+              <p className="mt-4 text-base text-white/85 md:text-lg">
+                <InlineEditable
+                  path="contact.body"
+                  value={c.body}
+                  as="span"
+                  multiline
+                  placeholder="Short note about how to reach you…"
+                />
+              </p>
 
               <div className="mt-8 space-y-3 text-sm">
-                {c.address ? (
+                {c.address || ctx.editMode ? (
                   <div className="flex items-start gap-3">
                     <MapPin className="mt-0.5 h-4 w-4 shrink-0 opacity-80" />
-                    <span>{c.address}</span>
+                    <InlineEditable
+                      path="contact.address"
+                      value={c.address ?? ''}
+                      as="span"
+                      placeholder="123 Main St, City"
+                    />
                   </div>
                 ) : null}
-                {c.phone ? (
-                  <a
-                    href={`tel:${c.phone.replace(/[^+\d]/g, '')}`}
-                    className="flex items-start gap-3 hover:underline"
-                  >
-                    <Phone className="mt-0.5 h-4 w-4 shrink-0 opacity-80" />
-                    <span>{c.phone}</span>
-                  </a>
+                {c.phone || ctx.editMode ? (
+                  ctx.editMode ? (
+                    <div className="flex items-start gap-3">
+                      <Phone className="mt-0.5 h-4 w-4 shrink-0 opacity-80" />
+                      <InlineEditable
+                        path="contact.phone"
+                        value={c.phone ?? ''}
+                        as="span"
+                        placeholder="+353 1 234 5678"
+                      />
+                    </div>
+                  ) : (
+                    <a
+                      href={`tel:${(c.phone ?? '').replace(/[^+\d]/g, '')}`}
+                      className="flex items-start gap-3 hover:underline"
+                    >
+                      <Phone className="mt-0.5 h-4 w-4 shrink-0 opacity-80" />
+                      <span>{c.phone}</span>
+                    </a>
+                  )
                 ) : null}
-                {c.email ? (
-                  <a href={`mailto:${c.email}`} className="flex items-start gap-3 hover:underline">
-                    <Mail className="mt-0.5 h-4 w-4 shrink-0 opacity-80" />
-                    <span>{c.email}</span>
-                  </a>
+                {c.email || ctx.editMode ? (
+                  ctx.editMode ? (
+                    <div className="flex items-start gap-3">
+                      <Mail className="mt-0.5 h-4 w-4 shrink-0 opacity-80" />
+                      <InlineEditable
+                        path="contact.email"
+                        value={c.email ?? ''}
+                        as="span"
+                        placeholder="hello@example.com"
+                      />
+                    </div>
+                  ) : (
+                    <a href={`mailto:${c.email}`} className="flex items-start gap-3 hover:underline">
+                      <Mail className="mt-0.5 h-4 w-4 shrink-0 opacity-80" />
+                      <span>{c.email}</span>
+                    </a>
+                  )
                 ) : null}
-                {c.showHours && c.hours ? (
+                {(c.showHours && c.hours) || ctx.editMode ? (
                   <div className="flex items-start gap-3">
                     <Clock className="mt-0.5 h-4 w-4 shrink-0 opacity-80" />
-                    <span>{c.hours}</span>
+                    <InlineEditable
+                      path="contact.hours"
+                      value={c.hours ?? ''}
+                      as="span"
+                      placeholder="Mon–Fri 9am–5pm"
+                    />
                   </div>
                 ) : null}
               </div>

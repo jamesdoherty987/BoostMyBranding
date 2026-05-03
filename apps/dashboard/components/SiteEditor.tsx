@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type React from 'react';
 import { Reorder } from 'framer-motion';
 import type {
   WebsiteConfig,
@@ -39,6 +40,12 @@ import {
   Edit3,
   FileText,
   X,
+  List,
+  Upload,
+  HelpCircle,
+  Star,
+  MessageSquare,
+  Link2,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 
@@ -123,12 +130,14 @@ export function SiteEditor({
   onActivePageSlugChange,
 }: SiteEditorProps) {
   const [tab, setTab] = useState<
-    'sections' | 'content' | 'pages' | 'hero' | 'brand' | 'ai' | 'domain'
+    'sections' | 'content' | 'pages' | 'items' | 'images' | 'hero' | 'brand' | 'ai' | 'domain'
   >('content');
 
   const hasPages = (config.pages?.length ?? 0) > 0;
   const tabs = [
     { id: 'content' as const, label: 'Content', icon: Edit3 },
+    { id: 'items' as const, label: 'Items', icon: List },
+    { id: 'images' as const, label: 'Images', icon: ImageIcon },
     ...(hasPages ? [{ id: 'pages' as const, label: 'Pages', icon: FileText }] : []),
     { id: 'sections' as const, label: 'Sections', icon: Layers },
     { id: 'hero' as const, label: 'Hero', icon: Sparkles },
@@ -163,6 +172,17 @@ export function SiteEditor({
             <ContentEditor
               editMode={editMode}
               onEditModeChange={onEditModeChange}
+              images={images}
+            />
+          )}
+          {tab === 'items' && (
+            <ItemsEditor config={config} onChange={onChange} />
+          )}
+          {tab === 'images' && (
+            <ImagesEditor
+              config={config}
+              onChange={onChange}
+              clientId={clientId}
               images={images}
             />
           )}
@@ -664,6 +684,129 @@ function HeroEditor({
           )}
         </div>
       )}
+
+      {/* CTA button links — labels are inline-editable in the preview; the
+          hrefs live here because a contenteditable span isn't the right
+          control for a URL. */}
+      <div className="space-y-2">
+        <p className="text-xs font-medium text-slate-600">Call-to-action links</p>
+        <CtaLinkField
+          label="Primary CTA"
+          labelText={config.hero?.ctaPrimary?.label ?? 'Get in touch'}
+          href={config.hero?.ctaPrimary?.href ?? '#contact'}
+          onChange={(patch) =>
+            onChange({
+              ...config,
+              hero: {
+                ...config.hero,
+                ctaPrimary: {
+                  ...(config.hero?.ctaPrimary ?? { label: 'Get in touch', href: '#contact' }),
+                  ...patch,
+                },
+              },
+            })
+          }
+        />
+        <CtaLinkField
+          label="Secondary CTA (optional)"
+          labelText={config.hero?.ctaSecondary?.label ?? ''}
+          href={config.hero?.ctaSecondary?.href ?? ''}
+          onChange={(patch) => {
+            const next = { ...(config.hero?.ctaSecondary ?? { label: '', href: '' }), ...patch };
+            onChange({
+              ...config,
+              hero: {
+                ...config.hero,
+                // If both label and href are cleared, remove the secondary CTA.
+                ctaSecondary: !next.label && !next.href ? undefined : next,
+              },
+            });
+          }}
+          onRemove={
+            config.hero?.ctaSecondary
+              ? () =>
+                  onChange({
+                    ...config,
+                    hero: { ...config.hero, ctaSecondary: undefined },
+                  })
+              : undefined
+          }
+        />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Editor for a single CTA button: label + href. The label is also editable
+ * via inline edit in the preview — duplicating it here is intentional so
+ * agencies can see both pieces side-by-side when wiring up a new link.
+ */
+function CtaLinkField({
+  label,
+  labelText,
+  href,
+  onChange,
+  onRemove,
+}: {
+  label: string;
+  labelText: string;
+  href: string;
+  onChange: (patch: { label?: string; href?: string }) => void;
+  onRemove?: () => void;
+}) {
+  const looksValid = !href || /^(#|https?:\/\/|tel:|mailto:|\/)/.test(href);
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-2.5">
+      <div className="flex items-center justify-between">
+        <p className="text-[11px] font-semibold text-slate-600">{label}</p>
+        {onRemove ? (
+          <button
+            type="button"
+            onClick={onRemove}
+            className="rounded-md p-0.5 text-slate-400 hover:bg-rose-50 hover:text-rose-500"
+            title="Remove this CTA"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        ) : null}
+      </div>
+      <div className="mt-1.5 space-y-1.5">
+        <Input
+          className="h-8 text-xs"
+          value={labelText}
+          onChange={(e) => onChange({ label: e.target.value.slice(0, 50) })}
+          placeholder="Button label"
+          maxLength={50}
+        />
+        <div className="flex items-center gap-1.5">
+          <Link2 className="h-3 w-3 shrink-0 text-slate-400" />
+          <Input
+            className={`h-8 font-mono text-[11px] ${
+              !looksValid ? 'border-rose-300 text-rose-600' : ''
+            }`}
+            value={href}
+            onChange={(e) => onChange({ href: e.target.value.slice(0, 500) })}
+            placeholder="#contact or https://..."
+            maxLength={500}
+          />
+        </div>
+        <p className="text-[10px] text-slate-400">
+          {href.startsWith('#')
+            ? 'Scrolls to that section on the page'
+            : href.startsWith('tel:')
+              ? 'Opens the phone dialer'
+              : href.startsWith('mailto:')
+                ? 'Opens email client'
+                : href.startsWith('http')
+                  ? 'Opens an external site'
+                  : href.startsWith('/')
+                    ? 'Goes to another page on the site'
+                    : href
+                      ? 'Unusual link — double-check this works'
+                      : 'Use # for in-page sections, tel: for phone, mailto: for email.'}
+        </p>
+      </div>
     </div>
   );
 }
@@ -1525,6 +1668,611 @@ function DnsRecordRow({
             <Copy className="h-3 w-3" />
           )}
         </button>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Items Editor — add/remove services, reviews, FAQ, stats, bullets    */
+/* ------------------------------------------------------------------ */
+
+const AVAILABLE_ICONS = [
+  'Sparkles', 'Wrench', 'Hammer', 'Coffee', 'Utensils', 'Leaf', 'Scissors',
+  'HeartPulse', 'Dumbbell', 'Phone', 'Calendar', 'Globe', 'Camera',
+  'MessageCircle', 'Star', 'CheckCircle2', 'Zap', 'Truck', 'Home', 'Shield',
+  'Brush', 'Sun', 'Flame', 'Award', 'Users',
+];
+
+/**
+ * Collection editor for everything that's an array in the config:
+ * services, reviews, FAQ entries, stats, about bullets. Agencies use this
+ * to add a missing service, reorder reviews, or drop a duplicated FAQ
+ * that Claude produced. Each list auto-saves via onChange, so changes
+ * flow through the existing debounced persist path.
+ *
+ * Text inside each row is edited inline in the preview — this tab is just
+ * for structural changes (add/remove/reorder/pick icon).
+ */
+function ItemsEditor({
+  config,
+  onChange,
+}: {
+  config: WebsiteConfig;
+  onChange: (c: WebsiteConfig) => void;
+}) {
+  const services = config.services ?? [];
+  const reviews = config.reviews ?? [];
+  const faq = config.faq ?? [];
+  const stats = config.stats ?? [];
+  const bullets = config.about?.bullets ?? [];
+
+  return (
+    <div className="space-y-5">
+      <p className="text-xs text-slate-500">
+        Add or remove items from each section. Click any row to edit its text in the preview.
+      </p>
+
+      {/* Services */}
+      <ArrayBlock
+        icon={<Sparkles className="h-3.5 w-3.5" />}
+        label="Services"
+        count={services.length}
+        onAdd={() =>
+          onChange({
+            ...config,
+            services: [
+              ...services,
+              { title: 'New service', description: 'What this service does.', icon: 'Sparkles' },
+            ],
+          })
+        }
+        addLabel="Add service"
+        emptyHint="No services yet. Add one to show up in the grid."
+      >
+        {services.map((s, i) => (
+          <ItemRow
+            key={i}
+            primary={s.title || `Service ${i + 1}`}
+            secondary={s.description}
+            onRemove={async () => {
+              if (
+                !(await confirmDialog({
+                  title: `Delete "${s.title || `Service ${i + 1}`}"?`,
+                  description: 'This removes it from the site.',
+                  confirmLabel: 'Delete',
+                  danger: true,
+                }))
+              )
+                return;
+              onChange({
+                ...config,
+                services: services.filter((_, j) => j !== i),
+              });
+            }}
+          >
+            <div className="mt-1 flex items-center gap-1">
+              <span className="text-[10px] text-slate-400">Icon:</span>
+              <select
+                value={s.icon ?? 'Sparkles'}
+                onChange={(e) => {
+                  const next = [...services];
+                  next[i] = { ...next[i]!, icon: e.target.value };
+                  onChange({ ...config, services: next });
+                }}
+                className="h-6 rounded border border-slate-200 bg-white px-1 text-[10px]"
+              >
+                {AVAILABLE_ICONS.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </ItemRow>
+        ))}
+      </ArrayBlock>
+
+      {/* Reviews */}
+      <ArrayBlock
+        icon={<MessageSquare className="h-3.5 w-3.5" />}
+        label="Reviews"
+        count={reviews.length}
+        onAdd={() =>
+          onChange({
+            ...config,
+            reviews: [
+              ...reviews,
+              { text: 'What a great experience.', author: 'New customer', rating: 5 },
+            ],
+          })
+        }
+        addLabel="Add review"
+        emptyHint="No reviews yet. Add a testimonial or two."
+      >
+        {reviews.map((r, i) => (
+          <ItemRow
+            key={i}
+            primary={`"${(r.text ?? '').slice(0, 60)}${(r.text ?? '').length > 60 ? '…' : ''}"`}
+            secondary={`— ${r.author} · ${'★'.repeat(Math.max(1, Math.min(5, Math.round(r.rating ?? 5))))}`}
+            onRemove={async () => {
+              if (
+                !(await confirmDialog({
+                  title: `Delete this review?`,
+                  description: `From ${r.author || 'unknown'}.`,
+                  confirmLabel: 'Delete',
+                  danger: true,
+                }))
+              )
+                return;
+              onChange({ ...config, reviews: reviews.filter((_, j) => j !== i) });
+            }}
+          >
+            <div className="mt-1 flex items-center gap-1">
+              <span className="text-[10px] text-slate-400">Rating:</span>
+              <select
+                value={r.rating ?? 5}
+                onChange={(e) => {
+                  const next = [...reviews];
+                  next[i] = { ...next[i]!, rating: Number(e.target.value) };
+                  onChange({ ...config, reviews: next });
+                }}
+                className="h-6 rounded border border-slate-200 bg-white px-1 text-[10px]"
+              >
+                {[5, 4, 3, 2, 1].map((n) => (
+                  <option key={n} value={n}>
+                    {n} ★
+                  </option>
+                ))}
+              </select>
+            </div>
+          </ItemRow>
+        ))}
+      </ArrayBlock>
+
+      {/* FAQ */}
+      <ArrayBlock
+        icon={<HelpCircle className="h-3.5 w-3.5" />}
+        label="FAQ"
+        count={faq.length}
+        onAdd={() =>
+          onChange({
+            ...config,
+            faq: [
+              ...faq,
+              { question: 'New question?', answer: 'Short, direct answer.' },
+            ],
+          })
+        }
+        addLabel="Add question"
+        emptyHint="No FAQs yet."
+      >
+        {faq.map((f, i) => (
+          <ItemRow
+            key={i}
+            primary={f.question || `Question ${i + 1}`}
+            secondary={(f.answer ?? '').slice(0, 80) + ((f.answer ?? '').length > 80 ? '…' : '')}
+            onRemove={async () => {
+              if (
+                !(await confirmDialog({
+                  title: `Delete this FAQ?`,
+                  description: f.question,
+                  confirmLabel: 'Delete',
+                  danger: true,
+                }))
+              )
+                return;
+              onChange({ ...config, faq: faq.filter((_, j) => j !== i) });
+            }}
+          />
+        ))}
+      </ArrayBlock>
+
+      {/* Stats */}
+      <ArrayBlock
+        icon={<Star className="h-3.5 w-3.5" />}
+        label="Stats"
+        count={stats.length}
+        onAdd={() => {
+          if (stats.length >= 4) {
+            toast.info('Max 4 stats', 'Remove one first.');
+            return;
+          }
+          onChange({
+            ...config,
+            stats: [
+              ...stats,
+              { value: 0, suffix: '+', label: 'Metric' },
+            ],
+          });
+        }}
+        addLabel="Add stat"
+        emptyHint="No stats yet. Add a metric like '500+ happy customers'."
+      >
+        {stats.map((s, i) => (
+          <ItemRow
+            key={i}
+            primary={`${s.prefix ?? ''}${s.value}${s.suffix ?? ''}`}
+            secondary={s.label}
+            onRemove={() => {
+              onChange({ ...config, stats: stats.filter((_, j) => j !== i) });
+            }}
+          />
+        ))}
+      </ArrayBlock>
+
+      {/* About bullets */}
+      {config.about ? (
+        <ArrayBlock
+          icon={<Check className="h-3.5 w-3.5" />}
+          label="About bullets"
+          count={bullets.length}
+          onAdd={() =>
+            onChange({
+              ...config,
+              about: {
+                ...config.about!,
+                bullets: [...bullets, 'New proof point'],
+              },
+            })
+          }
+          addLabel="Add bullet"
+          emptyHint="No bullets in About yet. Add some quick proof points."
+        >
+          {bullets.map((b, i) => (
+            <ItemRow
+              key={i}
+              primary={b || `Bullet ${i + 1}`}
+              secondary=""
+              onRemove={() => {
+                onChange({
+                  ...config,
+                  about: {
+                    ...config.about!,
+                    bullets: bullets.filter((_, j) => j !== i),
+                  },
+                });
+              }}
+            />
+          ))}
+        </ArrayBlock>
+      ) : null}
+    </div>
+  );
+}
+
+/** Collapsible-feel labelled group with an Add button. */
+function ArrayBlock({
+  icon,
+  label,
+  count,
+  children,
+  onAdd,
+  addLabel,
+  emptyHint,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  count: number;
+  children: React.ReactNode;
+  onAdd: () => void;
+  addLabel: string;
+  emptyHint: string;
+}) {
+  return (
+    <div>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-700">
+          <span className="text-slate-400">{icon}</span>
+          {label}
+          <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">
+            {count}
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={onAdd}
+          className="flex items-center gap-1 rounded-full border border-dashed border-slate-300 px-2 py-0.5 text-[10px] font-medium text-slate-600 transition-colors hover:border-[#1D9CA1] hover:text-[#1D9CA1]"
+        >
+          <Plus className="h-2.5 w-2.5" />
+          {addLabel}
+        </button>
+      </div>
+      <div className="mt-2 space-y-1.5">
+        {count === 0 ? (
+          <p className="py-2 text-center text-[11px] text-slate-400">{emptyHint}</p>
+        ) : (
+          children
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** A single row inside an ArrayBlock. Shows primary + secondary text and a delete button. */
+function ItemRow({
+  primary,
+  secondary,
+  onRemove,
+  children,
+}: {
+  primary: string;
+  secondary?: string;
+  onRemove: () => void;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-start gap-2 rounded-xl border border-slate-200 bg-white px-2.5 py-2">
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-xs font-medium text-slate-900">{primary}</div>
+        {secondary ? (
+          <div className="truncate text-[10px] text-slate-500">{secondary}</div>
+        ) : null}
+        {children}
+      </div>
+      <button
+        type="button"
+        onClick={onRemove}
+        className="rounded-lg p-1 text-slate-400 hover:bg-red-50 hover:text-red-500"
+        aria-label="Remove"
+      >
+        <Trash2 className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Images Editor — pick hero / about / gallery images, upload new ones */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Image management for a website. Agencies use this tab to swap which
+ * client photo appears in the About section, pick the set of images
+ * that make up the Gallery, and upload fresh images directly from their
+ * laptop (which land in the same media library the rest of the app uses).
+ *
+ * Uploads reuse `api.uploadImages` so the new files get quality-scored
+ * and show up in the gallery picker on the next render. The hero image
+ * is handled in its own tab (`Hero`) because it also interacts with AI
+ * regeneration, but we link across to it from here for discoverability.
+ */
+function ImagesEditor({
+  config,
+  onChange,
+  clientId,
+  images,
+}: {
+  config: WebsiteConfig;
+  onChange: (c: WebsiteConfig) => void;
+  clientId: string;
+  images: string[];
+}) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+
+  const handleFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    if (!clientId) {
+      toast.error('Pick a client first');
+      return;
+    }
+    const valid: File[] = [];
+    for (const file of Array.from(files)) {
+      if (!file.type.startsWith('image/')) {
+        toast.error('Skipped non-image', file.name);
+        continue;
+      }
+      if (file.size > 10 * 1024 * 1024) {
+        toast.error('Skipped oversize file', `${file.name} is over 10MB.`);
+        continue;
+      }
+      valid.push(file);
+    }
+    if (valid.length === 0) return;
+    setUploading(true);
+    try {
+      await api.uploadImages(clientId, valid, ['website']);
+      toast.success(
+        valid.length === 1 ? 'Image uploaded' : `${valid.length} images uploaded`,
+        'They should appear here shortly.',
+      );
+      // Parent SWR will revalidate on next window focus; hint the user if not.
+    } catch (e) {
+      toast.error('Upload failed', (e as Error).message);
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const setAboutImage = (idx: number | null) => {
+    onChange({
+      ...config,
+      about: config.about
+        ? { ...config.about, imageIndex: idx }
+        : {
+            heading: 'About us',
+            body: '',
+            imageIndex: idx,
+          },
+    });
+  };
+
+  const toggleGalleryImage = (idx: number) => {
+    const current = new Set(config.gallery?.imageIndices ?? []);
+    if (current.has(idx)) current.delete(idx);
+    else current.add(idx);
+    onChange({
+      ...config,
+      gallery: {
+        ...(config.gallery ?? {}),
+        imageIndices: Array.from(current).sort((a, b) => a - b),
+      },
+    });
+  };
+
+  const galleryIndices = new Set(
+    config.gallery?.imageIndices ?? images.map((_, i) => i).slice(0, 6),
+  );
+  const aboutIndex = config.about?.imageIndex ?? null;
+
+  return (
+    <div className="space-y-5">
+      {/* Upload */}
+      <div
+        className="rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 p-4 text-center transition-colors hover:border-[#1D9CA1]"
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.currentTarget.classList.add('border-[#1D9CA1]', 'bg-[#1D9CA1]/5');
+        }}
+        onDragLeave={(e) => {
+          e.currentTarget.classList.remove('border-[#1D9CA1]', 'bg-[#1D9CA1]/5');
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          e.currentTarget.classList.remove('border-[#1D9CA1]', 'bg-[#1D9CA1]/5');
+          handleFiles(e.dataTransfer.files);
+        }}
+      >
+        <Upload className="mx-auto h-6 w-6 text-slate-400" />
+        <p className="mt-2 text-xs font-medium text-slate-700">
+          Drop images here, or
+        </p>
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading || !clientId}
+          className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-[#1D9CA1] hover:underline disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {uploading ? (
+            <>
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Uploading…
+            </>
+          ) : (
+            <>browse from your computer</>
+          )}
+        </button>
+        <p className="mt-1 text-[10px] text-slate-400">
+          PNG, JPG, WebP, or SVG. Up to 10MB each.
+        </p>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/svg+xml"
+          multiple
+          hidden
+          onChange={(e) => handleFiles(e.target.files)}
+        />
+      </div>
+
+      {/* Library overview */}
+      <div>
+        <div className="flex items-center justify-between">
+          <p className="text-xs font-semibold text-slate-700">
+            Library
+            <span className="ml-2 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">
+              {images.length}
+            </span>
+          </p>
+        </div>
+        {images.length === 0 ? (
+          <p className="mt-2 py-4 text-center text-[11px] text-slate-400">
+            No client photos yet. Upload some above.
+          </p>
+        ) : null}
+      </div>
+
+      {/* About image picker */}
+      {images.length > 0 ? (
+        <div>
+          <p className="text-xs font-semibold text-slate-700">
+            About section image
+          </p>
+          <p className="text-[10px] text-slate-500">
+            Click a photo to feature it in the About section.
+          </p>
+          <div className="mt-2 grid grid-cols-4 gap-1.5 rounded-xl border border-slate-200 bg-white p-2">
+            <button
+              onClick={() => setAboutImage(null)}
+              className={`flex aspect-square items-center justify-center rounded-lg border-2 text-[10px] font-medium transition-all ${
+                aboutIndex == null
+                  ? 'border-[#1D9CA1] bg-[#1D9CA1]/5 text-[#1D9CA1]'
+                  : 'border-slate-200 text-slate-500 hover:border-slate-300'
+              }`}
+              title="Use brand gradient fallback"
+            >
+              <span className="text-center leading-tight">Auto<br />(gradient)</span>
+            </button>
+            {images.map((src, i) => (
+              <button
+                key={`about-${src}-${i}`}
+                onClick={() => setAboutImage(i)}
+                className={`relative aspect-square overflow-hidden rounded-lg border-2 transition-all ${
+                  aboutIndex === i
+                    ? 'border-[#1D9CA1] ring-1 ring-[#1D9CA1]/30'
+                    : 'border-transparent hover:border-slate-300'
+                }`}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={src} alt="" className="h-full w-full object-cover" />
+                {aboutIndex === i ? (
+                  <div className="absolute inset-0 flex items-center justify-center bg-[#1D9CA1]/30">
+                    <Check className="h-4 w-4 text-white drop-shadow" />
+                  </div>
+                ) : null}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {/* Gallery picker */}
+      {images.length > 0 ? (
+        <div>
+          <p className="text-xs font-semibold text-slate-700">
+            Gallery images
+            <span className="ml-2 font-normal text-slate-400">
+              pick which photos show in the gallery
+            </span>
+          </p>
+          <div className="mt-2 grid grid-cols-4 gap-1.5 rounded-xl border border-slate-200 bg-white p-2">
+            {images.map((src, i) => {
+              const selected = galleryIndices.has(i);
+              return (
+                <button
+                  key={`g-${src}-${i}`}
+                  onClick={() => toggleGalleryImage(i)}
+                  className={`relative aspect-square overflow-hidden rounded-lg border-2 transition-all ${
+                    selected
+                      ? 'border-[#1D9CA1] ring-1 ring-[#1D9CA1]/30'
+                      : 'border-transparent hover:border-slate-300'
+                  }`}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={src} alt="" className="h-full w-full object-cover" />
+                  {selected ? (
+                    <div className="absolute inset-0 flex items-center justify-center bg-[#1D9CA1]/30">
+                      <Check className="h-4 w-4 text-white drop-shadow" />
+                    </div>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+          <p className="mt-1 text-[10px] text-slate-500">
+            {galleryIndices.size} selected · {images.length - galleryIndices.size} hidden
+          </p>
+        </div>
+      ) : null}
+
+      {/* Hero link */}
+      <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-[11px] text-slate-600">
+        Looking for the hero image? It&apos;s in the{' '}
+        <strong className="text-slate-900">Hero</strong> tab — use it there so
+        you can pick between AI-generated and client-uploaded, plus regenerate
+        the illustration.
       </div>
     </div>
   );

@@ -98,11 +98,16 @@ export interface PageConfig {
   blocks?: {
     about?: WebsiteConfig['about'];
     stats?: WebsiteConfig['stats'];
+    statsSection?: WebsiteConfig['statsSection'];
+    servicesSection?: WebsiteConfig['servicesSection'];
     services?: WebsiteConfig['services'];
     gallery?: WebsiteConfig['gallery'];
+    reviewsSection?: WebsiteConfig['reviewsSection'];
     reviews?: WebsiteConfig['reviews'];
+    faqSection?: WebsiteConfig['faqSection'];
     faq?: WebsiteConfig['faq'];
     contact?: WebsiteConfig['contact'];
+    footer?: WebsiteConfig['footer'];
   };
 }
 
@@ -168,6 +173,8 @@ export interface WebsiteConfig {
   };
 
   about?: {
+    /** Small uppercase kicker above the heading (e.g. "About us"). */
+    eyebrow?: string;
     heading: string;
     body: string;
     bullets?: string[];
@@ -181,6 +188,17 @@ export interface WebsiteConfig {
     label: string;
   }>;
 
+  /**
+   * Optional text overrides for the services section's eyebrow/heading/tagline.
+   * When omitted, the block falls back to sensible defaults ("What we do" /
+   * "Every job, done properly."). Editable inline from the dashboard preview.
+   */
+  servicesSection?: {
+    eyebrow?: string;
+    heading?: string;
+    tagline?: string;
+  };
+
   services?: Array<{
     title: string;
     description: string;
@@ -189,9 +207,19 @@ export interface WebsiteConfig {
   }>;
 
   gallery?: {
+    eyebrow?: string;
     heading?: string;
     /** Indices into the provided `images` array. */
     imageIndices?: number[];
+  };
+
+  /**
+   * Optional text overrides for the reviews section's eyebrow/heading.
+   * Defaults: "Reviews" / "What customers say.".
+   */
+  reviewsSection?: {
+    eyebrow?: string;
+    heading?: string;
   };
 
   reviews?: Array<{
@@ -200,12 +228,33 @@ export interface WebsiteConfig {
     rating: number;
   }>;
 
+  /**
+   * Optional text overrides for the FAQ section's eyebrow/heading.
+   * Defaults: "FAQ" / "Questions, answered.".
+   */
+  faqSection?: {
+    eyebrow?: string;
+    heading?: string;
+  };
+
   faq?: Array<{
     question: string;
     answer: string;
   }>;
 
+  /**
+   * Optional text overrides for the stats section's eyebrow/heading.
+   * When both are omitted, the block renders as a minimal metric strip
+   * (no heading), which is the current behaviour. Set either to add a
+   * heading above the stats.
+   */
+  statsSection?: {
+    eyebrow?: string;
+    heading?: string;
+  };
+
   contact?: {
+    eyebrow?: string;
     heading: string;
     body: string;
     address?: string;
@@ -214,6 +263,15 @@ export interface WebsiteConfig {
     hours?: string;
     showBookingForm?: boolean;
     showHours?: boolean;
+  };
+
+  /**
+   * Optional text overrides for the footer. When omitted, the footer
+   * falls back to the brand tagline and a default nav list.
+   */
+  footer?: {
+    /** Line shown under the business name. Defaults to brand.tagline. */
+    tagline?: string;
   };
 
   navigation?: string[];

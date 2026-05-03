@@ -25,17 +25,30 @@ export function SiteServices({ config }: SiteServicesProps) {
     <SectionWrapper immediate={embedded} id="services" className="bg-slate-50 py-20 md:py-28">
       <div className="mx-auto max-w-6xl px-4">
         <div className="mx-auto max-w-2xl text-center">
-          <p
+          <InlineEditable
+            path="servicesSection.eyebrow"
+            value={config.servicesSection?.eyebrow ?? 'What we do'}
+            as="p"
             className="text-xs font-semibold uppercase tracking-[0.25em]"
             style={{ color: 'var(--bmb-site-primary)' }}
-          >
-            What we do
-          </p>
+            placeholder="Section eyebrow…"
+          />
           <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 md:text-5xl">
-            Every job, done properly.
+            <InlineEditable
+              path="servicesSection.heading"
+              value={config.servicesSection?.heading ?? 'Every job, done properly.'}
+              as="span"
+              placeholder="Section heading…"
+            />
           </h2>
           <p className="mt-4 text-base text-slate-600 md:text-lg">
-            {config.brand.tagline}
+            <InlineEditable
+              path="servicesSection.tagline"
+              value={config.servicesSection?.tagline ?? config.brand.tagline}
+              as="span"
+              multiline
+              placeholder="Short tagline for this section…"
+            />
           </p>
         </div>
 

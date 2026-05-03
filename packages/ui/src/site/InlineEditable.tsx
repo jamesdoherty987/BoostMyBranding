@@ -46,6 +46,8 @@ interface InlineEditableProps {
   as?: ElementType;
   /** Tailwind classes applied in both render and edit modes. */
   className?: string;
+  /** Inline styles applied in both render and edit modes. */
+  style?: React.CSSProperties;
   /** Placeholder shown when value is empty in edit mode. */
   placeholder?: string;
   /** If true, allow multi-line (textarea-style) editing. Default single-line. */
@@ -62,11 +64,16 @@ interface InlineEditableProps {
 const PER_PAGE_BLOCK_KEYS = new Set([
   'about',
   'stats',
+  'statsSection',
+  'servicesSection',
   'services',
   'gallery',
+  'reviewsSection',
   'reviews',
+  'faqSection',
   'faq',
   'contact',
+  'footer',
 ]);
 
 /**
@@ -121,6 +128,7 @@ export function InlineEditable({
   value,
   as,
   className,
+  style,
   placeholder = 'Click to edit…',
   multiline = false,
   maxLength = 2000,
@@ -141,7 +149,7 @@ export function InlineEditable({
 
   // Non-edit mode: plain element, no extras. React reconciles normally.
   if (!editMode) {
-    return <Tag className={className}>{value}</Tag>;
+    return <Tag className={className} style={style}>{value}</Tag>;
   }
 
   const commit = (next: string) => {
@@ -180,6 +188,7 @@ export function InlineEditable({
       className={`${className ?? ''} ${editingClass} ${
         isEmpty ? 'before:text-slate-400 before:content-[attr(data-placeholder)]' : ''
       }`}
+      style={style}
       contentEditable
       suppressContentEditableWarning
       data-inline-path={path}

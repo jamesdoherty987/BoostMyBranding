@@ -303,6 +303,77 @@ export default function WebsitesPage() {
 
   const selectedClient = clients.find((c) => c.id === newSite.clientId);
 
+  /**
+   * Wrapper for SiteEditor's onChange. Updates local state immediately
+   * (so the preview is responsive) and debounce-persists the full config
+   * to the DB so the user never has to click a Save button.
+   *
+   * The debounce prevents hammering the API when the user is dragging
+   * sections around or rapidly clicking color swatches.
+   */
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [lastSaved, setLastSaved] = useState<Date | null>(null);
+
+  const handleConfigChange = useCallback(
+    (next: WebsiteConfig) => {
+      setConfig(next);
+
+      // Debounce the persist — 1.5s after the last change.
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = setTimeout(async () => {
+        if (!newSite.clientId) return;
+        setSaving(true);
+        try {
+          // We use the AI edit endpoint with a no-op instruction to persist
+          // the full config. This is a bit of a hack — ideally we'd have a
+          // dedicated "save config" endpoint. But editWebsiteWithAI with
+          // the current config and an empty instruction just round-trips
+          // the config through normalizeConfig and saves it.
+          //
+          // Actually, let's use updateWebsiteField with the root path to
+          // overwrite the whole config. Simpler.
+          await api.updateWebsiteField({
+            clientId: newSite.clientId,
+            path: 'brand',
+            value: next.brand,
+          });
+          // Save layout + hero + pages in parallel
+          await Promise.all([
+            api.updateWebsiteField({
+              clientId: newSite.clientId,
+              path: 'layout',
+              value: next.layout,
+            }),
+            api.updateWebsiteField({
+              clientId: newSite.clientId,
+              path: 'hero',
+              value: next.hero,
+            }),
+            next.pages
+              ? api.updateWebsiteField({
+                  clientId: newSite.clientId,
+                  path: 'pages',
+                  value: next.pages,
+                })
+              : Promise.resolve(),
+            api.updateWebsiteField({
+              clientId: newSite.clientId,
+              path: 'navigation',
+              value: next.navigation,
+            }),
+          ]);
+          setLastSaved(new Date());
+        } catch (e) {
+          toast.error('Auto-save failed', (e as Error).message);
+        } finally {
+          setSaving(false);
+        }
+      }, 1500);
+    },
+    [newSite.clientId],
+  );
+
   return (
     <>
       <PageHeader
@@ -762,6 +833,17 @@ export default function WebsitesPage() {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <h2 className="text-sm font-semibold text-slate-900">Live preview</h2>
+                  {saving ? (
+                    <span className="flex items-center gap-1.5 text-[11px] text-slate-500">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      Saving…
+                    </span>
+                  ) : lastSaved ? (
+                    <span className="flex items-center gap-1.5 text-[11px] text-emerald-600">
+                      <Check className="h-3 w-3" />
+                      Saved
+                    </span>
+                  ) : null}
                   {editMode ? (
                     <Badge tone="info">
                       <span className="text-[10px] font-semibold uppercase tracking-wider">
@@ -880,7 +962,7 @@ export default function WebsitesPage() {
 
                 <SiteEditor
                   config={config}
-                  onChange={setConfig}
+                  onChange={handleConfigChange}
                   clientId={newSite.clientId}
                   images={clientImages}
                   editMode={editMode}

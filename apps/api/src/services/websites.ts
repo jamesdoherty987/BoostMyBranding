@@ -207,6 +207,7 @@ RULES:
 - If asked to change the hero style, update brand.heroStyle.
 - If asked to change the hero look/variant, update hero.variant to one of: spotlight, beams, floating-icons, parallax-layers, gradient-mesh.
 - If asked for different floating icons, update hero.floatingIcons (Lucide names or emoji strings).
+- If asked to rename a section heading (e.g. "change Services to 'Our Menu'"), update the matching *Section.heading field: servicesSection, statsSection, reviewsSection, faqSection, gallery, about, or contact (use their .heading / .eyebrow fields — not the section title strings that appear inside the layout array).
 - If asked to add or remove a page (e.g. "add a Menu page", "remove the About page"), update the "pages" array. Pages have {slug, title, layout, hero?, blocks?}. Use URL-safe slugs. The first page MUST be the homepage with slug "home". Max 4 pages total.
 - If asked to edit a sub-page's content ("change the About page headline"), locate the matching page in "pages" by slug and edit its hero/blocks.
 - Keep the same JSON structure — don't add or remove top-level keys.
@@ -341,18 +342,43 @@ function normalizeConfig(raw: Partial<WebsiteConfig>, template: SiteTemplate): W
       aiImageUrl: raw.hero?.aiImageUrl ?? null,
       aiImagePrompt: raw.hero?.aiImagePrompt,
     },
-    about: raw.about,
+    about: raw.about
+      ? {
+          eyebrow: raw.about.eyebrow,
+          heading: raw.about.heading ?? 'About us',
+          body: raw.about.body ?? '',
+          bullets: raw.about.bullets,
+          imageIndex: raw.about.imageIndex ?? null,
+        }
+      : undefined,
     stats: raw.stats,
+    statsSection: raw.statsSection,
+    servicesSection: raw.servicesSection,
     services: raw.services ?? [],
     gallery: raw.gallery,
+    reviewsSection: raw.reviewsSection,
     reviews: raw.reviews ?? [],
+    faqSection: raw.faqSection,
     faq: raw.faq ?? [],
-    contact: raw.contact ?? {
-      heading: 'Get in touch',
-      body: 'Drop us a line, we usually respond within a few hours.',
-      showBookingForm: true,
-      showHours: false,
-    },
+    contact: raw.contact
+      ? {
+          eyebrow: raw.contact.eyebrow,
+          heading: raw.contact.heading ?? 'Get in touch',
+          body: raw.contact.body ?? '',
+          address: raw.contact.address,
+          phone: raw.contact.phone,
+          email: raw.contact.email,
+          hours: raw.contact.hours,
+          showBookingForm: raw.contact.showBookingForm,
+          showHours: raw.contact.showHours,
+        }
+      : {
+          heading: 'Get in touch',
+          body: 'Drop us a line, we usually respond within a few hours.',
+          showBookingForm: true,
+          showHours: false,
+        },
+    footer: raw.footer,
     navigation: raw.navigation ?? ['Home', 'Services', 'About', 'Contact'],
     pages: normalizePages(raw.pages, rootLayout),
   };

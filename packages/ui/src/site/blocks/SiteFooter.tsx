@@ -1,14 +1,22 @@
 'use client';
 
 import type { WebsiteConfig } from '@boost/core';
+import { InlineEditable } from '../InlineEditable';
 
 interface SiteFooterProps {
   config: WebsiteConfig;
   businessName: string;
 }
 
+/**
+ * Dark footer strip. The tagline under the business name is inline-editable
+ * (defaulting to the brand tagline when a footer-specific one isn't set) and
+ * the nav labels are individually editable when edit mode is on.
+ */
 export function SiteFooter({ config, businessName }: SiteFooterProps) {
   const year = new Date().getFullYear();
+  const nav = config.navigation ?? ['Services', 'About', 'Contact'];
+  const tagline = config.footer?.tagline ?? config.brand.tagline ?? '';
   return (
     <footer
       className="border-t py-10"
@@ -32,17 +40,29 @@ export function SiteFooter({ config, businessName }: SiteFooterProps) {
           </span>
           <div>
             <div className="text-sm font-semibold text-white">{businessName}</div>
-            <div className="text-xs text-white/60">{config.brand.tagline}</div>
+            <div className="text-xs text-white/60">
+              <InlineEditable
+                path="footer.tagline"
+                value={tagline}
+                as="span"
+                placeholder="Footer tagline…"
+              />
+            </div>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-5 text-xs">
-          {(config.navigation ?? ['Services', 'About', 'Contact']).map((label) => (
+          {nav.map((label, i) => (
             <a
-              key={label}
-              href={`#${label.toLowerCase()}`}
+              key={i}
+              href={`#${label.toLowerCase().replace(/\s+/g, '-')}`}
               className="transition-colors hover:text-white"
             >
-              {label}
+              <InlineEditable
+                path={`navigation.${i}`}
+                value={label}
+                as="span"
+                placeholder="Nav label…"
+              />
             </a>
           ))}
         </div>

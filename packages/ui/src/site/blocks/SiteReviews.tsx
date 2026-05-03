@@ -5,11 +5,18 @@ import { Star } from 'lucide-react';
 import type { WebsiteConfig } from '@boost/core';
 import { SectionWrapper } from '../../section-wrapper';
 import { useSiteContext } from '../context';
+import { InlineEditable } from '../InlineEditable';
 
 interface SiteReviewsProps {
   config: WebsiteConfig;
 }
 
+/**
+ * Testimonials grid. Every review's text and author are inline-editable when
+ * edit mode is on. The section eyebrow/heading are also editable, and if
+ * either the eyebrow or heading lives under a sub-page's override the
+ * normal `InlineEditable` path-remapping routes the edit there.
+ */
 export function SiteReviews({ config }: SiteReviewsProps) {
   const { embedded } = useSiteContext();
   const reviews = config.reviews;
@@ -19,14 +26,21 @@ export function SiteReviews({ config }: SiteReviewsProps) {
     <SectionWrapper immediate={embedded} id="reviews" className="bg-white py-20 md:py-28">
       <div className="mx-auto max-w-6xl px-4">
         <div className="mx-auto max-w-2xl text-center">
-          <p
+          <InlineEditable
+            path="reviewsSection.eyebrow"
+            value={config.reviewsSection?.eyebrow ?? 'Reviews'}
+            as="p"
             className="text-xs font-semibold uppercase tracking-[0.25em]"
             style={{ color: 'var(--bmb-site-primary)' }}
-          >
-            Reviews
-          </p>
+            placeholder="Section eyebrow…"
+          />
           <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 md:text-5xl">
-            What customers say.
+            <InlineEditable
+              path="reviewsSection.heading"
+              value={config.reviewsSection?.heading ?? 'What customers say.'}
+              as="span"
+              placeholder="Section heading…"
+            />
           </h2>
         </div>
 
@@ -49,10 +63,24 @@ export function SiteReviews({ config }: SiteReviewsProps) {
                 )}
               </div>
               <blockquote className="mt-4 text-base text-slate-800">
-                &ldquo;{r.text}&rdquo;
+                <span aria-hidden>&ldquo;</span>
+                <InlineEditable
+                  path={`reviews.${i}.text`}
+                  value={r.text}
+                  as="span"
+                  multiline
+                  placeholder="Review text…"
+                />
+                <span aria-hidden>&rdquo;</span>
               </blockquote>
               <figcaption className="mt-4 text-sm font-semibold text-slate-500">
-                — {r.author}
+                <span aria-hidden>— </span>
+                <InlineEditable
+                  path={`reviews.${i}.author`}
+                  value={r.author}
+                  as="span"
+                  placeholder="Author name…"
+                />
               </figcaption>
             </motion.figure>
           ))}

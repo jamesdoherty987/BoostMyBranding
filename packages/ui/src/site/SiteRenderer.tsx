@@ -157,10 +157,15 @@ function buildPageConfig(root: WebsiteConfig, page: PageConfig): WebsiteConfig {
     },
     about: b.about ?? root.about,
     stats: b.stats ?? root.stats,
+    statsSection: b.statsSection ?? root.statsSection,
+    servicesSection: b.servicesSection ?? root.servicesSection,
     services: b.services ?? root.services,
     gallery: b.gallery ?? root.gallery,
+    reviewsSection: b.reviewsSection ?? root.reviewsSection,
     reviews: b.reviews ?? root.reviews,
+    faqSection: b.faqSection ?? root.faqSection,
     faq: b.faq ?? root.faq,
     contact: b.contact ?? root.contact,
+    footer: b.footer ?? root.footer,
   };
 }

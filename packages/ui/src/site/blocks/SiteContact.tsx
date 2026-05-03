@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
-import { Mail, MapPin, Phone, Clock, ArrowRight } from 'lucide-react';
+import { Mail, MapPin, Phone, Clock, ArrowRight, MessageCircle } from 'lucide-react';
 import type { WebsiteConfig } from '@boost/core';
 import { SectionWrapper } from '../../section-wrapper';
 import { useSiteContext } from '../context';
@@ -189,6 +189,17 @@ export function SiteContact({ config, clientId: clientIdProp, apiUrl: apiUrlProp
                       placeholder="Mon–Fri 9am–5pm"
                     />
                   </div>
+                ) : null}
+                {c.whatsapp ? (
+                  <a
+                    href={`https://wa.me/${c.whatsapp.replace(/[^+\d]/g, '')}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-start gap-3 hover:underline"
+                  >
+                    <MessageCircle className="mt-0.5 h-4 w-4 shrink-0 opacity-80" />
+                    <span>WhatsApp us</span>
+                  </a>
                 ) : null}
               </div>
             </div>

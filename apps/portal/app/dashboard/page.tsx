@@ -153,7 +153,7 @@ export default function DashboardPage() {
           {client.stats?.engagementRate ? (
             <div className="mt-3 inline-flex items-center gap-1.5 text-sm text-white/90">
               <TrendingUp className="h-4 w-4" />
-              {client.stats.engagementRate}% engagement
+              {(client.stats?.engagementRate ?? 0)}% engagement
             </div>
           ) : null}
         </motion.section>

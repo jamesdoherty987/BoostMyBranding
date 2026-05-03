@@ -7,6 +7,7 @@ import { Parallax } from '../../parallax';
 import { useSiteContext } from '../context';
 import { brandGradient } from '../theme';
 import { InlineEditable } from '../InlineEditable';
+import { InlineImage } from '../InlineImage';
 
 interface SiteAboutProps {
   config: WebsiteConfig;
@@ -35,22 +36,21 @@ export function SiteAbout({ config, images, businessName }: SiteAboutProps) {
         className="relative aspect-[4/5] overflow-hidden rounded-[2rem] shadow-2xl"
         style={{ boxShadow: '0 40px 80px -20px rgba(var(--bmb-site-primary-rgb), 0.3)' }}
       >
-        {image ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={image}
-            alt={`${businessName}, ${about.heading}`}
-            className="h-full w-full object-cover"
-            loading="lazy"
-          />
-        ) : (
-          <div
-            className="h-full w-full"
-            role="img"
-            aria-label={`${businessName} brand illustration`}
-            style={{ background: brandGradient(config.brand, 160) }}
-          />
-        )}
+        <InlineImage
+          src={image}
+          alt={`${businessName}, ${about.heading}`}
+          path="about"
+          fieldName="imageIndex"
+          className="h-full w-full"
+          placeholder={
+            <div
+              className="h-full w-full"
+              role="img"
+              aria-label={`${businessName} brand illustration`}
+              style={{ background: brandGradient(config.brand, 160) }}
+            />
+          }
+        />
       </div>
       <div
         aria-hidden

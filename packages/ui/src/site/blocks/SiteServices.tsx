@@ -55,7 +55,9 @@ export function SiteServices({ config }: SiteServicesProps) {
         <div className="mt-12 grid grid-cols-1 gap-4 sm:grid-cols-2 md:gap-6 lg:grid-cols-3">
           {services.map((s, i) => {
             const Icon = resolveIcon(s.icon);
-            const featured = i === 0 && services.length > 3;
+            // Featured when the service explicitly asks for it, OR when
+            // the first service has >3 siblings (auto-featured default).
+            const featured = s.featured ?? (i === 0 && services.length > 3);
             return (
               <motion.div
                 key={`${s.title}-${i}`}
@@ -64,8 +66,10 @@ export function SiteServices({ config }: SiteServicesProps) {
                 animate={embedded ? { opacity: 1, y: 0 } : undefined}
                 viewport={{ once: true, margin: '-40px' }}
                 transition={{ delay: i * 0.05, duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
-                className={`group relative overflow-hidden rounded-3xl border border-slate-200 bg-white p-6 transition-all hover:-translate-y-1 hover:shadow-xl ${
-                  featured ? 'lg:col-span-2 lg:row-span-1' : ''
+                className={`group relative overflow-hidden rounded-3xl border bg-white p-6 transition-all hover:-translate-y-1 hover:shadow-xl ${
+                  featured
+                    ? 'border-[color:var(--bmb-site-primary)] ring-1 ring-[color:var(--bmb-site-primary)]/30 lg:col-span-2 lg:row-span-1'
+                    : 'border-slate-200'
                 }`}
               >
                 {/* Accent top bar */}

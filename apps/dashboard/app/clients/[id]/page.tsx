@@ -8,6 +8,7 @@ import useSWR from 'swr';
 import {
   getClient,
   getMessagesForClient,
+  getClientStats,
   formatCurrency,
   timeAgo,
   mockClients,
@@ -72,6 +73,8 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
   if (!client) notFound();
 
   const messages = getMessagesForClient(client.id);
+  // DB clients don't have computed `stats` — use helper for zero defaults.
+  const stats = getClientStats(client);
 
   return (
     <>
@@ -126,7 +129,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                 </div>
                 <div className="mt-4 flex items-center gap-2 text-xs text-slate-500">
                   <TrendingUp className="h-3.5 w-3.5 text-[#1D9CA1]" />
-                  {client.stats.engagementRate}% avg engagement
+                  {stats.engagementRate}% avg engagement
                 </div>
               </CardContent>
             </Card>
@@ -137,7 +140,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                   Subscription
                 </div>
                 <div className="mt-1 text-2xl font-bold text-slate-900">
-                  {formatCurrency(client.monthlyPriceCents)}
+                  {formatCurrency(client.monthlyPriceCents ?? 0)}
                   <span className="text-sm font-normal text-slate-500"> /mo</span>
                 </div>
                 <div className="mt-2">
@@ -150,7 +153,9 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                   {client.subscriptionStartedAt ? (
                     <div>Subscribed {timeAgo(client.subscriptionStartedAt)}</div>
                   ) : null}
-                  <div>Onboarded {timeAgo(client.onboardedAt)}</div>
+                  {client.onboardedAt ? (
+                    <div>Onboarded {timeAgo(client.onboardedAt)}</div>
+                  ) : null}
                 </div>
               </CardContent>
             </Card>
@@ -161,17 +166,20 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                   Brand colors
                 </div>
                 <div className="mt-3 flex gap-2">
-                  {(['primary', 'secondary', 'accent'] as const).map((key) => (
-                    <div key={key} className="flex-1">
-                      <div
-                        className="h-12 rounded-xl border border-slate-200"
-                        style={{ backgroundColor: client.brandColors[key] }}
-                      />
-                      <div className="mt-1.5 text-[10px] text-slate-500">
-                        {client.brandColors[key]}
+                  {(['primary', 'secondary', 'accent'] as const).map((key) => {
+                    const color = client.brandColors?.[key] ?? '#e2e8f0';
+                    return (
+                      <div key={key} className="flex-1">
+                        <div
+                          className="h-12 rounded-xl border border-slate-200"
+                          style={{ backgroundColor: color }}
+                        />
+                        <div className="mt-1.5 text-[10px] text-slate-500">
+                          {color}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </CardContent>
             </Card>
@@ -223,24 +231,25 @@ function OverviewTab({
   setTab: (t: Tab) => void;
   messages: Message[];
 }) {
+  const stats = getClientStats(client);
   const tiles = [
     {
       label: 'Posts this month',
-      value: client.stats.postsThisMonth,
+      value: stats.postsThisMonth,
       icon: Sparkles,
       tab: 'posts' as Tab,
       tone: 'from-[#1D9CA1] to-[#48D886]',
     },
     {
       label: 'Pending review',
-      value: client.stats.pendingApproval,
+      value: stats.pendingApproval,
       icon: Sparkles,
       tab: 'posts' as Tab,
       tone: 'from-amber-400 to-amber-500',
     },
     {
       label: 'Media files',
-      value: client.stats.imagesUploaded,
+      value: stats.imagesUploaded,
       icon: ImageIcon,
       tab: 'media' as Tab,
       tone: 'from-sky-400 to-sky-600',

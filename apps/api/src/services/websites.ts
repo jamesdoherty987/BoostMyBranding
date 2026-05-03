@@ -42,6 +42,51 @@ export interface GenerateWebsiteArgs {
    * used. Set to false in tests or when the agency explicitly skips it.
    */
   generateHeroImage?: boolean;
+
+  /* ── Seeded business facts ──────────────────────────────────────────
+   * Passed through to Claude as known-good data it must use verbatim
+   * rather than invent. Every field is optional — Claude falls back to
+   * inferring from the scraped site + description when we leave them
+   * blank.
+   * ───────────────────────────────────────────────────────────────── */
+
+  /** Street address. Powers the Google Maps embed in the contact block. */
+  address?: string;
+  phone?: string;
+  email?: string;
+  whatsapp?: string;
+  /** Multi-line opening hours, e.g. "Mon–Fri 9am–6pm\nSat 10am–3pm". */
+  hours?: string;
+  socials?: {
+    facebook?: string;
+    instagram?: string;
+    tiktok?: string;
+    linkedin?: string;
+    x?: string;
+    youtube?: string;
+    google?: string;
+  };
+  /**
+   * Team members the site should show. When provided, Claude populates
+   * `team` verbatim (rather than inventing names). Leave empty to let
+   * Claude decide whether the business needs a team block at all.
+   */
+  team?: Array<{
+    name: string;
+    role: string;
+    bio?: string;
+    credentials?: string;
+    specialties?: string[];
+    photoUrl?: string;
+  }>;
+  /** Towns/regions this business covers. Populates the serviceAreas block. */
+  serviceAreas?: string[];
+  /** Certifications / insurance / licences. Populates the trustBadges block. */
+  trustBadges?: Array<{
+    label: string;
+    detail?: string;
+    href?: string;
+  }>;
 }
 
 export async function generateWebsite(args: GenerateWebsiteArgs) {
@@ -111,6 +156,7 @@ export async function generateWebsite(args: GenerateWebsiteArgs) {
     imageDescriptions,
     template: templateHint,
     suggestions: args.suggestions,
+    seededFacts: buildSeededFacts(args),
   });
 
   const raw = await withRetry(
@@ -121,6 +167,11 @@ export async function generateWebsite(args: GenerateWebsiteArgs) {
   // Claude picks the template — fall back to the hint if it didn't.
   const chosenTemplate = (raw.template ?? templateHint) as SiteTemplate;
   const config = normalizeConfig(raw, chosenTemplate);
+
+  // Apply seeded facts AFTER Claude's pass so they're authoritative.
+  // Contact info, team, service areas, trust badges, socials — the agency
+  // provided these directly so we must not let Claude's guesses overwrite them.
+  applySeededFacts(config, args);
 
   // 4. Generate AI hero image if no client image is selected. Runs after the
   // config so we can pass the chosen variant to the image prompt.
@@ -204,12 +255,25 @@ RULES:
 - If asked to change colors, update the brand object.
 - If asked to add/remove sections, update the layout array.
 - If asked to rewrite copy, update the relevant text fields.
+- If asked to make one card bigger / feature / highlight / emphasise a single item ("make the middle team member bigger", "highlight the Silver tier", "feature the first review"), set the item's "featured" field to true. Clear other items' "featured" fields to false when the user says "only the middle one". Featured items span two columns on wide grids and get a brand-accent ring. Supported on: services, reviews, team.members, portfolio.projects, pricingTiers.tiers, menu.categories[].items, products.items, priceList.items, schedule.entries.
+- If asked to change one team member's card style ("make Sarah's card the banner one"), set that member's "variant" ("portrait" | "minimal" | "quote" | "banner"). Leave other members untouched so the rest stay uniform.
+- If asked to change the team block's overall card style ("use minimal cards for the whole team"), set team.variant. Individual member overrides still win.
 - If asked to change the hero style, update brand.heroStyle.
 - If asked to change the hero look/variant, update hero.variant to one of: spotlight, beams, floating-icons, parallax-layers, gradient-mesh.
 - If asked for different floating icons, update hero.floatingIcons (Lucide names or emoji strings).
 - If asked to rename a section heading (e.g. "change Services to 'Our Menu'"), update the matching *Section.heading field: servicesSection, statsSection, reviewsSection, faqSection, gallery, about, or contact (use their .heading / .eyebrow fields — not the section title strings that appear inside the layout array).
 - If asked to add or remove a page (e.g. "add a Menu page", "remove the About page"), update the "pages" array. Pages have {slug, title, layout, hero?, blocks?}. Use URL-safe slugs. The first page MUST be the homepage with slug "home". Max 4 pages total.
 - If asked to edit a sub-page's content ("change the About page headline"), locate the matching page in "pages" by slug and edit its hero/blocks.
+- If asked to add a decorative image / cutout / prop to the hero (e.g. "add the coffee cup in the top right", "put a wrench drifting across the hero"), append to hero.cutouts with x/y/size/animation. Don't invent URLs — if there's no suitable image in the client's media library, explain in the summary that an image is needed.
+- If asked to "make a custom section" / "add a section showing these photos" / "invent a section", append to customSections with the best matching variant (image-strip, image-text-split, feature-row, pull-quote) and add "custom" to the layout array if it's not already there.
+- If asked to add a products / shop / menu-like section with prices, populate "products" and add "products" to layout.
+- If asked to add examples / case studies / portfolio / past projects, populate "portfolio" and add "portfolio" to layout.
+- If asked to explain the process / "how it works" / steps, populate "process" with numbered steps.
+- If asked for pricing packages / plans / tiers (Bronze/Silver/Gold), populate "pricingTiers".
+- If asked to promote something time-sensitive (Christmas hours, sale), populate "announcement" with a short message.
+- If asked to "feature press" / "show partner logos", populate "logoStrip".
+- If asked for an intro video / demo / embed, populate "video" with the URL.
+- If asked to add a newsletter / waitlist / email signup, populate "newsletter".
 - Keep the same JSON structure — don't add or remove top-level keys.
 - The summary should be concise and specific, e.g. "Changed primary color to navy blue and made the hero dark."`;
 
@@ -276,16 +340,35 @@ export async function updateWebsiteField(args: {
   return next as WebsiteConfig;
 }
 
-/** Set a nested value by path, creating intermediate objects/arrays as needed. */
+/**
+ * Set a nested value by path, creating intermediate objects/arrays as needed.
+ *
+ * Important: when a numeric segment points to an index past the current array
+ * length, we fill the gap with empty objects rather than leaving sparse
+ * holes. A sparse hole serialises as `null` in JSON, which later reads as
+ * `member = null` in the renderer and crashes `member.photoUrl`.
+ */
 function setPath(target: Record<string, any>, path: string[], value: unknown) {
   if (path.length === 0) return;
   let cursor: any = target;
   for (let i = 0; i < path.length - 1; i++) {
     const key = path[i]!;
-    // Numeric key → treat current level as an array.
+    // Numeric key → treat the current cursor level as an array.
     if (cursor[key] == null) {
       const nextKey = path[i + 1]!;
       cursor[key] = /^\d+$/.test(nextKey) ? [] : {};
+    }
+    // Ensure the child at this key isn't a sparse hole when we're about
+    // to descend into it by index. Fills `members[0]` and `members[1]`
+    // with `{}` when writing to `members[2]`.
+    if (Array.isArray(cursor[key])) {
+      const arr = cursor[key] as any[];
+      const nextKey = path[i + 1];
+      if (nextKey && /^\d+$/.test(nextKey)) {
+        const idx = Number(nextKey);
+        while (arr.length < idx) arr.push({});
+        if (arr[idx] == null) arr[idx] = {};
+      }
     }
     cursor = cursor[key];
   }
@@ -341,6 +424,7 @@ function normalizeConfig(raw: Partial<WebsiteConfig>, template: SiteTemplate): W
       floatingIcons: raw.hero?.floatingIcons,
       aiImageUrl: raw.hero?.aiImageUrl ?? null,
       aiImagePrompt: raw.hero?.aiImagePrompt,
+      cutouts: raw.hero?.cutouts,
     },
     about: raw.about
       ? {
@@ -369,6 +453,7 @@ function normalizeConfig(raw: Partial<WebsiteConfig>, template: SiteTemplate): W
           phone: raw.contact.phone,
           email: raw.contact.email,
           hours: raw.contact.hours,
+          whatsapp: raw.contact.whatsapp,
           showBookingForm: raw.contact.showBookingForm,
           showHours: raw.contact.showHours,
         }
@@ -378,7 +463,29 @@ function normalizeConfig(raw: Partial<WebsiteConfig>, template: SiteTemplate): W
           showBookingForm: true,
           showHours: false,
         },
+    socials: raw.socials,
+    mobileCta: raw.mobileCta,
     footer: raw.footer,
+    // Industry-specific blocks pass through as-is. They render null when
+    // their data is absent, so it's safe to leave them undefined.
+    menu: raw.menu,
+    priceList: raw.priceList,
+    team: raw.team,
+    schedule: raw.schedule,
+    serviceAreas: raw.serviceAreas,
+    beforeAfter: raw.beforeAfter,
+    trustBadges: raw.trustBadges,
+    cta: raw.cta,
+    customSections: raw.customSections,
+    // Extra small-business blocks
+    products: raw.products,
+    portfolio: raw.portfolio,
+    process: raw.process,
+    pricingTiers: raw.pricingTiers,
+    announcement: raw.announcement,
+    logoStrip: raw.logoStrip,
+    video: raw.video,
+    newsletter: raw.newsletter,
     navigation: raw.navigation ?? ['Home', 'Services', 'About', 'Contact'],
     pages: normalizePages(raw.pages, rootLayout),
   };
@@ -417,6 +524,23 @@ function normalizePages(
     'faq',
     'contact',
     'footer',
+    'menu',
+    'priceList',
+    'team',
+    'schedule',
+    'serviceAreas',
+    'beforeAfter',
+    'trustBadges',
+    'cta',
+    'custom',
+    'products',
+    'portfolio',
+    'process',
+    'pricingTiers',
+    'announcement',
+    'logoStrip',
+    'video',
+    'newsletter',
   ];
 
   const seenSlugs = new Set<string>();
@@ -523,6 +647,153 @@ const TEMPLATE_DEFAULTS: Record<SiteTemplate, { primary: string; accent: string 
   nonprofit: { primary: '#059669', accent: '#f59e0b' },
   tech: { primary: '#4338ca', accent: '#06b6d4' },
 };
+
+/**
+ * Turn the seeded-facts subset of `GenerateWebsiteArgs` into a
+ * human-readable block Claude can consume as authoritative context.
+ * These aren't suggestions — they're facts the agency has typed in.
+ *
+ * Returns undefined when nothing was seeded so we don't pad the prompt
+ * with an empty section.
+ */
+function buildSeededFacts(args: GenerateWebsiteArgs): string | undefined {
+  const lines: string[] = [];
+  if (args.address) lines.push(`Address: ${args.address}`);
+  if (args.phone) lines.push(`Phone: ${args.phone}`);
+  if (args.whatsapp) lines.push(`WhatsApp: ${args.whatsapp}`);
+  if (args.email) lines.push(`Email: ${args.email}`);
+  if (args.hours) lines.push(`Opening hours:\n${args.hours}`);
+
+  if (args.socials) {
+    const socialLines = Object.entries(args.socials)
+      .filter(([, v]) => v && v.trim())
+      .map(([k, v]) => `  ${k}: ${v}`);
+    if (socialLines.length > 0) {
+      lines.push(`Social links:\n${socialLines.join('\n')}`);
+    }
+  }
+
+  if (args.team && args.team.length > 0) {
+    lines.push(
+      `Team members (use these EXACTLY — do not invent):\n` +
+        args.team
+          .map(
+            (m, i) =>
+              `  [${i}] ${m.name} — ${m.role}` +
+              (m.credentials ? ` (${m.credentials})` : '') +
+              (m.specialties?.length ? ` · specialties: ${m.specialties.join(', ')}` : '') +
+              (m.bio ? `\n      bio: ${m.bio}` : ''),
+          )
+          .join('\n'),
+    );
+  }
+
+  if (args.serviceAreas && args.serviceAreas.length > 0) {
+    lines.push(`Service areas: ${args.serviceAreas.join(', ')}`);
+  }
+
+  if (args.trustBadges && args.trustBadges.length > 0) {
+    lines.push(
+      `Trust badges / credentials:\n` +
+        args.trustBadges
+          .map((b) => `  - ${b.label}${b.detail ? ` — ${b.detail}` : ''}`)
+          .join('\n'),
+    );
+  }
+
+  return lines.length > 0 ? lines.join('\n\n') : undefined;
+}
+
+/**
+ * Stamp seeded facts onto the final config AFTER Claude has run. Claude
+ * gets told about these facts in the prompt so it can write copy that's
+ * consistent with them, but we can't trust it to not paraphrase or
+ * invent. Overwriting at the end guarantees the facts on the rendered
+ * site match exactly what the agency typed.
+ *
+ * Safe to call with no seeded facts — any missing field is a no-op.
+ */
+function applySeededFacts(config: WebsiteConfig, args: GenerateWebsiteArgs): void {
+  const hasContactFacts =
+    args.address || args.phone || args.email || args.hours || args.whatsapp;
+  if (hasContactFacts) {
+    config.contact = {
+      heading: config.contact?.heading ?? 'Get in touch',
+      body: config.contact?.body ?? '',
+      eyebrow: config.contact?.eyebrow,
+      showBookingForm: config.contact?.showBookingForm ?? true,
+      showHours: config.contact?.showHours ?? Boolean(args.hours),
+      ...(args.address ? { address: args.address } : {}),
+      ...(args.phone ? { phone: args.phone } : {}),
+      ...(args.email ? { email: args.email } : {}),
+      ...(args.hours ? { hours: args.hours } : {}),
+      ...(args.whatsapp ? { whatsapp: args.whatsapp } : {}),
+    };
+  }
+
+  if (args.socials && Object.values(args.socials).some(Boolean)) {
+    config.socials = { ...(config.socials ?? {}), ...args.socials };
+  }
+
+  if (args.team && args.team.length > 0) {
+    config.team = {
+      eyebrow: config.team?.eyebrow ?? 'The team',
+      heading: config.team?.heading ?? 'Meet the people.',
+      members: args.team.map((m) => ({
+        name: m.name,
+        role: m.role,
+        bio: m.bio,
+        credentials: m.credentials,
+        specialties: m.specialties,
+        photoUrl: m.photoUrl,
+      })),
+    };
+    if (!config.layout?.includes('team')) {
+      config.layout = insertBeforeFooter(config.layout ?? [], 'team');
+    }
+  }
+
+  if (args.serviceAreas && args.serviceAreas.length > 0) {
+    config.serviceAreas = {
+      eyebrow: config.serviceAreas?.eyebrow ?? 'Where we work',
+      heading: config.serviceAreas?.heading ?? 'Serving these areas.',
+      areas: args.serviceAreas,
+      footnote: config.serviceAreas?.footnote,
+    };
+    if (!config.layout?.includes('serviceAreas')) {
+      config.layout = insertBeforeFooter(config.layout ?? [], 'serviceAreas');
+    }
+  }
+
+  if (args.trustBadges && args.trustBadges.length > 0) {
+    config.trustBadges = {
+      eyebrow: config.trustBadges?.eyebrow ?? 'Credentials',
+      heading: config.trustBadges?.heading ?? 'Qualified and insured.',
+      badges: args.trustBadges.map((b) => ({
+        label: b.label,
+        detail: b.detail,
+        href: b.href,
+      })),
+    };
+    if (!config.layout?.includes('trustBadges')) {
+      config.layout = insertBeforeFooter(config.layout ?? [], 'trustBadges');
+    }
+  }
+
+  if (args.whatsapp && !config.mobileCta?.showWhatsApp) {
+    config.mobileCta = {
+      ...(config.mobileCta ?? {}),
+      showWhatsApp: true,
+    };
+  }
+}
+
+/** Insert a block key into a layout just before the footer. */
+function insertBeforeFooter(layout: SiteBlockKey[], key: SiteBlockKey): SiteBlockKey[] {
+  const idx = layout.indexOf('footer');
+  if (idx < 0) return [...layout, key];
+  return [...layout.slice(0, idx), key, ...layout.slice(idx)];
+}
 
 /**
  * Deterministic, richly-populated demo config used when the DB is offline.
@@ -648,6 +919,12 @@ function demoConfig(name: string, industry: string, template: SiteTemplate): Web
       hours: 'Mon–Fri 8am–6pm · Sat 9am–3pm',
       showBookingForm: true,
       showHours: true,
+    },
+    mobileCta: {
+      primaryLabel: 'Book now',
+      primaryHref: '#contact',
+      showCall: true,
+      showWhatsApp: false,
     },
     navigation: ['Home', 'Services', 'About', 'Reviews', 'Contact'],
   };

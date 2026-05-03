@@ -39,6 +39,31 @@ export interface SiteContextValue {
    * `currentPageSlug`; undefined for single-page sites.
    */
   pageIndex?: number;
+  /**
+   * Full list of client image URLs (in index order). Blocks that use
+   * `imageIndex`-style references can pass this to `InlineImage` so a
+   * click-in-edit-mode opens the media library picker instead of going
+   * to a text-edit state.
+   */
+  images?: string[];
+  /**
+   * Called by `InlineImage` when the user clicks an image in edit mode.
+   * The dashboard opens a picker overlay; on selection it calls the
+   * same `onFieldChange` path with `{imageIndex: n}` or `{imageUrl: 's'}`.
+   *
+   * Receives the path prefix of the field to update — e.g. `about` or
+   * `team.members.2` — and the current value shape so the picker knows
+   * whether to set `imageIndex` or `imageUrl`.
+   */
+  onImageClick?: (context: { path: string; fieldName: 'imageIndex' | 'imageUrl' | 'photoIndex' | 'photoUrl' }) => void;
+  /**
+   * Called by `SiteAIChat` when the user submits a natural-language edit.
+   * The host wires this to the `editWebsiteWithAI` API and returns a short
+   * summary of what changed (or throws with a clear error message).
+   *
+   * Only runs in edit mode. Leave undefined to hide the floating chat.
+   */
+  onAIEdit?: (instruction: string) => Promise<string>;
 }
 
 export const SiteContext = createContext<SiteContextValue>({

@@ -384,3 +384,59 @@ async function runAnalysisForImage(imageId: string) {
   broadcast({ type: 'image:analyzed', payload: { id: img.id, score: analysis.qualityScore } });
   return analysis;
 }
+
+
+/**
+ * Update the editable metadata on a single image. Currently supports:
+ *   - aiDescription    (human-readable label; often what the AI guessed)
+ *   - status           ('approved' | 'rejected' | 'pending')
+ *
+ * Auth: client-role users can only edit their own clientId's images.
+ */
+const updateImageSchema = z.object({
+  aiDescription: z.string().max(500).nullable().optional(),
+  status: z.enum(['pending', 'approved', 'rejected']).optional(),
+});
+
+imagesRouter.patch('/:id', requireAuth, uploadLimiter, async (req, res, next) => {
+  try {
+    const id = req.params.id;
+    if (typeof id !== 'string' || !id) {
+      return res.status(400).json({ error: { message: 'Missing id', code: 'BAD_REQUEST' } });
+    }
+    const body = updateImageSchema.parse(req.body);
+    const user = (req as any).user as { role: string; clientId?: string };
+
+    if (!isDbConfigured()) {
+      return res.json({ data: { id, ...body } });
+    }
+
+    const db = getDb();
+    const [existing] = await db
+      .select()
+      .from(clientImages)
+      .where(eq(clientImages.id, id));
+    if (!existing) {
+      return res.status(404).json({ error: { message: 'Image not found', code: 'NOT_FOUND' } });
+    }
+    if (user.role === 'client' && existing.clientId !== user.clientId) {
+      return res.status(403).json({ error: { message: 'Forbidden', code: 'FORBIDDEN' } });
+    }
+
+    const patch: Record<string, unknown> = {};
+    if (body.aiDescription !== undefined) patch.aiDescription = body.aiDescription;
+    if (body.status !== undefined) patch.status = body.status;
+    if (Object.keys(patch).length === 0) {
+      return res.json({ data: existing });
+    }
+
+    const [updated] = await db
+      .update(clientImages)
+      .set(patch)
+      .where(eq(clientImages.id, id))
+      .returning();
+    res.json({ data: updated });
+  } catch (e) {
+    next(e);
+  }
+});

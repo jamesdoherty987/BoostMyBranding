@@ -36,12 +36,19 @@ import {
   type FocusEvent as ReactFocusEvent,
 } from 'react';
 import { useSiteContext } from './context';
+import { remapPathForPage } from './path-remap';
 
 interface InlineEditableProps {
   /** Dotted path into the config, e.g. "hero.headline" or "services.0.title". */
   path: string;
-  /** The current string value. */
-  value: string;
+  /**
+   * The current string value. Accepts null/undefined defensively so
+   * blocks don't have to thread `?? ''` at every call site — we coerce
+   * to an empty string internally. This matters in practice because
+   * legacy configs often have missing optional fields that the type
+   * system says are required.
+   */
+  value: string | null | undefined;
   /** HTML tag to render when not editing. Default 'span'. */
   as?: ElementType;
   /** Tailwind classes applied in both render and edit modes. */
@@ -56,76 +63,9 @@ interface InlineEditableProps {
   maxLength?: number;
 }
 
-/**
- * Block keys that live inside a `PageConfig.blocks` override. These are
- * the per-page data sections — everything else (brand, meta, navigation)
- * is global across pages and stays at the root.
- */
-const PER_PAGE_BLOCK_KEYS = new Set([
-  'about',
-  'stats',
-  'statsSection',
-  'servicesSection',
-  'services',
-  'gallery',
-  'reviewsSection',
-  'reviews',
-  'faqSection',
-  'faq',
-  'contact',
-  'footer',
-]);
-
-/**
- * Remap a local field path to the right place in the config when the user
- * is editing a sub-page.
- *
- *   currentPageSlug = 'home' (or undefined)  → path unchanged
- *   currentPageSlug = 'menu', path = 'hero.headline'
- *     → 'pages.{N}.hero.headline'     (where N is the index of the menu page)
- *   currentPageSlug = 'menu', path = 'services.0.title'
- *     → 'pages.{N}.blocks.services.0.title'
- *
- * Global fields (brand.*, meta.*, navigation, template) are never remapped.
- */
-function remapPathForPage(
-  path: string,
-  currentPageSlug: string | undefined,
-  pageIndex: number | undefined,
-): string {
-  if (!currentPageSlug || currentPageSlug === 'home') return path;
-  if (pageIndex == null || pageIndex < 0) return path;
-
-  // Global keys stay at the root.
-  if (
-    path.startsWith('brand.') ||
-    path.startsWith('meta.') ||
-    path.startsWith('navigation') ||
-    path === 'template'
-  ) {
-    return path;
-  }
-
-  // hero.* → pages.N.hero.*
-  if (path.startsWith('hero.')) {
-    return `pages.${pageIndex}.${path}`;
-  }
-
-  // {block}.* (services.0.title, about.heading, etc) → pages.N.blocks.{block}.*
-  const firstDot = path.indexOf('.');
-  const head = firstDot === -1 ? path : path.slice(0, firstDot);
-  if (PER_PAGE_BLOCK_KEYS.has(head)) {
-    return `pages.${pageIndex}.blocks.${path}`;
-  }
-
-  // Unknown path — leave it alone. Better to write nothing unexpected than
-  // to silently drop an edit into pages.N.blocks.something_we_dont_know.
-  return path;
-}
-
 export function InlineEditable({
   path,
-  value,
+  value: rawValue,
   as,
   className,
   style,
@@ -134,6 +74,10 @@ export function InlineEditable({
   maxLength = 2000,
 }: InlineEditableProps) {
   const { editMode, onFieldChange, currentPageSlug, pageIndex } = useSiteContext();
+  // Coerce null/undefined to empty string once so every read inside the
+  // component (textContent comparison, commit, initial render) can assume
+  // a string.
+  const value = typeof rawValue === 'string' ? rawValue : '';
   const Tag: ElementType = (as ?? 'span') as ElementType;
   const ref = useRef<HTMLElement | null>(null);
   const [editing, setEditing] = useState(false);

@@ -64,14 +64,59 @@ automationRouter.post(
 
 const generateWebsiteSchema = z.object({
   clientId: z.string().min(1).max(100),
-  description: z.string().max(4000).optional(),
-  services: z.array(z.string().max(100)).max(20).optional(),
-  hasBooking: z.boolean().optional(),
-  hasHours: z.boolean().optional(),
+  description: z.string().max(4000).nullish(),
+  services: z.array(z.string().max(100)).max(20).nullish(),
+  hasBooking: z.boolean().nullish(),
+  hasHours: z.boolean().nullish(),
   // Pulled from @boost/core so adding a template is a single-file change.
-  template: z.enum(SITE_TEMPLATES).optional(),
+  template: z.enum(SITE_TEMPLATES).nullish(),
   /** Free-text suggestions from the agency to steer the AI output. */
-  suggestions: z.string().max(2000).optional(),
+  suggestions: z.string().max(2000).nullish(),
+
+  /* Seeded business facts. These bypass Claude's invention and are
+     stamped onto the final config so the rendered site matches the
+     agency's inputs exactly. All optional; nullish so cleared form
+     fields (null) are accepted alongside undefined. */
+  address: z.string().max(300).nullish(),
+  phone: z.string().max(50).nullish(),
+  email: z.string().max(200).nullish(),
+  whatsapp: z.string().max(50).nullish(),
+  hours: z.string().max(500).nullish(),
+  socials: z
+    .object({
+      facebook: z.string().max(500).nullish(),
+      instagram: z.string().max(500).nullish(),
+      tiktok: z.string().max(500).nullish(),
+      linkedin: z.string().max(500).nullish(),
+      x: z.string().max(500).nullish(),
+      youtube: z.string().max(500).nullish(),
+      google: z.string().max(500).nullish(),
+    })
+    .nullish(),
+  team: z
+    .array(
+      z.object({
+        name: z.string().min(1).max(100),
+        role: z.string().min(1).max(100),
+        bio: z.string().max(1000).nullish(),
+        credentials: z.string().max(200).nullish(),
+        specialties: z.array(z.string().max(60)).max(5).nullish(),
+        photoUrl: z.string().url().max(500).nullish(),
+      }),
+    )
+    .max(20)
+    .nullish(),
+  serviceAreas: z.array(z.string().max(100)).max(30).nullish(),
+  trustBadges: z
+    .array(
+      z.object({
+        label: z.string().min(1).max(100),
+        detail: z.string().max(300).nullish(),
+        href: z.string().url().max(500).nullish(),
+      }),
+    )
+    .max(10)
+    .nullish(),
 });
 
 automationRouter.post(
@@ -80,7 +125,13 @@ automationRouter.post(
   requireRole('agency_admin', 'agency_member'),
   async (req, res, next) => {
     try {
-      const args = generateWebsiteSchema.parse(req.body);
+      const parsed = generateWebsiteSchema.parse(req.body);
+      // Coerce `null` form values to `undefined` so downstream code can keep
+      // using the tighter `string | undefined` shape. Happens once here at
+      // the route boundary instead of plumbing `null` everywhere. We cast
+      // the result because `nullsToUndefined` can't narrow the Zod output
+      // type through TS's control flow.
+      const args = nullsToUndefined(parsed) as Parameters<typeof generateWebsite>[0];
       const result = await generateWebsite(args);
       res.json({ data: result });
     } catch (e) {
@@ -88,6 +139,24 @@ automationRouter.post(
     }
   },
 );
+
+/** Recursively replace `null` with `undefined` at every depth. Keeps array
+ *  indices and object keys otherwise intact. */
+function nullsToUndefined<T>(value: T): T {
+  if (value === null) return undefined as unknown as T;
+  if (Array.isArray(value)) {
+    return value.map((v) => nullsToUndefined(v)) as unknown as T;
+  }
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) {
+      const cleaned = nullsToUndefined(v);
+      if (cleaned !== undefined) out[k] = cleaned;
+    }
+    return out as T;
+  }
+  return value;
+}
 
 automationRouter.post(
   '/analyze-pending',

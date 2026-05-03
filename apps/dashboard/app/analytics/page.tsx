@@ -68,7 +68,7 @@ export default function AnalyticsPage() {
                     <Badge tone="default">{client.industry}</Badge>
                   </div>
                   <div className="mt-1 text-xs text-slate-500">
-                    {client.stats.postsThisMonth} posts · {client.stats.engagementRate}% engagement
+                    {(client.stats?.postsThisMonth ?? 0)} posts · {(client.stats?.engagementRate ?? 0)}% engagement
                   </div>
                 </div>
                 <Sparkline series={series} />

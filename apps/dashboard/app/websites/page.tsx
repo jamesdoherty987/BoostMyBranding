@@ -21,7 +21,7 @@ import {
   toast,
   confirmDialog,
 } from '@boost/ui';
-import { SiteRenderer } from '@boost/ui/site';
+import { SiteRenderer, sanitizeConfig } from '@boost/ui/site';
 import {
   ExternalLink,
   Globe,
@@ -118,6 +118,32 @@ export default function WebsitesPage() {
     primaryColor: '',
     accentColor: '',
     logoUrl: '',
+
+    // Business facts — pipe through verbatim to the generated site.
+    address: '',
+    phone: '',
+    email: '',
+    whatsapp: '',
+    hours: '',
+    socials: {
+      facebook: '',
+      instagram: '',
+      tiktok: '',
+      linkedin: '',
+      x: '',
+      youtube: '',
+      google: '',
+    },
+    team: [] as Array<{
+      name: string;
+      role: string;
+      bio?: string;
+      credentials?: string;
+      specialties?: string[];
+      photoUrl?: string;
+    }>,
+    serviceAreas: '' as string, // comma-separated input, split on submit
+    trustBadges: [] as Array<{ label: string; detail?: string; href?: string }>,
   });
 
   // Pick a default client once the list arrives. Also re-picks if the
@@ -133,6 +159,7 @@ export default function WebsitesPage() {
   }, [clients]);
 
   const [templateOverrideOpen, setTemplateOverrideOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [running, setRunning] = useState(false);
   const [steps, setSteps] = useState<PipelineStep[]>(PIPELINE);
   const [config, setConfig] = useState<GeneratedConfig | null>(null);
@@ -142,6 +169,20 @@ export default function WebsitesPage() {
    * Resets to 'home' whenever a new site is generated or picked.
    */
   const [previewPageSlug, setPreviewPageSlug] = useState<string>('home');
+
+  /**
+   * When the user clicks an image in edit mode, we open a picker overlay
+   * and remember which field the pick should apply to. `path` is the
+   * dotted prefix (e.g. `about` or `team.members.2`); `fieldName` tells
+   * us whether to write `imageIndex`/`imageUrl` or `photoIndex`/`photoUrl`.
+   */
+  const [imagePicker, setImagePicker] = useState<
+    | {
+        path: string;
+        fieldName: 'imageIndex' | 'imageUrl' | 'photoIndex' | 'photoUrl';
+      }
+    | null
+  >(null);
 
   // Load the selected client's existing site config (if any) into the
   // preview + editor. This way you can pick Murphy's Plumbing from the
@@ -158,7 +199,10 @@ export default function WebsitesPage() {
     // work when SWR revalidates.
     const existing = (selectedClientRow?.websiteConfig ?? null) as WebsiteConfig | null;
     if (existing) {
-      setConfig(existing);
+      // Sanitize once on load so the editor and preview never see null
+      // entries from legacy sparse-hole saves. Every array operation
+      // downstream can assume non-null items.
+      setConfig(sanitizeConfig(existing));
       setPreviewPageSlug('home');
     } else {
       // Client has no saved site yet — clear any stale preview from a prior
@@ -173,19 +217,28 @@ export default function WebsitesPage() {
   // Fetch approved images for the currently-selected client. Skips the
   // request while clientId is empty so we don't fire a request for
   // "no client yet" on first render.
-  const { data: clientImages = [] } = useSWR(
-    newSite.clientId ? `websites:images:${newSite.clientId}` : null,
+  //
+  // We keep two parallel views:
+  //   - clientImages (URL strings only) — backward-compatible for blocks
+  //     and the preview renderer which take a plain `string[]`.
+  //   - clientImageRows — full DB rows with id, aiDescription, status.
+  //     Used for the label-editing + approval UI.
+  const {
+    data: clientImageRows = [],
+    mutate: mutateClientImages,
+  } = useSWR(
+    newSite.clientId ? `websites:image-rows:${newSite.clientId}` : null,
     async () => {
       try {
-        const rows = await api.listImages(newSite.clientId);
-        return rows
-          .map((r) => r.fileUrl)
-          .filter((u): u is string => typeof u === 'string' && u.length > 0);
+        return await api.listImages(newSite.clientId);
       } catch {
         return [];
       }
     },
   );
+  const clientImages = clientImageRows
+    .map((r) => r.fileUrl)
+    .filter((u): u is string => typeof u === 'string' && u.length > 0);
 
   const generate = async () => {
     // Defensive check: a real client id is a UUID. If we ever end up with
@@ -239,10 +292,34 @@ export default function WebsitesPage() {
         hasHours: newSite.hasHours,
         template: newSite.template, // may be undefined → Claude auto-detects
         suggestions: suggestionParts.join('\n') || undefined,
+        // Seeded business facts
+        address: newSite.address.trim() || undefined,
+        phone: newSite.phone.trim() || undefined,
+        email: newSite.email.trim() || undefined,
+        whatsapp: newSite.whatsapp.trim() || undefined,
+        hours: newSite.hours.trim() || undefined,
+        socials: Object.values(newSite.socials).some((v) => v.trim())
+          ? Object.fromEntries(
+              Object.entries(newSite.socials)
+                .filter(([, v]) => v.trim())
+                .map(([k, v]) => [k, v.trim()]),
+            )
+          : undefined,
+        team: newSite.team.length > 0 ? newSite.team : undefined,
+        serviceAreas: newSite.serviceAreas
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean).length
+          ? newSite.serviceAreas
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean)
+          : undefined,
+        trustBadges: newSite.trustBadges.length > 0 ? newSite.trustBadges : undefined,
       });
       clearInterval(tick);
       setSteps((prev) => prev.map((s) => ({ ...s, status: 'done' })));
-      setConfig(result.config);
+      setConfig(sanitizeConfig(result.config));
       // Jump the preview back to the homepage when a fresh generation
       // lands, otherwise a stale preview page slug might not exist in
       // the new config and we'd render the fallback.
@@ -271,7 +348,10 @@ export default function WebsitesPage() {
     async (path: string, value: unknown) => {
       if (!config || !newSite.clientId) return;
 
-      // Optimistic local patch so the preview updates instantly.
+      // Optimistic local patch so the preview updates instantly. The loop
+      // mirrors the server-side `setPath` — when we write into an array by
+      // index, we fill earlier holes with `{}` so downstream renders don't
+      // hit `member is null` (sparse holes serialize as null via JSON).
       const segments = path.split('.').filter((s) => s.length > 0);
       const prev = structuredClone(config) as any;
       const next = structuredClone(config) as any;
@@ -281,6 +361,15 @@ export default function WebsitesPage() {
         if (cursor[k] == null) {
           const nk = segments[i + 1]!;
           cursor[k] = /^\d+$/.test(nk) ? [] : {};
+        }
+        if (Array.isArray(cursor[k])) {
+          const arr = cursor[k] as any[];
+          const nk = segments[i + 1];
+          if (nk && /^\d+$/.test(nk)) {
+            const idx = Number(nk);
+            while (arr.length < idx) arr.push({});
+            if (arr[idx] == null) arr[idx] = {};
+          }
         }
         cursor = cursor[k];
       }
@@ -476,17 +565,25 @@ export default function WebsitesPage() {
               </div>
 
               <div>
-                <label className="text-xs font-medium text-slate-600">
-                  Suggestions (optional)
+                <label className="flex items-center gap-2 text-xs font-medium text-slate-900">
+                  <Wand2 className="h-3.5 w-3.5 text-[#1D9CA1]" />
+                  Anything specific you want? (free-form)
                 </label>
+                <p className="mt-0.5 text-[11px] text-slate-500">
+                  Tell the AI exactly what to build. Describe sections, tone, features,
+                  moves, photography style, pages, anything. The more specific you are,
+                  the closer the first draft lands.
+                </p>
                 <Textarea
-                  className="mt-1 no-zoom"
-                  rows={2}
+                  className="mt-1.5 no-zoom"
+                  rows={4}
                   value={newSite.suggestions}
                   onChange={(e) =>
                     setNewSite((s) => ({ ...s, suggestions: e.target.value }))
                   }
-                  placeholder="e.g. Use dark hero, beams variant, emphasise 24/7 availability..."
+                  placeholder={
+                    'Examples:\n• "Dark hero with floating coffee cups, warm brown + cream, include a menu page and a story section about sourcing"\n• "Clean professional feel for a solicitor, include a practice areas sub-page, emphasise 25 years of experience"\n• "Bright playful barber site with prices, team with specialties, before/after shots, book via WhatsApp"'
+                  }
                 />
               </div>
 
@@ -597,6 +694,52 @@ export default function WebsitesPage() {
                 </label>
               </div>
 
+              {/* Business details — seeded facts that override AI invention */}
+              <div className="border-t border-slate-100 pt-4">
+                <button
+                  onClick={() => setDetailsOpen((o) => !o)}
+                  className="flex w-full items-center justify-between text-left"
+                >
+                  <span className="text-xs font-medium text-slate-600">
+                    Business details
+                    <span className="ml-2 text-[10px] font-normal text-slate-400">
+                      address, phone, team, service areas
+                    </span>
+                    {detailsCompletionCount(newSite) > 0 ? (
+                      <span className="ml-2 rounded-full bg-[#48D886]/10 px-2 py-0.5 text-[10px] font-semibold text-[#15803d]">
+                        {detailsCompletionCount(newSite)} set
+                      </span>
+                    ) : null}
+                  </span>
+                  <ChevronDown
+                    className={`h-4 w-4 text-slate-400 transition-transform ${
+                      detailsOpen ? 'rotate-180' : ''
+                    }`}
+                  />
+                </button>
+                <AnimatePresence>
+                  {detailsOpen ? (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="overflow-hidden"
+                    >
+                      <p className="mt-2 text-[11px] text-slate-500">
+                        Typing these in means Claude uses them verbatim rather than inventing.
+                        Leave blank to let the AI decide. The contact block, team, service areas,
+                        trust badges, and socials all seed directly from here.
+                      </p>
+                      <BusinessDetailsPanel
+                        value={newSite}
+                        onChange={(patch) => setNewSite((s) => ({ ...s, ...patch }))}
+                        clientId={newSite.clientId}
+                      />
+                    </motion.div>
+                  ) : null}
+                </AnimatePresence>
+              </div>
+
               {/* Collapsed template override */}
               <div className="border-t border-slate-100 pt-4">
                 <button
@@ -668,21 +811,31 @@ export default function WebsitesPage() {
               </div>
 
               <div className="flex flex-col items-stretch gap-3 border-t border-slate-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
-                <span className="text-xs text-slate-500">
-                  Generation takes ~30–60s (includes AI hero image).
-                </span>
+                <div className="text-xs">
+                  {!clientsLoading && clients.length === 0 ? (
+                    <span className="text-rose-600">
+                      No clients yet — <a href="/clients" className="font-semibold underline">create one on the Clients tab</a> first.
+                    </span>
+                  ) : (
+                    <span className="text-slate-500">
+                      Generation takes ~30–60s (includes AI hero image).
+                    </span>
+                  )}
+                </div>
                 <Button
                   onClick={generate}
                   loading={running}
                   size="lg"
-                  disabled={running || clientsLoading || !newSite.clientId}
+                  disabled={running || clientsLoading || !newSite.clientId || clients.length === 0}
                 >
                   {running ? <Spinner /> : <Sparkles className="h-4 w-4" />}
                   {running
                     ? 'Generating…'
                     : clientsLoading
                       ? 'Loading clients…'
-                      : 'Generate site'}
+                      : clients.length === 0
+                        ? 'Add a client first'
+                        : 'Generate site'}
                 </Button>
               </div>
             </CardContent>
@@ -954,6 +1107,19 @@ export default function WebsitesPage() {
                         embedded
                         editMode={editMode}
                         onFieldChange={handleFieldChange}
+                        onImageClick={(ctx) => setImagePicker(ctx)}
+                        onAIEdit={async (instruction) => {
+                          if (!config || !newSite.clientId) {
+                            throw new Error('No site loaded yet');
+                          }
+                          const result = await api.editWebsiteWithAI({
+                            clientId: newSite.clientId,
+                            currentConfig: config as unknown as Record<string, unknown>,
+                            instruction,
+                          });
+                          setConfig(sanitizeConfig(result.config));
+                          return result.summary ?? 'Done — site updated.';
+                        }}
                         pageSlug={previewPageSlug}
                       />
                     </div>
@@ -965,6 +1131,15 @@ export default function WebsitesPage() {
                   onChange={handleConfigChange}
                   clientId={newSite.clientId}
                   images={clientImages}
+                  imageRows={clientImageRows}
+                  onImageLabelChange={async (id, aiDescription) => {
+                    try {
+                      await api.updateImage(id, { aiDescription });
+                      mutateClientImages();
+                    } catch (e) {
+                      toast.error('Label update failed', (e as Error).message);
+                    }
+                  }}
                   editMode={editMode}
                   onEditModeChange={setEditMode}
                   activePageSlug={previewPageSlug}
@@ -984,6 +1159,42 @@ export default function WebsitesPage() {
           ) : null}
         </AnimatePresence>
       </div>
+
+      {/* Image picker overlay — opens when the user clicks any image in
+          edit-mode preview. */}
+      {imagePicker ? (
+        <ImagePickerModal
+          images={clientImages}
+          clientId={newSite.clientId}
+          onPick={(pick) => {
+            const fieldName = imagePicker.fieldName;
+            const base = imagePicker.path;
+            // Write ONLY the field the block actually reads. If the block
+            // supports both imageIndex + imageUrl, clear the other so the
+            // precedence is unambiguous (url wins over index when set).
+            // We send `null` (not undefined) when clearing — undefined
+            // is dropped by JSON.stringify and the API requires a value.
+            if (pick.kind === 'library') {
+              handleFieldChange(`${base}.${fieldName}`, pick.index);
+              if (fieldName === 'imageIndex') {
+                handleFieldChange(`${base}.imageUrl`, null);
+              } else if (fieldName === 'photoIndex') {
+                handleFieldChange(`${base}.photoUrl`, null);
+              }
+            } else {
+              const urlField = fieldName === 'photoIndex' ? 'photoUrl' : 'imageUrl';
+              handleFieldChange(`${base}.${urlField}`, pick.url);
+              if (urlField === 'imageUrl') {
+                handleFieldChange(`${base}.imageIndex`, null);
+              } else {
+                handleFieldChange(`${base}.photoIndex`, null);
+              }
+            }
+            setImagePicker(null);
+          }}
+          onClose={() => setImagePicker(null)}
+        />
+      ) : null}
     </>
   );
 }
@@ -1133,6 +1344,592 @@ function PagePicker({
           </button>
         );
       })}
+    </div>
+  );
+}
+
+
+/**
+ * Quick count of how many "business details" fields the agency has filled in
+ * — shown as a badge on the collapsed panel so they can tell at a glance
+ * whether they've seeded the site with real data or are about to generate
+ * a mostly-invented one.
+ */
+function detailsCompletionCount(v: {
+  address: string;
+  phone: string;
+  email: string;
+  whatsapp: string;
+  hours: string;
+  socials: Record<string, string>;
+  team: Array<unknown>;
+  serviceAreas: string;
+  trustBadges: Array<unknown>;
+}): number {
+  let n = 0;
+  if (v.address.trim()) n++;
+  if (v.phone.trim()) n++;
+  if (v.email.trim()) n++;
+  if (v.whatsapp.trim()) n++;
+  if (v.hours.trim()) n++;
+  if (Object.values(v.socials).some((s) => s.trim())) n++;
+  if (v.team.length > 0) n++;
+  if (v.serviceAreas.trim()) n++;
+  if (v.trustBadges.length > 0) n++;
+  return n;
+}
+
+/**
+ * Expandable "Business details" panel for the generation form. Captures
+ * everything that's a fact (not a creative choice) so the generated site
+ * uses it verbatim.
+ *
+ *   Contact      — address, phone, WhatsApp, email, hours
+ *   Socials      — facebook/instagram/tiktok/x/linkedin/youtube/google
+ *   Team         — dynamic list of {name, role, bio, photo}
+ *   Areas        — comma-separated towns/regions (for tradesmen)
+ *   Badges       — dynamic list of {label, detail, href}
+ *
+ * All fields optional. When a client has an existing site we scraped,
+ * the agency can paste facts here directly; when it's a brand-new
+ * business, leaving these blank lets the AI generate placeholders.
+ */
+function BusinessDetailsPanel({
+  value,
+  onChange,
+  clientId,
+}: {
+  value: {
+    address: string;
+    phone: string;
+    email: string;
+    whatsapp: string;
+    hours: string;
+    socials: {
+      facebook: string;
+      instagram: string;
+      tiktok: string;
+      linkedin: string;
+      x: string;
+      youtube: string;
+      google: string;
+    };
+    team: Array<{
+      name: string;
+      role: string;
+      bio?: string;
+      credentials?: string;
+      specialties?: string[];
+      photoUrl?: string;
+    }>;
+    serviceAreas: string;
+    trustBadges: Array<{ label: string; detail?: string; href?: string }>;
+  };
+  onChange: (patch: Partial<typeof value>) => void;
+  clientId: string;
+}) {
+  return (
+    <div className="mt-3 space-y-4">
+      {/* Contact */}
+      <div>
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+          Contact
+        </p>
+        <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2">
+          <Input
+            value={value.address}
+            onChange={(e) => onChange({ address: e.target.value })}
+            placeholder="Street address — powers the map embed"
+            className="h-10 text-xs"
+          />
+          <Input
+            value={value.phone}
+            onChange={(e) => onChange({ phone: e.target.value })}
+            placeholder="+353 1 555 0100"
+            className="h-10 text-xs"
+          />
+          <Input
+            value={value.email}
+            onChange={(e) => onChange({ email: e.target.value })}
+            placeholder="hello@business.ie"
+            className="h-10 text-xs"
+            type="email"
+          />
+          <Input
+            value={value.whatsapp}
+            onChange={(e) => onChange({ whatsapp: e.target.value })}
+            placeholder="WhatsApp number (shown on mobile CTA)"
+            className="h-10 text-xs"
+          />
+          <Textarea
+            value={value.hours}
+            onChange={(e) => onChange({ hours: e.target.value })}
+            placeholder="Mon–Fri 9am–6pm&#10;Sat 10am–3pm"
+            className="md:col-span-2 no-zoom text-xs"
+            rows={2}
+          />
+        </div>
+      </div>
+
+      {/* Socials */}
+      <div>
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+          Socials
+        </p>
+        <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2">
+          {(
+            [
+              ['facebook', 'Facebook URL'],
+              ['instagram', 'Instagram URL'],
+              ['tiktok', 'TikTok URL'],
+              ['x', 'X / Twitter URL'],
+              ['linkedin', 'LinkedIn URL'],
+              ['youtube', 'YouTube URL'],
+              ['google', 'Google Business Profile URL'],
+            ] as const
+          ).map(([key, placeholder]) => (
+            <Input
+              key={key}
+              value={value.socials[key]}
+              onChange={(e) =>
+                onChange({ socials: { ...value.socials, [key]: e.target.value } })
+              }
+              placeholder={placeholder}
+              className="h-9 text-xs"
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* Service areas */}
+      <div>
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+          Service areas
+          <span className="ml-2 font-normal text-slate-400">
+            comma-separated towns/regions
+          </span>
+        </p>
+        <Textarea
+          value={value.serviceAreas}
+          onChange={(e) => onChange({ serviceAreas: e.target.value })}
+          placeholder="Dublin, Malahide, Howth, Swords, Portmarnock"
+          className="mt-2 text-xs no-zoom"
+          rows={2}
+        />
+      </div>
+
+      {/* Team members (dynamic list) */}
+      <div>
+        <div className="flex items-center justify-between">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+            Team members
+            {value.team.length > 0 ? (
+              <span className="ml-2 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">
+                {value.team.length}
+              </span>
+            ) : null}
+          </p>
+          <button
+            type="button"
+            onClick={() =>
+              onChange({
+                team: [
+                  ...value.team,
+                  { name: '', role: '' },
+                ],
+              })
+            }
+            className="flex items-center gap-1 rounded-full border border-dashed border-slate-300 px-2 py-0.5 text-[10px] font-medium text-slate-600 hover:border-[#1D9CA1] hover:text-[#1D9CA1]"
+          >
+            <Sparkles className="h-2.5 w-2.5" />
+            Add member
+          </button>
+        </div>
+        {value.team.length === 0 ? (
+          <p className="mt-2 text-[11px] text-slate-400">
+            Leave blank for solo traders. Add members for salons, clinics, gyms, agencies.
+          </p>
+        ) : (
+          <div className="mt-2 space-y-2">
+            {value.team.map((m, i) => (
+              <TeamMemberRow
+                key={i}
+                member={m}
+                clientId={clientId}
+                onChange={(patch) => {
+                  const next = [...value.team];
+                  next[i] = { ...next[i]!, ...patch };
+                  onChange({ team: next });
+                }}
+                onRemove={() =>
+                  onChange({ team: value.team.filter((_, j) => j !== i) })
+                }
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Trust badges (dynamic list) */}
+      <div>
+        <div className="flex items-center justify-between">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+            Credentials / licences
+            {value.trustBadges.length > 0 ? (
+              <span className="ml-2 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">
+                {value.trustBadges.length}
+              </span>
+            ) : null}
+          </p>
+          <button
+            type="button"
+            onClick={() =>
+              onChange({
+                trustBadges: [...value.trustBadges, { label: '' }],
+              })
+            }
+            className="flex items-center gap-1 rounded-full border border-dashed border-slate-300 px-2 py-0.5 text-[10px] font-medium text-slate-600 hover:border-[#1D9CA1] hover:text-[#1D9CA1]"
+          >
+            <Sparkles className="h-2.5 w-2.5" />
+            Add badge
+          </button>
+        </div>
+        {value.trustBadges.length === 0 ? (
+          <p className="mt-2 text-[11px] text-slate-400">
+            For regulated trades: RGI, Safe Electric, Gas Safe, Dental Council, insurance refs.
+          </p>
+        ) : (
+          <div className="mt-2 space-y-2">
+            {value.trustBadges.map((b, i) => (
+              <div
+                key={i}
+                className="grid grid-cols-1 items-start gap-1 rounded-xl border border-slate-200 bg-white p-2 md:grid-cols-[1fr_1fr_auto]"
+              >
+                <Input
+                  value={b.label}
+                  onChange={(e) => {
+                    const next = [...value.trustBadges];
+                    next[i] = { ...next[i]!, label: e.target.value };
+                    onChange({ trustBadges: next });
+                  }}
+                  placeholder="RGI Registered"
+                  className="h-8 text-xs"
+                />
+                <Input
+                  value={b.detail ?? ''}
+                  onChange={(e) => {
+                    const next = [...value.trustBadges];
+                    next[i] = { ...next[i]!, detail: e.target.value };
+                    onChange({ trustBadges: next });
+                  }}
+                  placeholder="Optional short detail"
+                  className="h-8 text-xs"
+                />
+                <button
+                  type="button"
+                  onClick={() =>
+                    onChange({
+                      trustBadges: value.trustBadges.filter((_, j) => j !== i),
+                    })
+                  }
+                  className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-500"
+                  aria-label="Remove"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Single-row team member input with photo upload. Uploads reuse the same
+ * media-library endpoint as every other image path so photos land in the
+ * client's photo grid and get AI-scored alongside everything else.
+ */
+function TeamMemberRow({
+  member,
+  clientId,
+  onChange,
+  onRemove,
+}: {
+  member: {
+    name: string;
+    role: string;
+    bio?: string;
+    credentials?: string;
+    specialties?: string[];
+    photoUrl?: string;
+  };
+  clientId: string;
+  onChange: (patch: Partial<typeof member>) => void;
+  onRemove: () => void;
+}) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+
+  const handleFile = async (file: File) => {
+    if (!clientId) {
+      toast.error('Pick a client first');
+      return;
+    }
+    if (!file.type.startsWith('image/')) {
+      toast.error('Not an image');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Too large', 'Under 5MB.');
+      return;
+    }
+    setUploading(true);
+    try {
+      const rows = await api.uploadImages(clientId, [file], ['team']);
+      const url = rows[0]?.fileUrl;
+      if (url) onChange({ photoUrl: url });
+    } catch (e) {
+      toast.error('Upload failed', (e as Error).message);
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-2.5">
+      <div className="flex items-start gap-2">
+        {/* Photo slot */}
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          disabled={uploading || !clientId}
+          className="h-14 w-14 shrink-0 overflow-hidden rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 transition-colors hover:border-[#1D9CA1] disabled:opacity-50"
+          title={!clientId ? 'Pick a client first' : 'Upload photo'}
+        >
+          {member.photoUrl ? (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img
+              src={member.photoUrl}
+              alt=""
+              className="h-full w-full object-cover"
+            />
+          ) : uploading ? (
+            <Loader2 className="mx-auto h-4 w-4 animate-spin text-slate-400" />
+          ) : (
+            <span className="text-[10px] text-slate-400">Photo</span>
+          )}
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            hidden
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) handleFile(f);
+            }}
+          />
+        </button>
+
+        <div className="min-w-0 flex-1 space-y-1">
+          <div className="grid grid-cols-2 gap-1">
+            <Input
+              value={member.name}
+              onChange={(e) => onChange({ name: e.target.value })}
+              placeholder="Name"
+              className="h-7 text-xs"
+            />
+            <Input
+              value={member.role}
+              onChange={(e) => onChange({ role: e.target.value })}
+              placeholder="Role"
+              className="h-7 text-xs"
+            />
+          </div>
+          <Input
+            value={member.credentials ?? ''}
+            onChange={(e) => onChange({ credentials: e.target.value })}
+            placeholder="Credentials (optional, e.g. BDS MFDS)"
+            className="h-7 text-xs"
+          />
+          <Input
+            value={(member.specialties ?? []).join(', ')}
+            onChange={(e) =>
+              onChange({
+                specialties: e.target.value
+                  .split(',')
+                  .map((s) => s.trim())
+                  .filter(Boolean),
+              })
+            }
+            placeholder="Specialties (comma-separated)"
+            className="h-7 text-xs"
+          />
+          <Textarea
+            value={member.bio ?? ''}
+            onChange={(e) => onChange({ bio: e.target.value })}
+            placeholder="Short bio (optional)"
+            rows={2}
+            className="text-xs no-zoom"
+          />
+        </div>
+
+        <button
+          type="button"
+          onClick={onRemove}
+          className="rounded-lg p-1 text-slate-400 hover:bg-red-50 hover:text-red-500"
+          aria-label="Remove member"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+
+/**
+ * Modal image picker. Lets the agency pick from the client's media
+ * library OR upload a new photo on the spot. Fires `onPick` with either
+ * a library index or a direct URL. Closes on backdrop click / Esc.
+ */
+function ImagePickerModal({
+  images,
+  clientId,
+  onPick,
+  onClose,
+}: {
+  images: string[];
+  clientId: string;
+  onPick: (pick: { kind: 'library'; index: number } | { kind: 'url'; url: string }) => void;
+  onClose: () => void;
+}) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const handleFile = async (file: File) => {
+    if (!clientId) {
+      toast.error('Pick a client first');
+      return;
+    }
+    if (!file.type.startsWith('image/')) {
+      toast.error('Not an image');
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error('Too large', 'Under 10MB.');
+      return;
+    }
+    setUploading(true);
+    try {
+      const rows = await api.uploadImages(clientId, [file], ['website']);
+      const url = rows[0]?.fileUrl;
+      if (!url) throw new Error('Upload returned no URL');
+      onPick({ kind: 'url', url });
+    } catch (e) {
+      toast.error('Upload failed', (e as Error).message);
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Pick an image"
+    >
+      <div
+        className="relative max-h-[85vh] w-[92vw] max-w-3xl overflow-hidden rounded-3xl bg-white shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-900">Choose an image</h3>
+            <p className="text-[11px] text-slate-500">
+              From the library or upload a fresh one.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              disabled={uploading || !clientId}
+              className="flex items-center gap-1.5 rounded-full bg-[#1D9CA1] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[#158087] disabled:opacity-60"
+            >
+              {uploading ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <Sparkles className="h-3 w-3" />
+              )}
+              Upload new
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+              aria-label="Close"
+            >
+              <Trash2 className="h-4 w-4 rotate-45" />
+            </button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              hidden
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) handleFile(f);
+              }}
+            />
+          </div>
+        </div>
+
+        <div className="max-h-[70vh] overflow-y-auto p-5">
+          {images.length === 0 ? (
+            <p className="py-10 text-center text-sm text-slate-500">
+              No images in the library yet. Upload one above.
+            </p>
+          ) : (
+            <div className="grid grid-cols-3 gap-3 md:grid-cols-4 lg:grid-cols-5">
+              {images.map((src, i) => (
+                <button
+                  key={`${src}-${i}`}
+                  type="button"
+                  onClick={() => onPick({ kind: 'library', index: i })}
+                  className="group relative aspect-square overflow-hidden rounded-xl border-2 border-transparent bg-slate-100 transition-all hover:border-[#1D9CA1]"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={src}
+                    alt=""
+                    className="h-full w-full object-cover"
+                    loading="lazy"
+                  />
+                  <span className="absolute inset-0 flex items-center justify-center bg-[#1D9CA1]/0 transition-colors group-hover:bg-[#1D9CA1]/30">
+                    <span className="rounded-full bg-white/95 px-2.5 py-0.5 text-[10px] font-semibold text-slate-900 opacity-0 shadow transition-opacity group-hover:opacity-100">
+                      Pick
+                    </span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

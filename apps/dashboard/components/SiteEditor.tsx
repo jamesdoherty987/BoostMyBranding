@@ -46,6 +46,9 @@ import {
   Star,
   MessageSquare,
   Link2,
+  Coffee,
+  Users,
+  Calendar,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 
@@ -60,11 +63,310 @@ const BLOCK_LABELS: Record<SiteBlockKey, string> = {
   faq: 'FAQ',
   contact: 'Contact',
   footer: 'Footer',
+  menu: 'Menu',
+  priceList: 'Price list',
+  team: 'Team',
+  schedule: 'Schedule',
+  serviceAreas: 'Service areas',
+  beforeAfter: 'Before & after',
+  trustBadges: 'Trust badges',
+  cta: 'CTA banner',
+  custom: 'Custom sections',
+  products: 'Products',
+  portfolio: 'Portfolio',
+  process: 'How it works',
+  pricingTiers: 'Pricing tiers',
+  announcement: 'Announcement bar',
+  logoStrip: 'Logo strip',
+  video: 'Video',
+  newsletter: 'Newsletter',
 };
 
 const ALL_BLOCKS: SiteBlockKey[] = [
-  'nav', 'hero', 'stats', 'services', 'about', 'gallery', 'reviews', 'faq', 'contact', 'footer',
+  'nav', 'hero', 'announcement', 'stats', 'services', 'about', 'gallery',
+  'reviews', 'faq', 'contact', 'footer', 'menu', 'priceList', 'team',
+  'schedule', 'serviceAreas', 'beforeAfter', 'trustBadges', 'cta', 'custom',
+  'products', 'portfolio', 'process', 'pricingTiers', 'logoStrip', 'video',
+  'newsletter',
 ];
+
+/**
+ * When the user adds a data-driven block from the Sections tab, seed it
+ * with placeholder content so the block actually renders (instead of
+ * silently returning `null` because the data arrays are empty).
+ *
+ * Returns a partial WebsiteConfig to be merged into the existing one.
+ * Skips fields that already have data so adding a section back after it
+ * was removed preserves the user's earlier content.
+ */
+function seedBlockData(
+  config: WebsiteConfig,
+  block: SiteBlockKey,
+): Partial<WebsiteConfig> {
+  switch (block) {
+    case 'team':
+      if (config.team && config.team.members && config.team.members.length > 0) return {};
+      return {
+        team: {
+          eyebrow: config.team?.eyebrow ?? 'The team',
+          heading: config.team?.heading ?? 'Meet the people.',
+          members: [
+            { name: 'Member name', role: 'Role', specialties: [] },
+            { name: 'Member name', role: 'Role', specialties: [] },
+            { name: 'Member name', role: 'Role', specialties: [] },
+          ],
+        },
+      };
+    case 'menu':
+      if (config.menu && (config.menu.categories?.length ?? 0) > 0) return {};
+      return {
+        menu: {
+          eyebrow: 'The menu',
+          heading: 'Small menu, done well.',
+          currency: '€',
+          categories: [
+            {
+              title: 'Section name',
+              items: [
+                { name: 'Item', price: '0', description: 'Short description' },
+              ],
+            },
+          ],
+        },
+      };
+    case 'priceList':
+      if (config.priceList && ((config.priceList.items?.length ?? 0) + (config.priceList.groups?.length ?? 0)) > 0) return {};
+      return {
+        priceList: {
+          eyebrow: 'Pricing',
+          heading: 'Simple, honest pricing.',
+          currency: '€',
+          items: [
+            { name: 'Service', price: '25', duration: '30 min' },
+            { name: 'Service', price: '45', duration: '45 min' },
+          ],
+        },
+      };
+    case 'schedule':
+      if (config.schedule && (config.schedule.entries?.length ?? 0) > 0) return {};
+      return {
+        schedule: {
+          eyebrow: 'Schedule',
+          heading: 'This week.',
+          entries: [
+            { day: 'Mo', time: '09:00', title: 'Open' },
+            { day: 'Tu', time: '09:00', title: 'Open' },
+            { day: 'We', time: '09:00', title: 'Open' },
+            { day: 'Th', time: '09:00', title: 'Open' },
+            { day: 'Fr', time: '09:00', title: 'Open' },
+          ],
+        },
+      };
+    case 'serviceAreas':
+      if (config.serviceAreas && (config.serviceAreas.areas?.length ?? 0) > 0) return {};
+      return {
+        serviceAreas: {
+          eyebrow: 'Where we work',
+          heading: 'Serving these areas.',
+          areas: ['Area 1', 'Area 2', 'Area 3'],
+        },
+      };
+    case 'beforeAfter':
+      if (config.beforeAfter && (config.beforeAfter.pairs?.length ?? 0) > 0) return {};
+      return {
+        beforeAfter: {
+          eyebrow: 'Our work',
+          heading: 'Before and after.',
+          pairs: [{}, {}],
+        },
+      };
+    case 'trustBadges':
+      if (config.trustBadges && (config.trustBadges.badges?.length ?? 0) > 0) return {};
+      return {
+        trustBadges: {
+          eyebrow: 'Credentials',
+          heading: 'Qualified and insured.',
+          badges: [
+            { label: 'Fully insured', icon: 'Shield' },
+            { label: 'Accredited', icon: 'Award' },
+          ],
+        },
+      };
+    case 'cta':
+      if (config.cta?.heading) return {};
+      return {
+        cta: {
+          heading: 'Ready to get started?',
+          body: 'Tap below and we\u2019ll be in touch within a day.',
+          buttonLabel: 'Get in touch',
+          buttonHref: '#contact',
+        },
+      };
+    case 'products':
+      if (config.products && (config.products.items?.length ?? 0) > 0) return {};
+      return {
+        products: {
+          eyebrow: 'Shop',
+          heading: 'The shop.',
+          currency: '€',
+          items: [
+            { name: 'Product name', price: '0', description: 'Short description' },
+            { name: 'Product name', price: '0', description: 'Short description' },
+            { name: 'Product name', price: '0', description: 'Short description' },
+          ],
+        },
+      };
+    case 'portfolio':
+      if (config.portfolio && (config.portfolio.projects?.length ?? 0) > 0) return {};
+      return {
+        portfolio: {
+          eyebrow: 'Examples',
+          heading: 'Recent work.',
+          projects: [
+            { title: 'Project name', summary: 'One-line teaser', imageIndices: [] },
+            { title: 'Project name', summary: 'One-line teaser', imageIndices: [] },
+          ],
+        },
+      };
+    case 'process':
+      if (config.process && (config.process.steps?.length ?? 0) > 0) return {};
+      return {
+        process: {
+          eyebrow: 'How it works',
+          heading: 'Simple, every time.',
+          steps: [
+            { title: 'Step one', description: 'What happens first.' },
+            { title: 'Step two', description: 'What happens next.' },
+            { title: 'Step three', description: 'How it wraps up.' },
+          ],
+        },
+      };
+    case 'pricingTiers':
+      if (config.pricingTiers && (config.pricingTiers.tiers?.length ?? 0) > 0) return {};
+      return {
+        pricingTiers: {
+          eyebrow: 'Pricing',
+          heading: 'Plans that fit.',
+          currency: '€',
+          tiers: [
+            { name: 'Starter', price: '29', period: '/month', features: ['Feature', 'Feature', 'Feature'], ctaLabel: 'Choose', ctaHref: '#contact' },
+            { name: 'Pro', price: '79', period: '/month', features: ['Everything in Starter', 'Feature', 'Feature'], ctaLabel: 'Choose', ctaHref: '#contact', highlighted: true },
+            { name: 'Premium', price: '149', period: '/month', features: ['Everything in Pro', 'Feature', 'Feature'], ctaLabel: 'Choose', ctaHref: '#contact' },
+          ],
+        },
+      };
+    case 'announcement':
+      if (config.announcement?.message) return {};
+      return {
+        announcement: {
+          message: 'Announcement text — click to edit.',
+          tone: 'brand',
+        },
+      };
+    case 'logoStrip':
+      if (config.logoStrip && (config.logoStrip.logos?.length ?? 0) > 0) return {};
+      return {
+        logoStrip: {
+          eyebrow: 'Featured in',
+          logos: [
+            { name: 'Publication' },
+            { name: 'Publication' },
+            { name: 'Publication' },
+          ],
+        },
+      };
+    case 'video':
+      if (config.video?.url) return {};
+      return {
+        video: {
+          eyebrow: 'Watch',
+          heading: 'See it in action.',
+          url: '',
+        },
+      };
+    case 'newsletter':
+      if (config.newsletter?.heading) return {};
+      return {
+        newsletter: {
+          heading: 'Stay in the loop.',
+          body: 'Occasional updates. No spam.',
+          placeholder: 'Your email',
+          buttonLabel: 'Subscribe',
+        },
+      };
+    case 'stats':
+      if (config.stats && config.stats.length > 0) return {};
+      return {
+        stats: [
+          { value: 100, suffix: '+', label: 'Happy customers' },
+          { value: 5, suffix: '', label: 'Years serving' },
+          { value: 4.9, suffix: '\u2605', label: 'Rating' },
+        ],
+      };
+    case 'services':
+      if (config.services && config.services.length > 0) return {};
+      return {
+        services: [
+          { title: 'Service', description: 'What this service does.', icon: 'Sparkles' },
+          { title: 'Service', description: 'What this service does.', icon: 'Star' },
+          { title: 'Service', description: 'What this service does.', icon: 'Wrench' },
+        ],
+      };
+    case 'about':
+      if (config.about?.heading) return {};
+      return {
+        about: {
+          eyebrow: 'About us',
+          heading: 'Who we are.',
+          body: 'Write a short about paragraph here.\n\nAdd a second paragraph for a bit more depth.',
+          bullets: ['Proof point', 'Proof point', 'Proof point'],
+        },
+      };
+    case 'faq':
+      if (config.faq && config.faq.length > 0) return {};
+      return {
+        faq: [
+          { question: 'First question?', answer: 'Short, honest answer.' },
+          { question: 'Second question?', answer: 'Short, honest answer.' },
+          { question: 'Third question?', answer: 'Short, honest answer.' },
+        ],
+      };
+    case 'reviews':
+      if (config.reviews && config.reviews.length > 0) return {};
+      return {
+        reviews: [
+          { text: 'What a great experience.', author: 'Customer name', rating: 5 },
+          { text: 'Highly recommend.', author: 'Customer name', rating: 5 },
+          { text: 'Excellent work.', author: 'Customer name', rating: 5 },
+        ],
+      };
+    case 'custom':
+      if (config.customSections && config.customSections.length > 0) return {};
+      return {
+        customSections: [
+          {
+            variant: 'image-strip',
+            heading: 'New section',
+            body: 'Short description of this section.',
+            items: [{}, {}, {}],
+          },
+        ],
+      };
+    default:
+      return {};
+  }
+}
+
+/** Short toast hint when seeding placeholders. */
+function seededMessage(
+  block: SiteBlockKey,
+  seeded: Partial<WebsiteConfig>,
+): string | null {
+  if (Object.keys(seeded).length === 0) return null;
+  if (block === 'video') return 'Add a video URL in the Items tab.';
+  if (block === 'beforeAfter') return 'Add image indexes in the Items tab.';
+  return 'Placeholder content added — edit it inline in the preview.';
+}
 
 const HERO_VARIANT_META: Record<HeroVariant, { label: string; description: string }> = {
   spotlight: {
@@ -95,6 +397,24 @@ interface SiteEditorProps {
   clientId: string;
   images: string[];
   /**
+   * Full DB rows for each image (when available). Used by the Images
+   * tab to show AI labels + allow the agency to edit them. When omitted
+   * (e.g. in tests / older callers), label editing is hidden.
+   */
+  imageRows?: Array<{
+    id: string;
+    fileUrl: string;
+    aiDescription?: string | null;
+    qualityScore?: number | null;
+    status?: string | null;
+    tags?: string[] | null;
+  }>;
+  /**
+   * Called when the agency edits an image's label. The host persists
+   * to the database and refetches.
+   */
+  onImageLabelChange?: (id: string, aiDescription: string) => Promise<void> | void;
+  /**
    * Whether the live preview is in edit mode. Hoisting state here lets
    * the editor toggle it from the Content tab.
    */
@@ -124,6 +444,8 @@ export function SiteEditor({
   onChange,
   clientId,
   images,
+  imageRows,
+  onImageLabelChange,
   editMode,
   onEditModeChange,
   activePageSlug,
@@ -138,7 +460,9 @@ export function SiteEditor({
     { id: 'content' as const, label: 'Content', icon: Edit3 },
     { id: 'items' as const, label: 'Items', icon: List },
     { id: 'images' as const, label: 'Images', icon: ImageIcon },
-    ...(hasPages ? [{ id: 'pages' as const, label: 'Pages', icon: FileText }] : []),
+    // Pages tab is always available — single-page sites can convert to
+    // multipage from the tab by adding a new page.
+    { id: 'pages' as const, label: 'Pages', icon: FileText },
     { id: 'sections' as const, label: 'Sections', icon: Layers },
     { id: 'hero' as const, label: 'Hero', icon: Sparkles },
     { id: 'brand' as const, label: 'Brand', icon: Palette },
@@ -184,9 +508,11 @@ export function SiteEditor({
               onChange={onChange}
               clientId={clientId}
               images={images}
+              imageRows={imageRows}
+              onImageLabelChange={onImageLabelChange}
             />
           )}
-          {tab === 'pages' && hasPages && (
+          {tab === 'pages' && (
             <PagesManager
               config={config}
               onChange={onChange}
@@ -349,7 +675,32 @@ function SectionManager({
     } else {
       newLayout.push(block);
     }
-    setLayout(newLayout);
+
+    // Seed placeholder data for data-driven blocks so they actually show up
+    // when added. Without this, adding e.g. "team" to the layout just puts
+    // the key in the array — the SiteTeam block returns `null` because
+    // `config.team.members` is empty, and the user thinks the add did nothing.
+    //
+    // We only seed when the block's data is currently missing, so adding
+    // a block to a page that already has data (e.g. via a previous AI
+    // edit) doesn't stomp the real content.
+    const seeded = seedBlockData(config, block);
+    if (isMultipage && activePage) {
+      onChange({
+        ...config,
+        ...seeded,
+        pages: pages.map((p) =>
+          p.slug === activePage.slug ? { ...p, layout: newLayout } : p,
+        ),
+      });
+    } else {
+      onChange({ ...config, ...seeded, layout: newLayout });
+    }
+
+    toast.success(
+      `${BLOCK_LABELS[block]} added`,
+      seededMessage(block, seeded) ?? 'Reorder from the list above.',
+    );
   };
 
   const resetLayout = () => {
@@ -733,6 +1084,8 @@ function HeroEditor({
           }
         />
       </div>
+
+      <CutoutsEditor config={config} onChange={onChange} clientId={clientId} />
     </div>
   );
 }
@@ -937,6 +1290,27 @@ function PagesManager({
   const activePage = pages.find((p) => p.slug === activePageSlug);
   const MAX_PAGES = 4;
 
+  // Single-page site? Offer to upgrade it to multipage by synthesising a
+  // "home" PageConfig from the current root layout. After the upgrade,
+  // subsequent "Add a page" clicks append new pages.
+  const convertToMultipage = () => {
+    const homeLayout =
+      config.layout && config.layout.length > 0
+        ? config.layout
+        : ['nav', 'hero', 'services', 'about', 'contact', 'footer'];
+    const base: PageConfig = {
+      slug: 'home',
+      title: 'Home',
+      layout: homeLayout as PageConfig['layout'],
+    };
+    onChange({ ...config, pages: [base] });
+    onActivePageSlugChange('home');
+    toast.success(
+      'Multipage enabled',
+      'Add more pages below. Each one gets its own URL + sections.',
+    );
+  };
+
   const updatePage = (slug: string, patch: Partial<PageConfig>) => {
     onChange({
       ...config,
@@ -1028,10 +1402,31 @@ function PagesManager({
 
   return (
     <div className="space-y-4">
-      <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
-        This is a multipage site. Each page gets its own URL in the nav.
-        Max {MAX_PAGES} pages. Delete unused ones to add more.
-      </div>
+      {pages.length === 0 ? (
+        <div className="rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 p-5 text-center">
+          <FileText className="mx-auto h-6 w-6 text-slate-400" />
+          <p className="mt-2 text-sm font-semibold text-slate-900">
+            Single-page site
+          </p>
+          <p className="mt-1 text-[11px] text-slate-500">
+            Everything lives on one scrolling page. Upgrade to multipage when the
+            business needs dedicated pages for Menu, Prices, Team, Shop, etc.
+          </p>
+          <button
+            type="button"
+            onClick={convertToMultipage}
+            className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-[#1D9CA1] px-4 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[#158087]"
+          >
+            <Plus className="h-3 w-3" />
+            Enable multipage
+          </button>
+        </div>
+      ) : (
+        <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
+          This is a multipage site. Each page gets its own URL in the nav.
+          Max {MAX_PAGES} pages. Delete unused ones to add more.
+        </div>
+      )}
 
       <div className="space-y-2">
         {pages.map((p) => {
@@ -1509,30 +1904,114 @@ function DomainEditor({ clientId }: { clientId: string }) {
 
   return (
     <div className="space-y-4">
-      <div>
-        <p className="text-xs text-slate-500">
-          Attach the client&apos;s own domain (e.g. <code>murphysplumbing.com</code>). They&apos;ll set one
-          DNS record with their registrar and we&apos;ll handle TLS automatically.
-        </p>
-      </div>
-
+      {/* Step-by-step guide — shown before a domain is attached. Once the
+          domain is in place we replace this with the status card + DNS
+          records, so the steps don't clutter the verified view. */}
       {!current?.customDomain ? (
-        <div className="space-y-2">
-          <Input
-            value={domain}
-            onChange={(e) => setDomain(e.target.value)}
-            placeholder="murphysplumbing.com"
-            className="text-sm"
-            maxLength={253}
-          />
-          <Button
-            onClick={attach}
-            disabled={!domain.trim() || loading}
-            className="w-full"
-          >
-            {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Globe className="h-3 w-3" />}
-            Attach domain
-          </Button>
+        <div className="space-y-3">
+          <div>
+            <p className="text-xs font-semibold text-slate-900">
+              Connecting a custom domain — how it works
+            </p>
+            <p className="mt-0.5 text-[11px] text-slate-500">
+              Already bought a domain at GoDaddy, Namecheap, Cloudflare, or similar? Four steps:
+            </p>
+          </div>
+
+          <ol className="space-y-2.5 rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <DomainStep
+              n={1}
+              title="Type the domain below"
+              detail={
+                <>
+                  Enter it without <code className="text-[10px]">www.</code> or{' '}
+                  <code className="text-[10px]">https://</code> —
+                  e.g. <code className="text-[10px]">murphysplumbing.com</code>.
+                  Click <strong>Attach domain</strong>.
+                </>
+              }
+            />
+            <DomainStep
+              n={2}
+              title="We'll show the DNS record to set"
+              detail={
+                <>
+                  After attach, this panel updates with the exact record to copy. Every registrar
+                  calls it something like <strong>DNS Management</strong> or <strong>DNS Zone</strong>.
+                </>
+              }
+            />
+            <DomainStep
+              n={3}
+              title="Set the record at the registrar"
+              detail={
+                <>
+                  Log in to GoDaddy / Namecheap / Cloudflare, find DNS, add the record we show.
+                  Takes 2 minutes. If the client owns the domain, paste them the record
+                  from the panel — they can do it too.
+                </>
+              }
+            />
+            <DomainStep
+              n={4}
+              title="Wait 1–10 minutes, then verify"
+              detail={
+                <>
+                  DNS takes a few minutes to propagate. Come back and click{' '}
+                  <strong>Check verification</strong>. Once green, the site is live on the custom
+                  domain with HTTPS set up automatically.
+                </>
+              }
+            />
+          </ol>
+
+          <div className="rounded-lg bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+            <strong>Registrar shortcuts:</strong>{' '}
+            <a
+              href="https://dcc.godaddy.com/control/portfolio"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-semibold underline hover:text-amber-900"
+            >
+              GoDaddy
+            </a>
+            {' · '}
+            <a
+              href="https://www.namecheap.com/myaccount/login/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-semibold underline hover:text-amber-900"
+            >
+              Namecheap
+            </a>
+            {' · '}
+            <a
+              href="https://dash.cloudflare.com/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-semibold underline hover:text-amber-900"
+            >
+              Cloudflare
+            </a>
+          </div>
+
+          <div className="space-y-2">
+            <Input
+              value={domain}
+              onChange={(e) => setDomain(e.target.value)}
+              placeholder="murphysplumbing.com"
+              className="text-sm"
+              maxLength={253}
+            />
+            <Button
+              onClick={attach}
+              disabled={!domain.trim() || loading}
+              className="w-full"
+            >
+              {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Globe className="h-3 w-3" />}
+              Attach domain
+            </Button>
+          </div>
         </div>
       ) : (
         <div className="space-y-3">
@@ -1937,6 +2416,591 @@ function ItemsEditor({
           ))}
         </ArrayBlock>
       ) : null}
+
+      {/* ── Industry blocks below ─────────────────────────────────── */}
+
+      {/* Menu (categorised items for cafes/restaurants) */}
+      {config.menu ? (
+        <ArrayBlock
+          icon={<Coffee className="h-3.5 w-3.5" />}
+          label="Menu categories"
+          count={config.menu.categories?.length ?? 0}
+          onAdd={() => {
+            const cats = config.menu!.categories ?? [];
+            onChange({
+              ...config,
+              menu: {
+                ...config.menu!,
+                categories: [
+                  ...cats,
+                  { title: 'New section', items: [{ name: 'Item', price: '0' }] },
+                ],
+              },
+            });
+          }}
+          addLabel="Add category"
+          emptyHint="No menu categories yet."
+        >
+          {(config.menu.categories ?? []).map((cat, i) => (
+            <div key={i} className="rounded-xl border border-slate-200 bg-white p-2.5">
+              <div className="flex items-center justify-between">
+                <p className="truncate text-xs font-medium text-slate-900">
+                  {cat.title || `Section ${i + 1}`}
+                </p>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (
+                      !(await confirmDialog({
+                        title: `Delete "${cat.title}"?`,
+                        description: `Removes ${cat.items?.length ?? 0} items from the menu.`,
+                        confirmLabel: 'Delete',
+                        danger: true,
+                      }))
+                    )
+                      return;
+                    onChange({
+                      ...config,
+                      menu: {
+                        ...config.menu!,
+                        categories: (config.menu!.categories ?? []).filter((_, j) => j !== i),
+                      },
+                    });
+                  }}
+                  className="rounded-lg p-1 text-slate-400 hover:bg-red-50 hover:text-red-500"
+                  aria-label="Remove category"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              <div className="mt-1 flex items-center justify-between text-[10px] text-slate-500">
+                <span>{cat.items?.length ?? 0} items</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const cats = [...(config.menu!.categories ?? [])];
+                    cats[i] = {
+                      ...cats[i]!,
+                      items: [...(cats[i]?.items ?? []), { name: 'Item', price: '0' }],
+                    };
+                    onChange({ ...config, menu: { ...config.menu!, categories: cats } });
+                  }}
+                  className="inline-flex items-center gap-0.5 font-medium text-[#1D9CA1] hover:underline"
+                >
+                  <Plus className="h-2.5 w-2.5" />
+                  Add item
+                </button>
+              </div>
+              {/* Per-item remove */}
+              {(cat.items ?? []).map((item, ii) => (
+                <div key={ii} className="mt-1 flex items-center justify-between rounded-lg bg-slate-50 px-2 py-1 text-[11px]">
+                  <span className="truncate text-slate-700">{item.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const cats = [...(config.menu!.categories ?? [])];
+                      cats[i] = {
+                        ...cats[i]!,
+                        items: (cats[i]?.items ?? []).filter((_, k) => k !== ii),
+                      };
+                      onChange({ ...config, menu: { ...config.menu!, categories: cats } });
+                    }}
+                    className="rounded p-0.5 text-slate-400 hover:bg-red-50 hover:text-red-500"
+                    aria-label="Remove item"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          ))}
+        </ArrayBlock>
+      ) : null}
+
+      {/* Price list */}
+      {config.priceList ? (
+        <ArrayBlock
+          icon={<List className="h-3.5 w-3.5" />}
+          label="Price list"
+          count={
+            (config.priceList.groups?.reduce((n, g) => n + (g.items?.length ?? 0), 0) ?? 0) +
+            (config.priceList.items?.length ?? 0)
+          }
+          onAdd={() => {
+            // Add to flat `items` array. Groups are managed through AI/direct editing.
+            onChange({
+              ...config,
+              priceList: {
+                ...config.priceList!,
+                items: [
+                  ...(config.priceList!.items ?? []),
+                  { name: 'New service', price: '0', duration: '30 min' },
+                ],
+              },
+            });
+          }}
+          addLabel="Add service"
+          emptyHint="No priced services yet."
+        >
+          {(config.priceList.items ?? []).map((item, i) => (
+            <ItemRow
+              key={`pl-${i}`}
+              primary={item.name}
+              secondary={`${item.price ?? '—'} · ${item.duration ?? ''}`}
+              onRemove={() =>
+                onChange({
+                  ...config,
+                  priceList: {
+                    ...config.priceList!,
+                    items: (config.priceList!.items ?? []).filter((_, j) => j !== i),
+                  },
+                })
+              }
+            />
+          ))}
+        </ArrayBlock>
+      ) : null}
+
+      {/* Team */}
+      {config.team ? (
+        <ArrayBlock
+          icon={<Users className="h-3.5 w-3.5" />}
+          label="Team members"
+          count={config.team.members?.length ?? 0}
+          onAdd={() =>
+            onChange({
+              ...config,
+              team: {
+                ...config.team!,
+                members: [
+                  ...(config.team!.members ?? []),
+                  { name: 'New member', role: 'Role' },
+                ],
+              },
+            })
+          }
+          addLabel="Add member"
+          emptyHint="No team members yet."
+        >
+          {/* Block-level variant picker */}
+          <VariantPicker
+            label="Card layout (all members)"
+            value={config.team.variant ?? 'portrait'}
+            options={TEAM_VARIANT_OPTIONS}
+            onChange={(v) =>
+              onChange({
+                ...config,
+                team: { ...config.team!, variant: v },
+              })
+            }
+          />
+          {(config.team.members ?? []).map((m, i) => (
+            <div key={`tm-${i}`} className="space-y-1.5">
+              <ItemRow
+                primary={m.name ?? '(unnamed)'}
+                secondary={m.role ?? ''}
+                onRemove={async () => {
+                  if (
+                    !(await confirmDialog({
+                      title: `Remove ${m.name || 'this member'}?`,
+                      confirmLabel: 'Remove',
+                      danger: true,
+                    }))
+                  )
+                    return;
+                  onChange({
+                    ...config,
+                    team: {
+                      ...config.team!,
+                      members: (config.team!.members ?? []).filter((_, j) => j !== i),
+                    },
+                  });
+                }}
+              >
+                <VariantPicker
+                  label="This member's card"
+                  value={m.variant}
+                  options={TEAM_VARIANT_OPTIONS}
+                  blockDefault={config.team!.variant ?? 'portrait'}
+                  onChange={(v) => {
+                    const next = [...(config.team!.members ?? [])];
+                    next[i] = { ...next[i]!, variant: v ?? undefined };
+                    onChange({
+                      ...config,
+                      team: { ...config.team!, members: next },
+                    });
+                  }}
+                  allowDefault
+                />
+              </ItemRow>
+            </div>
+          ))}
+        </ArrayBlock>
+      ) : null}
+
+      {/* Schedule entries */}
+      {config.schedule ? (
+        <ArrayBlock
+          icon={<Calendar className="h-3.5 w-3.5" />}
+          label="Schedule entries"
+          count={config.schedule.entries?.length ?? 0}
+          onAdd={() =>
+            onChange({
+              ...config,
+              schedule: {
+                ...config.schedule!,
+                entries: [
+                  ...(config.schedule!.entries ?? []),
+                  { day: 'Mo', time: '09:00', title: 'New entry' },
+                ],
+              },
+            })
+          }
+          addLabel="Add entry"
+          emptyHint="No schedule entries yet."
+        >
+          {(config.schedule.entries ?? []).map((e, i) => (
+            <ItemRow
+              key={`sch-${i}`}
+              primary={`${e.day} ${e.time} — ${e.title}`}
+              secondary={e.detail ?? ''}
+              onRemove={() =>
+                onChange({
+                  ...config,
+                  schedule: {
+                    ...config.schedule!,
+                    entries: (config.schedule!.entries ?? []).filter((_, j) => j !== i),
+                  },
+                })
+              }
+            />
+          ))}
+        </ArrayBlock>
+      ) : null}
+
+      {/* Service areas */}
+      {config.serviceAreas ? (
+        <ArrayBlock
+          icon={<Globe className="h-3.5 w-3.5" />}
+          label="Service areas"
+          count={config.serviceAreas.areas?.length ?? 0}
+          onAdd={() =>
+            onChange({
+              ...config,
+              serviceAreas: {
+                ...config.serviceAreas!,
+                areas: [...(config.serviceAreas!.areas ?? []), 'New area'],
+              },
+            })
+          }
+          addLabel="Add area"
+          emptyHint="No service areas yet."
+        >
+          {(config.serviceAreas.areas ?? []).map((area, i) => (
+            <ItemRow
+              key={`sa-${i}`}
+              primary={area || `Area ${i + 1}`}
+              onRemove={() =>
+                onChange({
+                  ...config,
+                  serviceAreas: {
+                    ...config.serviceAreas!,
+                    areas: (config.serviceAreas!.areas ?? []).filter((_, j) => j !== i),
+                  },
+                })
+              }
+            />
+          ))}
+        </ArrayBlock>
+      ) : null}
+
+      {/* Trust badges */}
+      {config.trustBadges ? (
+        <ArrayBlock
+          icon={<Check className="h-3.5 w-3.5" />}
+          label="Trust badges"
+          count={config.trustBadges.badges?.length ?? 0}
+          onAdd={() =>
+            onChange({
+              ...config,
+              trustBadges: {
+                ...config.trustBadges!,
+                badges: [
+                  ...(config.trustBadges!.badges ?? []),
+                  { label: 'New badge' },
+                ],
+              },
+            })
+          }
+          addLabel="Add badge"
+          emptyHint="No trust badges yet."
+        >
+          {(config.trustBadges.badges ?? []).map((b, i) => (
+            <ItemRow
+              key={`tb-${i}`}
+              primary={b.label}
+              secondary={b.detail ?? ''}
+              onRemove={() =>
+                onChange({
+                  ...config,
+                  trustBadges: {
+                    ...config.trustBadges!,
+                    badges: (config.trustBadges!.badges ?? []).filter((_, j) => j !== i),
+                  },
+                })
+              }
+            />
+          ))}
+        </ArrayBlock>
+      ) : null}
+
+      {/* Before/after pairs */}
+      {config.beforeAfter ? (
+        <ArrayBlock
+          icon={<ImageIcon className="h-3.5 w-3.5" />}
+          label="Before / after pairs"
+          count={config.beforeAfter.pairs?.length ?? 0}
+          onAdd={() =>
+            onChange({
+              ...config,
+              beforeAfter: {
+                ...config.beforeAfter!,
+                pairs: [...(config.beforeAfter!.pairs ?? []), {}],
+              },
+            })
+          }
+          addLabel="Add pair"
+          emptyHint="No before/after pairs yet. Pick image indexes from the Images tab."
+        >
+          {(config.beforeAfter.pairs ?? []).map((p, i) => (
+            <ItemRow
+              key={`ba-${i}`}
+              primary={p.caption || `Pair ${i + 1}`}
+              secondary={`Before: ${p.beforeIndex ?? '—'} · After: ${p.afterIndex ?? '—'}`}
+              onRemove={() =>
+                onChange({
+                  ...config,
+                  beforeAfter: {
+                    ...config.beforeAfter!,
+                    pairs: (config.beforeAfter!.pairs ?? []).filter((_, j) => j !== i),
+                  },
+                })
+              }
+            />
+          ))}
+        </ArrayBlock>
+      ) : null}
+
+      {/* Custom sections — always available, creates the 'custom' layout entry on first add */}
+      <CustomSectionsEditor config={config} onChange={onChange} />
+
+      {/* Products */}
+      {config.products ? (
+        <ArrayBlock
+          icon={<ImageIcon className="h-3.5 w-3.5" />}
+          label="Products"
+          count={config.products.items?.length ?? 0}
+          onAdd={() =>
+            onChange({
+              ...config,
+              products: {
+                ...config.products!,
+                items: [
+                  ...(config.products!.items ?? []),
+                  { name: 'New product', price: '0' },
+                ],
+              },
+            })
+          }
+          addLabel="Add product"
+          emptyHint="No products yet."
+        >
+          {(config.products.items ?? []).map((p, i) => (
+            <ItemRow
+              key={`prod-${i}`}
+              primary={p.name}
+              secondary={`${p.price ?? ''}${p.category ? ` · ${p.category}` : ''}`}
+              onRemove={() =>
+                onChange({
+                  ...config,
+                  products: {
+                    ...config.products!,
+                    items: (config.products!.items ?? []).filter((_, j) => j !== i),
+                  },
+                })
+              }
+            />
+          ))}
+        </ArrayBlock>
+      ) : null}
+
+      {/* Portfolio projects */}
+      {config.portfolio ? (
+        <ArrayBlock
+          icon={<Layers className="h-3.5 w-3.5" />}
+          label="Portfolio projects"
+          count={config.portfolio.projects?.length ?? 0}
+          onAdd={() =>
+            onChange({
+              ...config,
+              portfolio: {
+                ...config.portfolio!,
+                projects: [
+                  ...(config.portfolio!.projects ?? []),
+                  { title: 'New project', summary: 'Short teaser', imageIndices: [] },
+                ],
+              },
+            })
+          }
+          addLabel="Add project"
+          emptyHint="No projects yet."
+        >
+          {(config.portfolio.projects ?? []).map((p, i) => (
+            <ItemRow
+              key={`port-${i}`}
+              primary={p.title}
+              secondary={`${(p.imageIndices?.length ?? 0) + (p.imageUrls?.length ?? 0)} images · ${(p.tags ?? []).join(', ')}`}
+              onRemove={() =>
+                onChange({
+                  ...config,
+                  portfolio: {
+                    ...config.portfolio!,
+                    projects: (config.portfolio!.projects ?? []).filter((_, j) => j !== i),
+                  },
+                })
+              }
+            />
+          ))}
+        </ArrayBlock>
+      ) : null}
+
+      {/* Process steps */}
+      {config.process ? (
+        <ArrayBlock
+          icon={<List className="h-3.5 w-3.5" />}
+          label="Process steps"
+          count={config.process.steps?.length ?? 0}
+          onAdd={() =>
+            onChange({
+              ...config,
+              process: {
+                ...config.process!,
+                steps: [
+                  ...(config.process!.steps ?? []),
+                  { title: 'New step', description: '' },
+                ],
+              },
+            })
+          }
+          addLabel="Add step"
+          emptyHint="No steps yet."
+        >
+          {(config.process.steps ?? []).map((s, i) => (
+            <ItemRow
+              key={`proc-${i}`}
+              primary={`${i + 1}. ${s.title}`}
+              secondary={s.description ?? ''}
+              onRemove={() =>
+                onChange({
+                  ...config,
+                  process: {
+                    ...config.process!,
+                    steps: (config.process!.steps ?? []).filter((_, j) => j !== i),
+                  },
+                })
+              }
+            />
+          ))}
+        </ArrayBlock>
+      ) : null}
+
+      {/* Pricing tiers */}
+      {config.pricingTiers ? (
+        <ArrayBlock
+          icon={<Star className="h-3.5 w-3.5" />}
+          label="Pricing tiers"
+          count={config.pricingTiers.tiers?.length ?? 0}
+          onAdd={() => {
+            if ((config.pricingTiers!.tiers?.length ?? 0) >= 4) {
+              toast.info('Max 4 tiers', 'Remove one first.');
+              return;
+            }
+            onChange({
+              ...config,
+              pricingTiers: {
+                ...config.pricingTiers!,
+                tiers: [
+                  ...(config.pricingTiers!.tiers ?? []),
+                  {
+                    name: 'New tier',
+                    price: '0',
+                    period: '/month',
+                    features: ['Feature'],
+                    ctaLabel: 'Choose',
+                    ctaHref: '#contact',
+                  },
+                ],
+              },
+            });
+          }}
+          addLabel="Add tier"
+          emptyHint="No tiers yet."
+        >
+          {(config.pricingTiers.tiers ?? []).map((t, i) => (
+            <ItemRow
+              key={`tier-${i}`}
+              primary={t.name}
+              secondary={`${t.price ?? ''}${t.period ?? ''} · ${(t.features ?? []).length} features`}
+              onRemove={() =>
+                onChange({
+                  ...config,
+                  pricingTiers: {
+                    ...config.pricingTiers!,
+                    tiers: (config.pricingTiers!.tiers ?? []).filter((_, j) => j !== i),
+                  },
+                })
+              }
+            />
+          ))}
+        </ArrayBlock>
+      ) : null}
+
+      {/* Logo strip */}
+      {config.logoStrip ? (
+        <ArrayBlock
+          icon={<Globe className="h-3.5 w-3.5" />}
+          label="Logos"
+          count={config.logoStrip.logos?.length ?? 0}
+          onAdd={() =>
+            onChange({
+              ...config,
+              logoStrip: {
+                ...config.logoStrip!,
+                logos: [...(config.logoStrip!.logos ?? []), { name: 'New logo' }],
+              },
+            })
+          }
+          addLabel="Add logo"
+          emptyHint="No logos yet."
+        >
+          {(config.logoStrip.logos ?? []).map((l, i) => (
+            <ItemRow
+              key={`logo-${i}`}
+              primary={l.name}
+              secondary={l.imageUrl || (typeof l.imageIndex === 'number' ? `image [${l.imageIndex}]` : 'no image')}
+              onRemove={() =>
+                onChange({
+                  ...config,
+                  logoStrip: {
+                    ...config.logoStrip!,
+                    logos: (config.logoStrip!.logos ?? []).filter((_, j) => j !== i),
+                  },
+                })
+              }
+            />
+          ))}
+        </ArrayBlock>
+      ) : null}
     </div>
   );
 }
@@ -2042,11 +3106,22 @@ function ImagesEditor({
   onChange,
   clientId,
   images,
+  imageRows,
+  onImageLabelChange,
 }: {
   config: WebsiteConfig;
   onChange: (c: WebsiteConfig) => void;
   clientId: string;
   images: string[];
+  imageRows?: Array<{
+    id: string;
+    fileUrl: string;
+    aiDescription?: string | null;
+    qualityScore?: number | null;
+    status?: string | null;
+    tags?: string[] | null;
+  }>;
+  onImageLabelChange?: (id: string, aiDescription: string) => Promise<void> | void;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -2167,7 +3242,7 @@ function ImagesEditor({
         />
       </div>
 
-      {/* Library overview */}
+      {/* Library overview — with editable AI labels */}
       <div>
         <div className="flex items-center justify-between">
           <p className="text-xs font-semibold text-slate-700">
@@ -2181,6 +3256,21 @@ function ImagesEditor({
           <p className="mt-2 py-4 text-center text-[11px] text-slate-400">
             No client photos yet. Upload some above.
           </p>
+        ) : imageRows && imageRows.length > 0 ? (
+          <div className="mt-2 space-y-1.5">
+            {imageRows.slice(0, 20).map((row) => (
+              <LibraryImageRow
+                key={row.id}
+                row={row}
+                onLabelChange={onImageLabelChange}
+              />
+            ))}
+            {imageRows.length > 20 ? (
+              <p className="py-2 text-center text-[10px] text-slate-400">
+                Showing first 20 of {imageRows.length}. Upload / review more from the Content Hub.
+              </p>
+            ) : null}
+          </div>
         ) : null}
       </div>
 
@@ -2275,5 +3365,662 @@ function ImagesEditor({
         the illustration.
       </div>
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Cutouts Editor — decorative PNG overlays on the hero                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Editor for decorative hero cutouts. A cutout is a transparent PNG
+ * (e.g. a coffee cup for a cafe, a wrench for a plumber) layered over
+ * the hero with its own position and animation. Agencies can upload a
+ * cutout from their laptop, nudge it with sliders, or pick an animation
+ * style — no canvas or image editor needed.
+ *
+ * Uploads reuse `api.uploadImages` with a `cutout` tag so they land in
+ * the client's media library, then we use the returned URL directly.
+ */
+function CutoutsEditor({
+  config,
+  onChange,
+  clientId,
+}: {
+  config: WebsiteConfig;
+  onChange: (c: WebsiteConfig) => void;
+  clientId: string;
+}) {
+  const cutouts = config.hero?.cutouts ?? [];
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+
+  const addCutout = (url: string) => {
+    const next = [
+      ...cutouts,
+      {
+        url,
+        // Sensible default position: right side, mid-height, medium size
+        x: 80,
+        y: 50,
+        size: 30,
+        animation: 'float' as const,
+        speed: 1,
+        shadow: 1 as const,
+      },
+    ];
+    onChange({ ...config, hero: { ...config.hero, cutouts: next } });
+  };
+
+  const updateCutout = (i: number, patch: Partial<(typeof cutouts)[number]>) => {
+    const next = [...cutouts];
+    next[i] = { ...next[i]!, ...patch };
+    onChange({ ...config, hero: { ...config.hero, cutouts: next } });
+  };
+
+  const removeCutout = (i: number) => {
+    onChange({
+      ...config,
+      hero: { ...config.hero, cutouts: cutouts.filter((_, j) => j !== i) },
+    });
+  };
+
+  const onFile = async (file: File) => {
+    if (!clientId) {
+      toast.error('Pick a client first');
+      return;
+    }
+    if (!file.type.startsWith('image/')) {
+      toast.error('Pick an image file', 'PNG with transparency works best.');
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      toast.error('Too large', 'Keep cutouts under 8MB.');
+      return;
+    }
+    setUploading(true);
+    try {
+      const rows = await api.uploadImages(clientId, [file], ['cutout']);
+      const url = rows[0]?.fileUrl;
+      if (!url) throw new Error('Upload returned no URL');
+      addCutout(url);
+      toast.success('Cutout added', 'Position + animation below.');
+    } catch (e) {
+      toast.error('Upload failed', (e as Error).message);
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  return (
+    <div className="space-y-3 border-t border-slate-100 pt-4">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-medium text-slate-600">
+          Hero cutouts
+          <span className="ml-2 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">
+            {cutouts.length}
+          </span>
+        </p>
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading || !clientId}
+          className="flex items-center gap-1 rounded-full border border-dashed border-slate-300 px-2 py-0.5 text-[10px] font-medium text-slate-600 transition-colors hover:border-[#1D9CA1] hover:text-[#1D9CA1] disabled:opacity-50"
+          title={!clientId ? 'Pick a client first' : 'Upload a transparent PNG'}
+        >
+          {uploading ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Plus className="h-2.5 w-2.5" />}
+          Upload PNG
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/png,image/webp,image/svg+xml"
+          hidden
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) onFile(f);
+          }}
+        />
+      </div>
+
+      <p className="text-[10px] text-slate-400">
+        Layered over the hero. Transparent PNGs look best — a coffee cup, scissors,
+        a wrench, whatever fits the business. Each one animates on its own.
+      </p>
+
+      {cutouts.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 text-center">
+          <p className="text-[11px] text-slate-500">
+            No cutouts yet. Upload a PNG above to add one.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {cutouts.map((cutout, i) => (
+            <CutoutCard
+              key={`${cutout.url}-${i}`}
+              index={i}
+              cutout={cutout}
+              onChange={(patch) => updateCutout(i, patch)}
+              onRemove={() => removeCutout(i)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const CUTOUT_ANIMATIONS: Array<{
+  value: NonNullable<NonNullable<WebsiteConfig['hero']>['cutouts']>[number]['animation'];
+  label: string;
+  description: string;
+}> = [
+  { value: 'float', label: 'Float', description: 'Gentle up-and-down bob' },
+  { value: 'tilt', label: 'Tilt', description: 'Slow rotation back and forth' },
+  { value: 'orbit', label: 'Orbit', description: 'Subtle circular drift' },
+  { value: 'pulse', label: 'Pulse', description: 'Breathing scale' },
+  { value: 'drift', label: 'Drift', description: 'Slow diagonal movement' },
+  { value: 'none', label: 'Static', description: 'No animation' },
+];
+
+function CutoutCard({
+  index,
+  cutout,
+  onChange,
+  onRemove,
+}: {
+  index: number;
+  cutout: NonNullable<NonNullable<WebsiteConfig['hero']>['cutouts']>[number];
+  onChange: (patch: Partial<typeof cutout>) => void;
+  onRemove: () => void;
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-3">
+      <div className="flex items-start gap-3">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={cutout.url}
+          alt=""
+          className="h-14 w-14 shrink-0 rounded-lg border border-slate-200 bg-[linear-gradient(45deg,#f1f5f9_25%,transparent_25%,transparent_75%,#f1f5f9_75%),linear-gradient(45deg,#f1f5f9_25%,transparent_25%,transparent_75%,#f1f5f9_75%)] bg-[length:8px_8px] bg-[position:0_0,4px_4px] object-contain p-1"
+        />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-xs font-semibold text-slate-900">
+            Cutout {index + 1}
+          </p>
+          <p className="truncate text-[10px] text-slate-500">
+            {cutout.animation ?? 'float'} · size {cutout.size ?? 30}%
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onRemove}
+          className="rounded-lg p-1 text-slate-400 hover:bg-red-50 hover:text-red-500"
+          aria-label="Remove cutout"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
+      </div>
+
+      <div className="mt-3 space-y-2">
+        <Slider
+          label="Horizontal"
+          value={cutout.x ?? 50}
+          min={-10}
+          max={110}
+          onChange={(v) => onChange({ x: v })}
+          suffix="%"
+        />
+        <Slider
+          label="Vertical"
+          value={cutout.y ?? 50}
+          min={-10}
+          max={110}
+          onChange={(v) => onChange({ y: v })}
+          suffix="%"
+        />
+        <Slider
+          label="Size"
+          value={cutout.size ?? 30}
+          min={10}
+          max={60}
+          onChange={(v) => onChange({ size: v })}
+          suffix="%"
+        />
+        <Slider
+          label="Rotation"
+          value={cutout.rotate ?? 0}
+          min={-45}
+          max={45}
+          onChange={(v) => onChange({ rotate: v })}
+          suffix="°"
+        />
+
+        <div className="grid grid-cols-2 gap-2 pt-1">
+          <div>
+            <label className="text-[10px] font-medium text-slate-500">Layer</label>
+            <select
+              value={cutout.layer ?? 0}
+              onChange={(e) =>
+                onChange({ layer: Number(e.target.value) as 0 | 1 })
+              }
+              className="mt-0.5 h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-[11px]"
+            >
+              <option value={0}>Behind copy</option>
+              <option value={1}>In front of copy</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-[10px] font-medium text-slate-500">Shadow</label>
+            <select
+              value={cutout.shadow ?? 1}
+              onChange={(e) =>
+                onChange({ shadow: Number(e.target.value) as 0 | 1 | 2 })
+              }
+              className="mt-0.5 h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-[11px]"
+            >
+              <option value={0}>None</option>
+              <option value={1}>Soft</option>
+              <option value={2}>Dramatic</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label className="text-[10px] font-medium text-slate-500">Animation</label>
+          <div className="mt-1 grid grid-cols-3 gap-1">
+            {CUTOUT_ANIMATIONS.map((a) => (
+              <button
+                key={a.value}
+                type="button"
+                onClick={() => onChange({ animation: a.value })}
+                className={`rounded-md border px-1.5 py-1 text-[10px] font-medium transition-colors ${
+                  (cutout.animation ?? 'float') === a.value
+                    ? 'border-[#1D9CA1] bg-[#1D9CA1]/5 text-[#1D9CA1]'
+                    : 'border-slate-200 text-slate-600 hover:border-slate-300'
+                }`}
+                title={a.description}
+              >
+                {a.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <Slider
+          label="Animation speed"
+          value={cutout.speed ?? 1}
+          min={0.3}
+          max={3}
+          step={0.1}
+          onChange={(v) => onChange({ speed: v })}
+          suffix="×"
+        />
+      </div>
+    </div>
+  );
+}
+
+/** Reusable labelled slider with live numeric readout. */
+function Slider({
+  label,
+  value,
+  min,
+  max,
+  step = 1,
+  onChange,
+  suffix,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  onChange: (v: number) => void;
+  suffix?: string;
+}) {
+  return (
+    <label className="block">
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] font-medium text-slate-500">{label}</span>
+        <span className="text-[10px] tabular-nums text-slate-700">
+          {step < 1 ? value.toFixed(1) : Math.round(value)}
+          {suffix ?? ''}
+        </span>
+      </div>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="mt-0.5 h-1 w-full cursor-pointer appearance-none rounded-full bg-slate-200 accent-[#1D9CA1]"
+      />
+    </label>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Custom Sections Editor — add/remove/pick variant                    */
+/* ------------------------------------------------------------------ */
+
+const CUSTOM_VARIANTS: Array<{
+  value: NonNullable<WebsiteConfig['customSections']>[number]['variant'];
+  label: string;
+  description: string;
+}> = [
+  {
+    value: 'image-strip',
+    label: 'Image strip',
+    description: '2–5 images in a row with captions',
+  },
+  {
+    value: 'image-text-split',
+    label: 'Image + text',
+    description: 'Big image on one side, paragraph on the other',
+  },
+  {
+    value: 'feature-row',
+    label: 'Feature row',
+    description: '2–4 small cards with icon + title + description',
+  },
+  {
+    value: 'pull-quote',
+    label: 'Pull quote',
+    description: 'Big centered quote with attribution',
+  },
+];
+
+/**
+ * Structural editor for `customSections` — append to the Items tab.
+ * Agencies add a new section, pick one of four layout variants, then
+ * the text fields edit inline in the preview.
+ */
+export function CustomSectionsEditor({
+  config,
+  onChange,
+}: {
+  config: WebsiteConfig;
+  onChange: (c: WebsiteConfig) => void;
+}) {
+  const sections = config.customSections ?? [];
+
+  const addSection = (
+    variant: NonNullable<WebsiteConfig['customSections']>[number]['variant'],
+  ) => {
+    const base = { variant, heading: 'New section', body: '' };
+    const newSection =
+      variant === 'image-strip'
+        ? { ...base, items: [{}, {}, {}] }
+        : variant === 'image-text-split'
+          ? { ...base, items: [{}], body: 'Tell the story here.' }
+          : variant === 'feature-row'
+            ? {
+                ...base,
+                items: [
+                  { title: 'First thing', description: 'What it does.', icon: 'Sparkles' },
+                  { title: 'Second', description: 'What it does.', icon: 'Star' },
+                  { title: 'Third', description: 'What it does.', icon: 'CheckCircle2' },
+                ],
+              }
+            : {
+                // pull-quote
+                ...base,
+                heading: undefined,
+                body: 'The quote goes here.',
+                caption: '— Author',
+              };
+    onChange({
+      ...config,
+      customSections: [...sections, newSection],
+    });
+    // Also add 'custom' to the layout if not already there, so the section
+    // actually renders. If custom is already in the layout, it already
+    // renders all entries in customSections.
+    if (!(config.layout ?? []).includes('custom')) {
+      onChange({
+        ...config,
+        customSections: [...sections, newSection],
+        layout: [
+          ...(config.layout ?? []).filter((k) => k !== 'footer'),
+          'custom',
+          'footer',
+        ],
+      });
+    }
+  };
+
+  return (
+    <ArrayBlock
+      icon={<Layers className="h-3.5 w-3.5" />}
+      label="Custom sections"
+      count={sections.length}
+      onAdd={() => addSection('image-strip')}
+      addLabel="Add section"
+      emptyHint="No custom sections yet."
+    >
+      <div className="mb-2 flex flex-wrap gap-1">
+        {CUSTOM_VARIANTS.map((v) => (
+          <button
+            key={v.value}
+            type="button"
+            onClick={() => addSection(v.value)}
+            className="rounded-full border border-slate-200 px-2 py-0.5 text-[10px] font-medium text-slate-600 hover:border-[#1D9CA1] hover:text-[#1D9CA1]"
+            title={v.description}
+          >
+            + {v.label}
+          </button>
+        ))}
+      </div>
+      {sections.map((s, i) => (
+        <ItemRow
+          key={i}
+          primary={s.heading || CUSTOM_VARIANTS.find((v) => v.value === s.variant)?.label || 'Section'}
+          secondary={`${s.variant} · ${(s.items?.length ?? 0)} ${s.items?.length === 1 ? 'item' : 'items'}`}
+          onRemove={async () => {
+            if (
+              !(await confirmDialog({
+                title: 'Remove this custom section?',
+                description: s.heading ?? s.variant,
+                confirmLabel: 'Remove',
+                danger: true,
+              }))
+            )
+              return;
+            onChange({
+              ...config,
+              customSections: sections.filter((_, j) => j !== i),
+            });
+          }}
+        />
+      ))}
+    </ArrayBlock>
+  );
+}
+
+
+/**
+ * Row in the Images tab's Library. Shows the thumbnail + the AI-generated
+ * description as an editable textarea. The description is used by the
+ * website generator to pick which photos suit which sections — agencies
+ * often want to correct what the AI guessed (e.g. "woman holding coffee"
+ * vs "barista pulling espresso") before a regeneration.
+ *
+ * Saves on blur. Quality score (when set) is shown as a tiny readonly
+ * chip so agencies can see at a glance which photos Claude rated best.
+ */
+function LibraryImageRow({
+  row,
+  onLabelChange,
+}: {
+  row: {
+    id: string;
+    fileUrl: string;
+    aiDescription?: string | null;
+    qualityScore?: number | null;
+    status?: string | null;
+  };
+  onLabelChange?: (id: string, aiDescription: string) => Promise<void> | void;
+}) {
+  const [value, setValue] = useState(row.aiDescription ?? '');
+  const [savingState, setSavingState] = useState<'idle' | 'saving' | 'saved'>('idle');
+
+  useEffect(() => {
+    setValue(row.aiDescription ?? '');
+  }, [row.aiDescription]);
+
+  const commit = async () => {
+    const trimmed = value.trim();
+    if (trimmed === (row.aiDescription ?? '').trim()) return;
+    if (!onLabelChange) return;
+    setSavingState('saving');
+    try {
+      await onLabelChange(row.id, trimmed);
+      setSavingState('saved');
+      setTimeout(() => setSavingState('idle'), 1200);
+    } catch {
+      setSavingState('idle');
+    }
+  };
+
+  return (
+    <div className="flex items-start gap-2 rounded-xl border border-slate-200 bg-white p-2">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={row.fileUrl}
+        alt=""
+        className="h-14 w-14 shrink-0 rounded-lg object-cover"
+        loading="lazy"
+      />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          {row.qualityScore != null ? (
+            <span
+              className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold tabular-nums ${
+                row.qualityScore >= 8
+                  ? 'bg-emerald-100 text-emerald-700'
+                  : row.qualityScore >= 5
+                    ? 'bg-amber-100 text-amber-700'
+                    : 'bg-rose-100 text-rose-700'
+              }`}
+              title={`Quality score ${row.qualityScore}/10`}
+            >
+              {row.qualityScore}/10
+            </span>
+          ) : null}
+          {row.status ? (
+            <span className="text-[10px] uppercase tracking-wider text-slate-400">
+              {row.status}
+            </span>
+          ) : null}
+          {savingState === 'saving' ? (
+            <span className="text-[10px] text-slate-500">saving…</span>
+          ) : savingState === 'saved' ? (
+            <span className="text-[10px] text-emerald-600">saved ✓</span>
+          ) : null}
+        </div>
+        <textarea
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onBlur={commit}
+          rows={2}
+          placeholder="AI couldn't describe this one — add a label so the generator knows what it is"
+          className="mt-1 w-full resize-none rounded-md border border-transparent bg-slate-50 px-2 py-1 text-[11px] text-slate-700 transition-colors focus:border-[#1D9CA1] focus:bg-white focus:outline-none"
+        />
+      </div>
+    </div>
+  );
+}
+
+
+/**
+ * Dropdown-style variant picker used by blocks that have multiple card
+ * layouts (team today, more later when Aceternity components get added).
+ *
+ * When `allowDefault` is true, a leading "Default" option lets the user
+ * clear a per-item override and fall back to the block-level variant.
+ */
+function VariantPicker<V extends string>({
+  label,
+  value,
+  options,
+  onChange,
+  allowDefault = false,
+  blockDefault,
+}: {
+  label: string;
+  value: V | undefined;
+  options: Array<{ value: V; label: string; hint?: string }>;
+  onChange: (v: V | undefined) => void;
+  allowDefault?: boolean;
+  blockDefault?: V;
+}) {
+  return (
+    <label className="block">
+      <span className="text-[10px] font-medium text-slate-500">{label}</span>
+      <select
+        value={value ?? ''}
+        onChange={(e) => {
+          const v = e.target.value;
+          if (allowDefault && v === '') onChange(undefined);
+          else onChange(v as V);
+        }}
+        className="mt-0.5 h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-[11px]"
+      >
+        {allowDefault ? (
+          <option value="">
+            {blockDefault
+              ? `Default (${options.find((o) => o.value === blockDefault)?.label ?? blockDefault})`
+              : 'Default'}
+          </option>
+        ) : null}
+        {options.map((opt) => (
+          <option key={opt.value} value={opt.value}>
+            {opt.label}
+            {opt.hint ? ` — ${opt.hint}` : ''}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+const TEAM_VARIANT_OPTIONS = [
+  { value: 'portrait', label: 'Portrait', hint: 'Tall photo + full info' },
+  { value: 'minimal', label: 'Minimal', hint: 'Avatar + name + role' },
+  { value: 'quote', label: 'Quote', hint: 'Avatar + bio as a quote card' },
+  { value: 'banner', label: 'Banner', hint: 'Wide landscape with overlay' },
+] as const satisfies Array<{
+  value: NonNullable<NonNullable<WebsiteConfig['team']>['variant']>;
+  label: string;
+  hint?: string;
+}>;
+
+
+/** Numbered step row used by the DomainEditor onboarding guide. */
+function DomainStep({
+  n,
+  title,
+  detail,
+}: {
+  n: number;
+  title: string;
+  detail: React.ReactNode;
+}) {
+  return (
+    <li className="flex items-start gap-3">
+      <span
+        className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white"
+        style={{ background: '#1D9CA1' }}
+      >
+        {n}
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-[12px] font-semibold text-slate-900">{title}</p>
+        <p className="mt-0.5 text-[11px] leading-relaxed text-slate-600">{detail}</p>
+      </div>
+    </li>
   );
 }

@@ -46,16 +46,19 @@ export interface Client {
   slug?: string;
   contactName: string;
   email: string;
-  industry: string;
+  /** Industry is nullable in the DB — treat as optional in the UI. */
+  industry?: string | null;
   logoUrl?: string;
-  brandColors: { primary: string; secondary: string; accent: string };
+  brandColors?: { primary: string; secondary: string; accent: string };
   subscriptionTier: SubscriptionTier;
   subscriptionStatus?: SubscriptionStatus;
   subscriptionStartedAt?: string | null;
   stripeCustomerId?: string | null;
-  monthlyPriceCents: number;
+  /** Null when the agency hasn't set a monthly price yet. */
+  monthlyPriceCents?: number | null;
   isActive: boolean;
-  onboardedAt: string;
+  /** Nullable — set once the client finishes onboarding. */
+  onboardedAt?: string | null;
   websiteUrl?: string;
   socialAccounts?: Record<string, string>;
   /** Generated website config JSON blob. Present on DB rows once a site is generated. */
@@ -66,11 +69,31 @@ export interface Client {
   customDomain?: string | null;
   customDomainStatus?: 'pending' | 'provisioning' | 'verified' | 'failed' | null;
   customDomainVerifiedAt?: string | Date | null;
-  stats: {
+  /**
+   * Roll-up engagement stats. Computed by the API on demand and attached
+   * to mock client rows. Real DB rows may not have it, so this field is
+   * optional — UI code should default to zero when missing.
+   */
+  stats?: {
     postsThisMonth: number;
     pendingApproval: number;
     imagesUploaded: number;
     engagementRate: number;
+  };
+}
+
+/**
+ * Return a client's stats with safe zero-defaults. Use this everywhere
+ * in the UI instead of `client.stats.X` — the DB doesn't include `stats`
+ * on real clients, only mocks do.
+ */
+export function getClientStats(client: Pick<Client, 'stats'> | null | undefined) {
+  const s = client?.stats;
+  return {
+    postsThisMonth: s?.postsThisMonth ?? 0,
+    pendingApproval: s?.pendingApproval ?? 0,
+    imagesUploaded: s?.imagesUploaded ?? 0,
+    engagementRate: s?.engagementRate ?? 0,
   };
 }
 
@@ -88,8 +111,8 @@ export interface ClientImage {
   fileUrl: string;
   fileName: string;
   tags: string[];
-  aiDescription?: string;
-  qualityScore?: number;
+  aiDescription?: string | null;
+  qualityScore?: number | null;
   status: ImageStatus;
   uploadedAt: string;
 }

@@ -27,12 +27,17 @@ import { NextResponse, type NextRequest } from 'next/server';
  * needs the full URL to reach the API deployment. In dev it's set to the
  * local API port. The public `NEXT_PUBLIC_API_URL` is a relative path
  * (`/api`) in prod for browser calls; this internal one has to be absolute.
+ *
+ * If `API_UPSTREAM` isn't set and `NEXT_PUBLIC_API_URL` isn't an absolute
+ * URL, custom-domain resolution is disabled (middleware just passes requests
+ * through to the app). Better to silently pass than to try a relative fetch
+ * that will always fail.
  */
-const API_URL =
+const RAW_API_URL =
   process.env.API_UPSTREAM ??
   process.env.NEXT_PUBLIC_API_URL ??
   'http://localhost:4000';
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? process.env.APP_URL ?? '';
+const API_URL = /^https?:\/\//i.test(RAW_API_URL) ? RAW_API_URL : null;
 
 /** Hosts the middleware should always pass through without a lookup. */
 function isReservedHost(host: string): boolean {
@@ -42,9 +47,10 @@ function isReservedHost(host: string): boolean {
   if (h.endsWith('.vercel.dev')) return true;
   if (h.endsWith('.ngrok.io') || h.endsWith('.ngrok-free.app')) return true;
 
-  if (APP_URL) {
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? process.env.APP_URL ?? '';
+  if (appUrl) {
     try {
-      const appHost = new URL(APP_URL).host.toLowerCase();
+      const appHost = new URL(appUrl).host.toLowerCase();
       if (h === appHost) return true;
       if (h === `www.${appHost}`) return true;
     } catch {
@@ -65,6 +71,12 @@ const MISS_TTL_MS = 30 * 1000;
 const ERROR_TTL_MS = 10 * 1000;
 
 async function resolveHost(host: string): Promise<string | null> {
+  if (!API_URL) {
+    // API URL isn't absolute — we can't do a server-side fetch from the
+    // edge. Cache a short miss so we don't spam this branch.
+    cache.set(host, { slug: null, expiresAt: Date.now() + ERROR_TTL_MS });
+    return null;
+  }
   const now = Date.now();
   const cached = cache.get(host);
   if (cached && cached.expiresAt > now) return cached.slug;
@@ -115,10 +127,10 @@ export async function middleware(request: NextRequest) {
   // Custom domain — resolve to a client slug and rewrite internally.
   const slug = await resolveHost(host);
   if (!slug) {
-    // Unknown host: send them to the main marketing site rather than a 500.
-    if (APP_URL) {
-      return NextResponse.redirect(APP_URL);
-    }
+    // Unknown host: pass through to the marketing site rather than 500.
+    // We used to redirect to APP_URL, but that can loop when APP_URL isn't
+    // set (relative) or in preview environments. `next()` lets the app's
+    // root route render normally on this hostname.
     return NextResponse.next();
   }
 

@@ -122,8 +122,8 @@ export function VideosPanel({ clientId, client }: Props) {
         count,
         headlines,
         brand: {
-          primary: client.brandColors.primary,
-          accent: client.brandColors.accent,
+          primary: client.brandColors?.primary ?? '#1D9CA1',
+          accent: client.brandColors?.accent ?? '#48D886',
         },
       });
       setProgress({
@@ -464,19 +464,26 @@ export function VideosPanel({ clientId, client }: Props) {
   );
 }
 
-function previewBg(id: string, brand: { primary: string; accent: string }) {
+function previewBg(
+  id: string,
+  brand: { primary: string; accent: string } | undefined,
+) {
+  // Fallback brand colours when the client row has none — matches the
+  // service template's defaults so the preview tile looks on-brand rather
+  // than black.
+  const b = brand ?? { primary: '#1D9CA1', accent: '#48D886' };
   switch (id) {
     case 'liquid-blob':
-      return `radial-gradient(circle at 30% 30%, ${brand.primary}, ${brand.accent} 50%, #0B1220)`;
+      return `radial-gradient(circle at 30% 30%, ${b.primary}, ${b.accent} 50%, #0B1220)`;
     case 'product-showcase':
-      return `conic-gradient(from 0deg, ${brand.primary}, ${brand.accent}, #FFEC3D, ${brand.primary})`;
+      return `conic-gradient(from 0deg, ${b.primary}, ${b.accent}, #FFEC3D, ${b.primary})`;
     case 'aurora':
-      return `conic-gradient(from 180deg at 50% 50%, ${brand.primary} 0deg, transparent 90deg, ${brand.accent} 180deg, transparent 270deg, #FFEC3D 360deg)`;
+      return `conic-gradient(from 180deg at 50% 50%, ${b.primary} 0deg, transparent 90deg, ${b.accent} 180deg, transparent 270deg, #FFEC3D 360deg)`;
     case 'glitch-art':
       return 'linear-gradient(135deg, #FF00AA 0%, #0B1220 50%, #00FFFF 100%)';
     case 'holo-foil':
-      return `conic-gradient(from 45deg at 50% 50%, ${brand.primary}, ${brand.accent}, #FFEC3D, #ff00ff, ${brand.primary})`;
+      return `conic-gradient(from 45deg at 50% 50%, ${b.primary}, ${b.accent}, #FFEC3D, #ff00ff, ${b.primary})`;
     default:
-      return `linear-gradient(135deg, ${brand.primary}, ${brand.accent})`;
+      return `linear-gradient(135deg, ${b.primary}, ${b.accent})`;
   }
 }

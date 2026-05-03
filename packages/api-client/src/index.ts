@@ -241,6 +241,19 @@ export class BoostApi {
       method: 'DELETE',
     });
   }
+  /**
+   * Update editable metadata on a single image. Currently the AI-generated
+   * description (label) and the approval status.
+   */
+  updateImage(
+    id: string,
+    patch: { aiDescription?: string | null; status?: 'pending' | 'approved' | 'rejected' },
+  ) {
+    return this.request<ClientImage>(`/api/v1/images/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    });
+  }
   async uploadImages(clientId: string, files: File[], tags: string[] = []) {
     const form = new FormData();
     form.append('clientId', clientId);
@@ -389,6 +402,35 @@ export class BoostApi {
     hasHours?: boolean;
     template?: SiteTemplate;
     suggestions?: string;
+    /* Seeded business facts — see apps/api/src/services/websites.ts */
+    address?: string;
+    phone?: string;
+    email?: string;
+    whatsapp?: string;
+    hours?: string;
+    socials?: {
+      facebook?: string;
+      instagram?: string;
+      tiktok?: string;
+      linkedin?: string;
+      x?: string;
+      youtube?: string;
+      google?: string;
+    };
+    team?: Array<{
+      name: string;
+      role: string;
+      bio?: string;
+      credentials?: string;
+      specialties?: string[];
+      photoUrl?: string;
+    }>;
+    serviceAreas?: string[];
+    trustBadges?: Array<{
+      label: string;
+      detail?: string;
+      href?: string;
+    }>;
   }) {
     return this.request<{
       config: WebsiteConfig;

@@ -6,6 +6,7 @@ import { SectionWrapper } from '../../section-wrapper';
 import { useSiteContext } from '../context';
 import { brandGradient } from '../theme';
 import { InlineEditable } from '../InlineEditable';
+import { remapPathForPage } from '../path-remap';
 
 interface SiteStatsProps {
   config: WebsiteConfig;
@@ -21,7 +22,7 @@ interface SiteStatsProps {
  *   - each stat label, prefix, and suffix are inline-editable
  */
 export function SiteStats({ config }: SiteStatsProps) {
-  const { embedded, editMode, onFieldChange } = useSiteContext();
+  const { embedded, editMode, onFieldChange, currentPageSlug, pageIndex } = useSiteContext();
   const stats = config.stats;
   if (!stats || stats.length === 0) return null;
 
@@ -67,6 +68,8 @@ export function SiteStats({ config }: SiteStatsProps) {
                       prefix={s.prefix}
                       suffix={s.suffix}
                       onFieldChange={onFieldChange}
+                      currentPageSlug={currentPageSlug}
+                      pageIndex={pageIndex}
                     />
                   ) : (
                     <AnimatedCounter
@@ -106,12 +109,16 @@ function StatValueEditor({
   prefix,
   suffix,
   onFieldChange,
+  currentPageSlug,
+  pageIndex,
 }: {
   index: number;
   value: number;
   prefix?: string;
   suffix?: string;
   onFieldChange?: (path: string, value: unknown) => void;
+  currentPageSlug?: string;
+  pageIndex?: number;
 }) {
   return (
     <span className="inline-flex items-baseline gap-0.5">
@@ -133,14 +140,23 @@ function StatValueEditor({
         className="inline-block w-24 rounded-md bg-white/10 px-2 py-1 text-inherit outline-none outline-2 outline-offset-2 outline-transparent transition-all [appearance:textfield] focus:bg-white/20 focus:outline-white [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
         onBlur={(e) => {
           const raw = e.currentTarget.value.trim();
-          if (raw === '') return;
+          if (raw === '') {
+            // Empty input — restore previous value so we never save NaN.
+            e.currentTarget.value = String(value);
+            return;
+          }
           const n = Number(raw);
           if (!Number.isFinite(n)) {
             e.currentTarget.value = String(value);
             return;
           }
           if (n === value) return;
-          onFieldChange?.(`stats.${index}.value`, n);
+          const writePath = remapPathForPage(
+            `stats.${index}.value`,
+            currentPageSlug,
+            pageIndex,
+          );
+          onFieldChange?.(writePath, n);
         }}
         onKeyDown={(e) => {
           if (e.key === 'Enter') {

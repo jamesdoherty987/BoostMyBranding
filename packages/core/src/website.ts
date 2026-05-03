@@ -37,7 +37,42 @@ export type SiteBlockKey =
   | 'reviews'
   | 'faq'
   | 'contact'
-  | 'footer';
+  | 'footer'
+  /**
+   * Industry-specific blocks. Enabled per business by adding them to
+   * `layout` or a page's `layout`. All are optional — they render as
+   * `null` when their data isn't present, so including the key is safe.
+   */
+  | 'menu'           // Food/drink menu with categories, items, prices
+  | 'priceList'      // Per-service prices for barbers/salons/trades
+  | 'team'           // Staff/practitioner profiles with credentials
+  | 'schedule'       // Weekly class/appointment grid (gyms, clinics)
+  | 'serviceAreas'   // Towns/regions covered (tradesmen, mobile services)
+  | 'beforeAfter'    // Before/after image pairs (trades, beauty)
+  | 'trustBadges'    // Insurance, licensing, certifications
+  | 'cta'            // Dedicated mid-page call-to-action strip
+  /**
+   * More small-business-specific blocks.
+   */
+  | 'products'       // Retail/e-com-lite product catalog (name, image, price, buy link)
+  | 'portfolio'      // Full case studies / examples with story + photos
+  | 'process'        // How it works: numbered step-by-step
+  | 'pricingTiers'   // Bronze/Silver/Gold package cards
+  | 'announcement'   // Top-of-site strip for promos, holiday hours
+  | 'logoStrip'      // "As featured in" / partner / certification logos
+  | 'video'          // Embedded hero or inline video (YouTube/Vimeo/MP4)
+  | 'newsletter'     // Email capture for newsletter / waitlist
+  /**
+   * AI-generated custom sections. When Claude (or the agency) needs a
+   * section that doesn't fit any prebuilt block — e.g. "show these 3
+   * roastery photos with captions" — it populates `customSections` and
+   * the `custom` block renders each entry in order.
+   *
+   * This is the escape hatch: instead of forcing every request into an
+   * existing block, the AI can express arbitrary layouts using 4 proven
+   * primitives (image strip, image+text split, feature row, pull quote).
+   */
+  | 'custom';
 
 /**
  * High-level hero layout. Each variant is a fundamentally different visual
@@ -108,7 +143,129 @@ export interface PageConfig {
     faq?: WebsiteConfig['faq'];
     contact?: WebsiteConfig['contact'];
     footer?: WebsiteConfig['footer'];
+    // Industry-specific block overrides
+    menu?: WebsiteConfig['menu'];
+    priceList?: WebsiteConfig['priceList'];
+    team?: WebsiteConfig['team'];
+    schedule?: WebsiteConfig['schedule'];
+    serviceAreas?: WebsiteConfig['serviceAreas'];
+    beforeAfter?: WebsiteConfig['beforeAfter'];
+    trustBadges?: WebsiteConfig['trustBadges'];
+    cta?: WebsiteConfig['cta'];
+    // Extra small-business blocks
+    products?: WebsiteConfig['products'];
+    portfolio?: WebsiteConfig['portfolio'];
+    process?: WebsiteConfig['process'];
+    pricingTiers?: WebsiteConfig['pricingTiers'];
+    logoStrip?: WebsiteConfig['logoStrip'];
+    video?: WebsiteConfig['video'];
+    newsletter?: WebsiteConfig['newsletter'];
+    // Announcement is global only — it's a top-of-site bar, not per-page.
+    customSections?: WebsiteConfig['customSections'];
   };
+}
+
+/**
+ * A row in a price list. Used by barbers, salons, trades.
+ *   name     — "Men's cut", "Boiler service"
+ *   price    — "25", "from 120" (kept as a string so clients can write
+ *              "from 85" or "25–35" without fighting the number type)
+ *   duration — "45 min" etc. Optional.
+ *   note     — Short extra line, e.g. "incl. consultation".
+ */
+export interface PriceListItem {
+  name: string;
+  price?: string;
+  duration?: string;
+  note?: string;
+  /** When true, row gets a brand accent border and moves to the top. */
+  featured?: boolean;
+}
+
+/**
+ * A decorative cutout layered over the hero. Typically a transparent PNG
+ * (e.g. a coffee cup for a cafe, scissors for a salon), positioned by
+ * percentage so it stays anchored responsively. `animation` chooses the
+ * motion style — all variants use CSS/Framer so they're GPU-cheap.
+ *
+ *   float  — gentle up/down bob, staggered per cutout
+ *   tilt   — slow back-and-forth rotation, nice for props
+ *   orbit  — small circular drift, feels alive
+ *   pulse  — subtle scale in/out, good for badges / stars
+ *   drift  — slow diagonal movement across its origin point
+ *   none   — static; use when the image already has its own animation baked in
+ */
+export interface HeroCutout {
+  /** Image URL. Best results with a transparent PNG. */
+  url: string;
+  /** Short alt text for accessibility. Defaults to empty (decorative). */
+  alt?: string;
+  /** X position as 0–100 percent of the hero width. 50 = centered. */
+  x?: number;
+  /** Y position as 0–100 percent of the hero height. 50 = centered. */
+  y?: number;
+  /** Size as a percent of the hero width. Sensible range: 15–45. Default 30. */
+  size?: number;
+  /** Rotation in degrees. Applied before animation. */
+  rotate?: number;
+  /**
+   * Layer — renders behind (0) or above (1) the hero copy. Default 0.
+   * Set to 1 for a cutout you want in the foreground (e.g. a coffee cup
+   * that should feel like it's "in front of" the headline).
+   */
+  layer?: 0 | 1;
+  /** Animation style. Default 'float'. */
+  animation?: 'float' | 'tilt' | 'orbit' | 'pulse' | 'drift' | 'none';
+  /** Animation speed multiplier. 1 = default, 2 = twice as fast. Default 1. */
+  speed?: number;
+  /** Optional drop shadow intensity. 0 = none, 1 = soft, 2 = dramatic. Default 1. */
+  shadow?: 0 | 1 | 2;
+}
+
+/**
+ * A freeform custom section that doesn't fit any prebuilt block. Each
+ * section picks one of four layout primitives via its `variant` field,
+ * so the renderer stays deterministic while the agency/AI gets broad
+ * creative control.
+ *
+ * Shared fields across all variants:
+ *   eyebrow  — optional small uppercase kicker above the heading
+ *   heading  — optional section heading
+ *   body     — optional supporting paragraph
+ *   items    — variant-specific array (see below)
+ *   caption  — the pull-quote variant's attribution line
+ *   background — optional 'white' | 'slate' | 'brand' tone for variety
+ *
+ * Variants and what `items` mean for each:
+ *   image-strip      — items: [{ imageIndex?, imageUrl?, caption? }] — 2–5
+ *   image-text-split — items: [{ imageIndex?, imageUrl? }] — exactly 1
+ *   feature-row      — items: [{ icon?, title, description }] — 2–4
+ *   pull-quote       — items unused (quote lives in `body`, author in `caption`)
+ */
+export interface CustomSection {
+  variant: 'image-strip' | 'image-text-split' | 'feature-row' | 'pull-quote';
+  eyebrow?: string;
+  heading?: string;
+  body?: string;
+  items?: Array<{
+    /** Index into the client images array. */
+    imageIndex?: number;
+    /** Direct URL (used when imageIndex is unset). */
+    imageUrl?: string;
+    /** Per-item short caption. */
+    caption?: string;
+    /** For feature-row: icon name from the shared icon map. */
+    icon?: string;
+    /** For feature-row: title and description. */
+    title?: string;
+    description?: string;
+  }>;
+  /** For pull-quote: the attribution line (e.g. "— Sarah, owner"). */
+  caption?: string;
+  /** Section background tone. Default white. */
+  background?: 'white' | 'slate' | 'brand';
+  /** For image-text-split: which side the image sits on. Default left. */
+  imageSide?: 'left' | 'right';
 }
 
 export interface WebsiteConfig {
@@ -170,6 +327,18 @@ export interface WebsiteConfig {
      * full site regeneration.
      */
     aiImagePrompt?: string;
+    /**
+     * Decorative cutouts layered over the hero. Each cutout is a
+     * transparent PNG (or any image — though transparent PNGs look best)
+     * positioned and animated independently. Great for cafes wanting a
+     * coffee cup floating in from the right, salons wanting a pair of
+     * scissors drifting across, or a plumber's wrench slowly rotating.
+     *
+     * Works on every hero variant — the cutouts render in a layer above
+     * the variant's background but below the copy, so they complement
+     * rather than replace the variant.
+     */
+    cutouts?: Array<HeroCutout>;
   };
 
   about?: {
@@ -204,6 +373,12 @@ export interface WebsiteConfig {
     description: string;
     /** Lucide icon name (e.g. "Wrench"). Renderer maps unknowns to `Sparkles`. */
     icon: string;
+    /**
+     * Mark as featured — spans two columns on wide grids and gets a
+     * brand-accent ring. Use for the headline service ("Our signature
+     * kitchen refit", "Emergency call-out").
+     */
+    featured?: boolean;
   }>;
 
   gallery?: {
@@ -226,6 +401,8 @@ export interface WebsiteConfig {
     text: string;
     author: string;
     rating: number;
+    /** Feature this review — spans two columns + brand-accent ring. */
+    featured?: boolean;
   }>;
 
   /**
@@ -261,13 +438,50 @@ export interface WebsiteConfig {
     phone?: string;
     email?: string;
     hours?: string;
+    /** WhatsApp number (international format, e.g. "+353851234567"). */
+    whatsapp?: string;
     showBookingForm?: boolean;
     showHours?: boolean;
   };
 
   /**
-   * Optional text overrides for the footer. When omitted, the footer
-   * falls back to the brand tagline and a default nav list.
+   * Social media links. Rendered in the footer and optionally in the
+   * contact section. Claude populates these when the business description
+   * or existing site mentions social accounts.
+   */
+  socials?: {
+    facebook?: string;
+    instagram?: string;
+    tiktok?: string;
+    linkedin?: string;
+    x?: string;
+    youtube?: string;
+    google?: string;
+  };
+
+  /**
+   * Sticky mobile CTA bar. Shown fixed at the bottom of the viewport on
+   * small screens so visitors can call or book with one tap. Claude picks
+   * the right action based on the business type — a restaurant gets
+   * "View menu" + "Call", a tradesman gets "Get a quote" + "Call".
+   *
+   * When omitted, the renderer auto-generates a sensible default from
+   * the hero CTA + phone number.
+   */
+  mobileCta?: {
+    /** Primary action label, e.g. "Book now", "Get a quote". */
+    primaryLabel?: string;
+    /** Primary action href — same rules as hero CTA. */
+    primaryHref?: string;
+    /** Whether to show a "Call" button next to the primary. Defaults true when phone is set. */
+    showCall?: boolean;
+    /** Whether to show a WhatsApp button. Defaults true when whatsapp is set. */
+    showWhatsApp?: boolean;
+  };
+
+  /**
+   * Footer text overrides. When omitted, the footer falls back to the
+   * brand tagline and a default nav list.
    */
   footer?: {
     /** Line shown under the business name. Defaults to brand.tagline. */
@@ -275,6 +489,406 @@ export interface WebsiteConfig {
   };
 
   navigation?: string[];
+
+  /* ────────────────────────────────────────────────────────────── *
+   *  Industry-specific blocks                                      *
+   *                                                                *
+   *  Each of these is opt-in — a business only gets what makes     *
+   *  sense for it. Claude picks the right blocks per business      *
+   *  during generation and adds them to `layout`.                  *
+   * ────────────────────────────────────────────────────────────── */
+
+  /**
+   * Food / drink menu. Used by cafes, restaurants, bars. Rendered as
+   * categorized sections with item name, description, and price. Supports
+   * featured items (highlighted) and dietary tags.
+   */
+  menu?: {
+    eyebrow?: string;
+    heading?: string;
+    /** Optional currency symbol prefixed to every price. Default "€". */
+    currency?: string;
+    categories: Array<{
+      title: string;
+      /** Short blurb under the category heading. Optional. */
+      description?: string;
+      items: Array<{
+        name: string;
+        description?: string;
+        /** Stored as a string so the config can hold "4.50" or "from 12". */
+        price?: string;
+        /** Dietary tags like "V", "VG", "GF". Up to 4. */
+        tags?: string[];
+        /** When true, item gets a brand accent to stand out. */
+        featured?: boolean;
+      }>;
+    }>;
+  };
+
+  /**
+   * Per-service price list. Used by barbers, salons, trades — anyone
+   * who bills by service. Simpler than menu: flat list of rows with
+   * service name + price + optional duration.
+   */
+  priceList?: {
+    eyebrow?: string;
+    heading?: string;
+    currency?: string;
+    /**
+     * Optional groupings (e.g. "Cuts", "Colour"). When omitted, all
+     * items render in a single list.
+     */
+    groups?: Array<{
+      title: string;
+      items: PriceListItem[];
+    }>;
+    /** Flat list when no groups are used. Ignored if `groups` is set. */
+    items?: PriceListItem[];
+    /** Optional note (e.g. "Prices from. Final quote on booking."). */
+    footnote?: string;
+  };
+
+  /**
+   * Team / practitioners. Used by clinics, salons, gyms, agencies.
+   * Each member has a photo (by index into the images array or URL),
+   * name, role, short bio, and optional credentials / specialties.
+   */
+  team?: {
+    eyebrow?: string;
+    heading?: string;
+    /**
+     * Default card layout for this block's members. Individual members
+     * can override via `member.variant`. Extendable — when you paste
+     * Aceternity Pro cards later, register them here.
+     *
+     *   portrait  — 3/4 photo + name + role + specialties (current default)
+     *   minimal   — small avatar + name + role only (dense grid)
+     *   quote     — photo + name + role + short quote/bio card
+     *   banner    — wide landscape card with overlay text (fewer per row)
+     */
+    variant?: 'portrait' | 'minimal' | 'quote' | 'banner';
+    members: Array<{
+      name: string;
+      role: string;
+      bio?: string;
+      /** Credentials like "BDS, MFDS RCSI". Rendered subtly under the name. */
+      credentials?: string;
+      /** Specialties / skills, e.g. ["Beard trims", "Skin fades"]. Up to 5. */
+      specialties?: string[];
+      /** Index into the client's approved images, OR a direct URL. */
+      photoIndex?: number;
+      photoUrl?: string;
+      /**
+       * Per-member card override. When set, this member renders with the
+       * given variant regardless of the block-level `team.variant`.
+       * Lets agencies feature one person with a bigger card while the
+       * rest stay in a uniform grid.
+       */
+      variant?: 'portrait' | 'minimal' | 'quote' | 'banner';
+      /**
+       * Mark this member's card as featured — spans two columns on
+       * wide grids and gets a brand-accent ring so it stands out from
+       * the rest. Useful for the founder / head stylist / lead dentist.
+       */
+      featured?: boolean;
+    }>;
+  };
+
+  /**
+   * Weekly schedule grid. Used by gyms (class schedule), clinics
+   * (appointment hours), salons (staff availability). Each row is a
+   * time slot; each column is a day of the week.
+   */
+  schedule?: {
+    eyebrow?: string;
+    heading?: string;
+    /**
+     * Which days to show. Two-letter codes: Mo, Tu, We, Th, Fr, Sa, Su.
+     * Defaults to the full week if omitted.
+     */
+    days?: string[];
+    entries: Array<{
+      day: string; // "Mo" / "Tu" / ...
+      time: string; // "9:00" / "18:30"
+      title: string; // "HIIT" / "Dr. Smith available" / "Kids' class"
+      /** Optional detail, e.g. "45 min · Coach Maria". */
+      detail?: string;
+      /** Featured slot — rendered with brand accent. */
+      featured?: boolean;
+    }>;
+    footnote?: string;
+  };
+
+  /**
+   * Service areas. Used by mobile / call-out businesses: plumbers,
+   * electricians, mobile groomers, cleaning services. A chip grid of
+   * towns/regions covered, plus optional note about call-out fee.
+   */
+  serviceAreas?: {
+    eyebrow?: string;
+    heading?: string;
+    /** List of town/region names. Up to ~20. */
+    areas: string[];
+    footnote?: string;
+  };
+
+  /**
+   * Before/after image pairs. Used by trades (plumbing jobs, roofing,
+   * decorating), beauty (hair colour, nails, aesthetics). Each pair has
+   * two images and optional caption.
+   */
+  beforeAfter?: {
+    eyebrow?: string;
+    heading?: string;
+    pairs: Array<{
+      /** Indices into the images array, OR direct URLs. */
+      beforeIndex?: number;
+      beforeUrl?: string;
+      afterIndex?: number;
+      afterUrl?: string;
+      caption?: string;
+    }>;
+  };
+
+  /**
+   * Trust badges: insurance, licensing, certifications, awards.
+   * Used by trades (RGI, Safe Electric), medical (GMC, Dental Council),
+   * legal (Law Society). Each badge is a short text chip; add a URL
+   * to make the chip a link to the licensing authority.
+   */
+  trustBadges?: {
+    eyebrow?: string;
+    heading?: string;
+    badges: Array<{
+      /** Short label, e.g. "RGI Registered", "Fully insured to €5M". */
+      label: string;
+      /** Optional longer description shown on hover / below. */
+      detail?: string;
+      /** Optional link to the authority's register. */
+      href?: string;
+      /** Optional icon name from the services icon list. */
+      icon?: string;
+    }>;
+  };
+
+  /**
+   * Mid-page call-to-action strip. A focused "book now" / "call today"
+   * banner with brand gradient, placed between sections to catch the
+   * user before they scroll past the contact form.
+   */
+  cta?: {
+    heading: string;
+    body?: string;
+    buttonLabel: string;
+    buttonHref: string;
+    /** Optional second button. Usually "Call" or "WhatsApp". */
+    secondaryLabel?: string;
+    secondaryHref?: string;
+  };
+
+  /**
+   * Product catalog. Used by retail (gift shops, boutiques), bakeries
+   * selling whole cakes, florists selling bouquets — small retail
+   * businesses that want to showcase products without a full checkout.
+   * Each product has an image, name, description, price, and an
+   * action link (to a product page, "Order via DM", Shopify, etc).
+   */
+  products?: {
+    eyebrow?: string;
+    heading?: string;
+    /** Currency symbol prefixed to every price. Default "€". */
+    currency?: string;
+    /**
+     * Optional category filter tabs above the grid. When empty, all
+     * products render in one grid.
+     */
+    categories?: string[];
+    items: Array<{
+      name: string;
+      description?: string;
+      price?: string;
+      /** The category this product belongs to. Matches one of `categories`. */
+      category?: string;
+      /** Image: index into images array OR direct URL. */
+      imageIndex?: number;
+      imageUrl?: string;
+      /** Buy / order link. If omitted, product is display-only. */
+      href?: string;
+      /** Label on the action button. Default "Order". */
+      ctaLabel?: string;
+      /** Show a small "Featured" / "New" / "Sale" badge. */
+      badge?: string;
+      /** Mark featured products — they span two columns on desktop. */
+      featured?: boolean;
+    }>;
+    /** Optional footnote (e.g. "Contact us to order. Free delivery in Dublin."). */
+    footnote?: string;
+  };
+
+  /**
+   * Portfolio / case studies / work examples. Each entry is a project
+   * with multiple images, a story, and optional client/results metadata.
+   * Richer than gallery (which is just a photo grid) — portfolio items
+   * have a name, description, and context.
+   *
+   * Used by tradesmen (full-kitchen refits), creatives (design projects,
+   * photography shoots), landscapers, event planners.
+   */
+  portfolio?: {
+    eyebrow?: string;
+    heading?: string;
+    projects: Array<{
+      title: string;
+      /** Short one-liner shown in the card grid. */
+      summary?: string;
+      /** Optional longer description shown when a project is expanded. */
+      description?: string;
+      /** Image indices (preferred) or direct URLs. First image is the cover. */
+      imageIndices?: number[];
+      imageUrls?: string[];
+      /** Optional metadata chips — e.g. client name, year, location. */
+      tags?: string[];
+      /** Feature this project — spans two columns, lifted + accent ring. */
+      featured?: boolean;
+    }>;
+  };
+
+  /**
+   * "How it works" numbered steps. Explains the process for service
+   * businesses where the customer wants to know what to expect. Common
+   * for tradesmen ("1. Call us, 2. Free visit, 3. Quote, 4. We fix"),
+   * consultants, agencies.
+   */
+  process?: {
+    eyebrow?: string;
+    heading?: string;
+    steps: Array<{
+      title: string;
+      description?: string;
+      /** Optional icon name from the shared icon map. */
+      icon?: string;
+    }>;
+    footnote?: string;
+  };
+
+  /**
+   * Pricing tiers / packages. Card-based layout with 2–4 tiers and an
+   * optional highlighted "recommended" tier. Different from `priceList`
+   * — priceList is a flat list of individual services (€25 cut, €15
+   * beard), pricingTiers is grouped packages ("Bronze / Silver / Gold").
+   *
+   * Used by gyms (membership levels), beauty (package deals), agencies
+   * (retainer tiers), SaaS-lite.
+   */
+  pricingTiers?: {
+    eyebrow?: string;
+    heading?: string;
+    currency?: string;
+    tiers: Array<{
+      name: string;
+      /** Big price displayed on the card. Keep short ("49", "from 199"). */
+      price?: string;
+      /** Billing period, e.g. "/month", "/session". */
+      period?: string;
+      description?: string;
+      /** Bullet list of what's included. */
+      features: string[];
+      /** CTA button. */
+      ctaLabel?: string;
+      ctaHref?: string;
+      /** When true, card gets a brand accent + scale bump. */
+      highlighted?: boolean;
+    }>;
+    footnote?: string;
+  };
+
+  /**
+   * Top-of-site announcement bar. Sticky strip above the nav used for
+   * seasonal promos, holiday hours, new service launches. Dismissible
+   * so returning visitors can hide it.
+   */
+  announcement?: {
+    /** Short message text. Keep to one line. */
+    message: string;
+    /** Optional CTA link at the end of the message. */
+    linkLabel?: string;
+    linkHref?: string;
+    /** Visual tone: brand (default), success (green), warning (amber). */
+    tone?: 'brand' | 'success' | 'warning';
+    /** Hides the dismiss button. Use for genuinely critical info. */
+    nonDismissible?: boolean;
+  };
+
+  /**
+   * Horizontal strip of logos — "as featured in" press, partners,
+   * awards, certification bodies. Grayscale by default, colour on hover.
+   */
+  logoStrip?: {
+    eyebrow?: string;
+    heading?: string;
+    logos: Array<{
+      /** Alt text / label for the logo. */
+      name: string;
+      imageUrl?: string;
+      imageIndex?: number;
+      /** Optional link out. */
+      href?: string;
+    }>;
+  };
+
+  /**
+   * Video block. Renders a responsive 16:9 frame with either a YouTube /
+   * Vimeo embed or a self-hosted MP4. Good for intro videos, product
+   * demos, customer testimonials on camera.
+   */
+  video?: {
+    eyebrow?: string;
+    heading?: string;
+    body?: string;
+    /** Video source URL. Accepts YouTube, Vimeo, or direct MP4. */
+    url: string;
+    /** Optional custom poster/thumbnail (only used for MP4 URLs). */
+    posterUrl?: string;
+    /** Autoplay muted on scroll-into-view. Off by default to respect bandwidth. */
+    autoplay?: boolean;
+  };
+
+  /**
+   * Newsletter / waitlist signup. Simple email capture with a friendly
+   * heading and consent line. Posts to the same `/leads` endpoint as
+   * the contact form but tagged as `newsletter_signup` so the dashboard
+   * inbox can filter.
+   */
+  newsletter?: {
+    eyebrow?: string;
+    heading?: string;
+    body?: string;
+    /** Input placeholder. Default "Your email". */
+    placeholder?: string;
+    /** Submit button label. Default "Subscribe". */
+    buttonLabel?: string;
+    /** Tiny consent line under the input. */
+    consent?: string;
+  };
+
+  /**
+   * Freeform custom sections. When the `custom` block is in the layout,
+   * each entry in this array renders in order. Each section has a
+   * `variant` that picks a layout primitive — this keeps the rendering
+   * deterministic while letting the AI (or agency) assemble custom
+   * combinations of images + copy.
+   *
+   * Layout primitives:
+   *   image-strip      — 2–5 images in a row with optional captions
+   *   image-text-split — large image on one side, heading+body on the other
+   *   feature-row      — 2–4 small feature cards with icon + text
+   *   pull-quote       — big centered quote with author
+   *
+   * Each entry gets its own edit paths (`customSections.0.heading`,
+   * `customSections.0.items.2.caption`) so `InlineEditable` can address
+   * individual fields.
+   */
+  customSections?: CustomSection[];
 
   /**
    * Multipage sites. When present and length > 1, the renderer treats the
@@ -332,24 +946,27 @@ export function listPages(config: WebsiteConfig): PageConfig[] {
 
 /**
  * Default layout per template. Used when the config omits `layout`.
- * Keeps the generator resilient — the renderer always has something to show.
+ * Industry-specific blocks (menu, priceList, team, schedule, serviceAreas,
+ * beforeAfter, trustBadges, cta) are only added when their data is
+ * actually present — including them here is safe because the renderer
+ * skips empty blocks.
  */
 export const DEFAULT_LAYOUT: Record<SiteTemplate, SiteBlockKey[]> = {
-  service: ['nav', 'hero', 'stats', 'services', 'about', 'reviews', 'faq', 'contact', 'footer'],
-  food: ['nav', 'hero', 'services', 'gallery', 'about', 'reviews', 'contact', 'footer'],
-  beauty: ['nav', 'hero', 'services', 'gallery', 'reviews', 'about', 'contact', 'faq', 'footer'],
-  fitness: ['nav', 'hero', 'stats', 'services', 'reviews', 'faq', 'contact', 'footer'],
-  professional: ['nav', 'hero', 'about', 'services', 'stats', 'reviews', 'faq', 'contact', 'footer'],
+  service: ['nav', 'hero', 'stats', 'services', 'serviceAreas', 'beforeAfter', 'about', 'trustBadges', 'reviews', 'faq', 'cta', 'contact', 'footer'],
+  food: ['nav', 'hero', 'menu', 'gallery', 'about', 'reviews', 'contact', 'footer'],
+  beauty: ['nav', 'hero', 'priceList', 'gallery', 'team', 'reviews', 'about', 'contact', 'faq', 'footer'],
+  fitness: ['nav', 'hero', 'stats', 'services', 'schedule', 'team', 'reviews', 'cta', 'faq', 'contact', 'footer'],
+  professional: ['nav', 'hero', 'about', 'services', 'team', 'stats', 'reviews', 'faq', 'contact', 'footer'],
   retail: ['nav', 'hero', 'services', 'gallery', 'stats', 'reviews', 'faq', 'contact', 'footer'],
-  medical: ['nav', 'hero', 'about', 'services', 'stats', 'reviews', 'faq', 'contact', 'footer'],
-  creative: ['nav', 'hero', 'gallery', 'about', 'services', 'reviews', 'contact', 'footer'],
-  realestate: ['nav', 'hero', 'stats', 'services', 'gallery', 'reviews', 'faq', 'contact', 'footer'],
-  education: ['nav', 'hero', 'about', 'stats', 'services', 'reviews', 'faq', 'contact', 'footer'],
-  automotive: ['nav', 'hero', 'services', 'stats', 'gallery', 'reviews', 'faq', 'contact', 'footer'],
-  hospitality: ['nav', 'hero', 'gallery', 'about', 'services', 'reviews', 'contact', 'footer'],
-  legal: ['nav', 'hero', 'about', 'services', 'reviews', 'faq', 'contact', 'footer'],
-  nonprofit: ['nav', 'hero', 'about', 'stats', 'services', 'reviews', 'contact', 'footer'],
-  tech: ['nav', 'hero', 'stats', 'services', 'about', 'reviews', 'faq', 'contact', 'footer'],
+  medical: ['nav', 'hero', 'about', 'services', 'team', 'schedule', 'trustBadges', 'reviews', 'faq', 'contact', 'footer'],
+  creative: ['nav', 'hero', 'gallery', 'about', 'services', 'team', 'reviews', 'contact', 'footer'],
+  realestate: ['nav', 'hero', 'stats', 'services', 'gallery', 'team', 'reviews', 'faq', 'contact', 'footer'],
+  education: ['nav', 'hero', 'about', 'stats', 'services', 'team', 'schedule', 'reviews', 'faq', 'contact', 'footer'],
+  automotive: ['nav', 'hero', 'services', 'priceList', 'stats', 'gallery', 'serviceAreas', 'reviews', 'trustBadges', 'faq', 'contact', 'footer'],
+  hospitality: ['nav', 'hero', 'gallery', 'about', 'services', 'menu', 'reviews', 'contact', 'footer'],
+  legal: ['nav', 'hero', 'about', 'services', 'team', 'trustBadges', 'reviews', 'faq', 'contact', 'footer'],
+  nonprofit: ['nav', 'hero', 'about', 'stats', 'services', 'team', 'reviews', 'cta', 'contact', 'footer'],
+  tech: ['nav', 'hero', 'stats', 'services', 'team', 'about', 'reviews', 'faq', 'contact', 'footer'],
 };
 
 /**

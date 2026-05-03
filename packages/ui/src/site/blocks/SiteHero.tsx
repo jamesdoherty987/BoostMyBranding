@@ -10,10 +10,18 @@
  * be worked on independently and shared with other surfaces later. The
  * generator prompt is expected to pick a variant that matches the
  * business personality; we fall back by template when it doesn't.
+ *
+ * Decorative cutouts (`config.hero.cutouts`) are rendered as an absolutely
+ * positioned overlay regardless of variant — they sit in two layers, one
+ * below the copy (behind) and one above (foreground), and every variant
+ * handles the main visuals inside its own section. The dispatcher wraps
+ * the variant in a relative container so the cutout layer can anchor to
+ * the correct bounds.
  */
 
 import type { WebsiteConfig, HeroVariant, SiteTemplate } from '@boost/core';
 import { DEFAULT_HERO_VARIANT, HERO_VARIANTS } from '@boost/core';
+import type { ReactElement } from 'react';
 import {
   HeroSpotlight,
   HeroBeams,
@@ -21,6 +29,7 @@ import {
   HeroParallaxLayers,
   HeroGradientMesh,
 } from './hero';
+import { HeroCutouts } from './hero/HeroCutouts';
 
 interface SiteHeroProps {
   config: WebsiteConfig;
@@ -67,21 +76,26 @@ export function SiteHero({ config, images, businessName, embedded }: SiteHeroPro
     config.hero?.imageIndex != null ? images[config.hero.imageIndex] : undefined;
   const heroImage = clientImage ?? config.hero?.aiImageUrl ?? undefined;
 
+  let variantEl: ReactElement;
   switch (variant) {
     case 'spotlight':
-      return <HeroSpotlight config={config} heroImage={heroImage} embedded={embedded} />;
+      variantEl = <HeroSpotlight config={config} heroImage={heroImage} embedded={embedded} />;
+      break;
 
     case 'beams':
-      return <HeroBeams config={config} embedded={embedded} />;
+      variantEl = <HeroBeams config={config} embedded={embedded} />;
+      break;
 
     case 'floating-icons':
-      return <HeroFloatingIcons config={config} embedded={embedded} />;
+      variantEl = <HeroFloatingIcons config={config} embedded={embedded} />;
+      break;
 
     case 'gradient-mesh':
-      return <HeroGradientMesh config={config} embedded={embedded} />;
+      variantEl = <HeroGradientMesh config={config} embedded={embedded} />;
+      break;
 
     case 'parallax-layers':
-      return (
+      variantEl = (
         <HeroParallaxLayers
           config={config}
           heroImage={heroImage}
@@ -89,10 +103,10 @@ export function SiteHero({ config, images, businessName, embedded }: SiteHeroPro
           embedded={embedded}
         />
       );
+      break;
 
     default:
-      // Unknown variant — safe fallback.
-      return (
+      variantEl = (
         <HeroParallaxLayers
           config={config}
           heroImage={heroImage}
@@ -101,4 +115,20 @@ export function SiteHero({ config, images, businessName, embedded }: SiteHeroPro
         />
       );
   }
+
+  const cutouts = config.hero?.cutouts;
+  if (!cutouts || cutouts.length === 0) {
+    return variantEl;
+  }
+
+  // Wrap the variant so the cutouts can overlay it. The variant itself is
+  // already `position: relative` on its root <section>, so we use a relative
+  // fragment wrapper with cutout layers absolutely positioned inside.
+  return (
+    <div className="relative">
+      <HeroCutouts cutouts={cutouts} embedded={embedded} layer={0} />
+      {variantEl}
+      <HeroCutouts cutouts={cutouts} embedded={embedded} layer={1} />
+    </div>
+  );
 }

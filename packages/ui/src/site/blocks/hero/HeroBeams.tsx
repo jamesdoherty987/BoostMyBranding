@@ -75,9 +75,12 @@ export function HeroBeams({ config, embedded }: HeroBeamsProps) {
   );
 }
 
-/** Rough hex shade for background composition. Negative amount darkens. */
-function shade(hex: string, amount: number): string {
+/** Rough hex shade for background composition. Negative amount darkens.
+ *  Defensive against missing/invalid inputs — falls back to black. */
+function shade(hex: string | null | undefined, amount: number): string {
+  if (!hex || typeof hex !== 'string') return '#000000';
   const h = hex.replace('#', '');
+  if (!/^[0-9a-fA-F]{3}$|^[0-9a-fA-F]{6}$/.test(h)) return '#000000';
   const full = h.length === 3 ? h.split('').map((c) => c + c).join('') : h;
   const num = parseInt(full, 16);
   const r = Math.max(0, Math.min(255, ((num >> 16) & 0xff) + amount * 255));

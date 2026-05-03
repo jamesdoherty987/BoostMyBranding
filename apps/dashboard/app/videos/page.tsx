@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import useSWR from 'swr';
 import { motion } from 'framer-motion';
 import {
@@ -53,11 +53,15 @@ export default function VideosPage() {
   const [rendering, setRendering] = useState(false);
   const [rendered, setRendered] = useState<{ videoUrl: string; fromMock?: boolean } | null>(null);
 
-  // Sync clientId once real clients load from the API.
-  const firstClientId = clients[0]?.id;
-  if (firstClientId && !clientId) {
-    setClientId(firstClientId);
-  }
+  // Sync clientId once real clients load from the API. MUST be in an
+  // effect — calling setState during render causes an infinite render loop
+  // that crashes the page with "Cannot read properties of undefined".
+  useEffect(() => {
+    const firstId = clients[0]?.id;
+    if (firstId && !clientId) {
+      setClientId(firstId);
+    }
+  }, [clients, clientId]);
 
   const selected = templates.find((t) => t.id === selectedTemplate);
   const client = clients.find((c) => c.id === clientId);

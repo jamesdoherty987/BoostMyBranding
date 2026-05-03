@@ -53,7 +53,11 @@ export function SiteReviews({ config }: SiteReviewsProps) {
               animate={embedded ? { opacity: 1, y: 0 } : undefined}
               viewport={{ once: true, margin: '-40px' }}
               transition={{ delay: i * 0.05, duration: 0.5 }}
-              className="relative rounded-3xl border border-slate-200 bg-slate-50 p-6"
+              className={`relative rounded-3xl border p-6 ${
+                r.featured
+                  ? 'border-[color:var(--bmb-site-primary)] bg-white ring-1 ring-[color:var(--bmb-site-primary)]/30 md:col-span-2'
+                  : 'border-slate-200 bg-slate-50'
+              }`}
             >
               <div className="flex items-center gap-0.5" style={{ color: 'var(--bmb-site-pop)' }}>
                 {Array.from({ length: Math.max(1, Math.min(5, Math.round(r.rating ?? 5))) }).map(

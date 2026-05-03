@@ -111,7 +111,11 @@ export const mockPosts: Post[] = Array.from({ length: 40 }, (_, i) => {
     imageUrl: sampleImage(`${client.id}-${i}`),
     caption: captions[i % captions.length]!,
     platform,
-    hashtags: ['#smallbusiness', `#${client.industry.toLowerCase().replace(/\s+/g, '')}`, '#daily'],
+    hashtags: [
+      '#smallbusiness',
+      `#${(client.industry ?? 'business').toLowerCase().replace(/\s+/g, '')}`,
+      '#daily',
+    ],
     scheduledFor: iso(i - 10),
     status,
     engagement:

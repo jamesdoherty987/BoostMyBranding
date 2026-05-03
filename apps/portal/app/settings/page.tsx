@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import useSWR from 'swr';
-import { Button, Input, toast, Spinner, Badge, Dialog, EmptyState } from '@boost/ui';
+import { Button, Input, toast, Spinner, Badge, Dialog } from '@boost/ui';
 import { Check, Instagram, Facebook, Linkedin, Music2, Twitter, LogOut, Download, CreditCard, ArrowRight } from 'lucide-react';
 import Link from 'next/link';
 import { Shell } from '@/components/Shell';
@@ -38,13 +38,20 @@ export default function SettingsPage() {
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [dirty, setDirty] = useState(false);
 
+  /**
+   * Reset the form back to whatever the server last handed us. Shared
+   * between the initial sync effect and the "Discard" button on the
+   * sticky save bar, so "discard" always puts the form in a clean state.
+   */
+  const setAllFromData = (row: NonNullable<typeof data>) => {
+    setWebsiteUrl(row.websiteUrl ?? '');
+    setIndustry(row.industry ?? '');
+    setSocials(row.socialAccounts ?? {});
+    setDirty(false);
+  };
+
   useEffect(() => {
-    if (data) {
-      setWebsiteUrl(data.websiteUrl ?? '');
-      setIndustry(data.industry ?? '');
-      setSocials(data.socialAccounts ?? {});
-      setDirty(false);
-    }
+    if (data) setAllFromData(data);
   }, [data]);
 
   const markDirty = () => setDirty(true);
@@ -199,9 +206,12 @@ export default function SettingsPage() {
         </div>
       </section>
 
+      {/* Inline save button — stays here so users still see a confirmation
+          after saving. The sticky bar below handles the "unsaved changes"
+          nudge when they scroll. */}
       <div className="mt-5 flex flex-col gap-2">
-        <Button onClick={save} size="lg" disabled={!dirty || saving}>
-          {saving ? <Spinner /> : <Check className="h-4 w-4" />}
+        <Button onClick={save} size="lg" disabled={!dirty || saving} loading={saving}>
+          {!saving ? <Check className="h-4 w-4" /> : null}
           {saving ? 'Saving…' : dirty ? 'Save changes' : 'All saved'}
         </Button>
         <Button variant="outline" size="lg" onClick={() => setConfirmLogout(true)}>
@@ -246,6 +256,31 @@ export default function SettingsPage() {
           </Button>
         </div>
       </Dialog>
+
+      {/* Sticky "unsaved changes" reminder — appears when the user has edits
+          that haven't been saved yet, sits above the bottom nav so it's
+          always reachable without scrolling. */}
+      {dirty ? (
+        <div className="fixed bottom-[calc(4rem+env(safe-area-inset-bottom))] left-1/2 z-30 w-[min(100%-1rem,28rem)] -translate-x-1/2 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl">
+          <div className="flex items-center gap-2">
+            <span className="flex-1 px-2 text-xs font-medium text-slate-700">
+              Unsaved changes
+            </span>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => data && setAllFromData(data)}
+              disabled={saving}
+            >
+              Discard
+            </Button>
+            <Button size="sm" onClick={save} disabled={saving} loading={saving}>
+              {!saving ? <Check className="h-4 w-4" /> : null}
+              Save
+            </Button>
+          </div>
+        </div>
+      ) : null}
     </Shell>
   );
 }

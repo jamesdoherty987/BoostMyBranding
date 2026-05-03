@@ -5,7 +5,7 @@ import useSWR from 'swr';
 import { motion, AnimatePresence } from 'framer-motion';
 import { mockClients, getMessagesForClient, timeAgo, type Message } from '@boost/core';
 import { Input, Spinner, toast, useRealtime } from '@boost/ui';
-import { Send, Paperclip } from 'lucide-react';
+import { Send } from 'lucide-react';
 import { Shell } from '@/components/Shell';
 import { api, API_URL } from '@/lib/api';
 import { handlePortalAuthError, ALLOW_MOCK_FALLBACK } from '@/lib/auth';
@@ -95,6 +95,19 @@ export default function ChatPage() {
         <div className="mt-10 flex justify-center">
           <Spinner size={24} />
         </div>
+      ) : messages.length === 0 ? (
+        <div className="mt-16 flex flex-col items-center px-4 text-center">
+          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-[#1D9CA1]/10 text-[#1D9CA1]">
+            <Send className="h-6 w-6" />
+          </div>
+          <h2 className="mt-4 text-base font-semibold text-slate-900">
+            Say hi 👋
+          </h2>
+          <p className="mt-1 max-w-xs text-sm text-slate-600">
+            Ask a question, share an update, or let us know about an upcoming event.
+            Your account manager usually replies within a few hours.
+          </p>
+        </div>
       ) : (
         <div className="space-y-3 pb-24">
           <AnimatePresence initial={false}>
@@ -140,18 +153,12 @@ export default function ChatPage() {
         }}
         className="fixed bottom-[calc(4rem+env(safe-area-inset-bottom))] left-1/2 z-20 flex w-[min(100%-1rem,28rem)] -translate-x-1/2 items-center gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl"
       >
-        <button
-          type="button"
-          className="rounded-full p-2 text-slate-500 hover:bg-slate-100"
-          aria-label="Attach"
-        >
-          <Paperclip className="h-4 w-4" />
-        </button>
         <Input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          placeholder="Message…"
-          className="h-10 border-none bg-transparent px-0 no-zoom focus:ring-0 focus:border-transparent"
+          placeholder="Message your team…"
+          className="h-10 border-none bg-transparent px-3 no-zoom focus:ring-0 focus:border-transparent"
+          aria-label="Message"
         />
         <button
           type="submit"

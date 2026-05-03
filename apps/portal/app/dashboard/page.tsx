@@ -118,6 +118,23 @@ export default function DashboardPage() {
             </Button>
           </Link>
         </motion.section>
+      ) : client.subscriptionTier === 'website_only' ? (
+        // Website-only clients don't have a posts-per-month metric. Show
+        // a different "active" card that speaks to what they get.
+        <motion.section
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="rounded-2xl bg-gradient-cta p-5 text-white shadow-brand"
+        >
+          <div className="text-xs font-medium uppercase tracking-widest text-white/80">
+            Your site
+          </div>
+          <div className="mt-1 text-2xl font-bold">Live and looked after.</div>
+          <p className="mt-1 text-sm text-white/90">
+            We keep your site fast, secure, and up-to-date. Chat us anytime for
+            copy or design changes.
+          </p>
+        </motion.section>
       ) : (
         <motion.section
           initial={{ opacity: 0, y: 8 }}
@@ -163,7 +180,7 @@ export default function DashboardPage() {
         />
       </section>
 
-      {noContentYet && !isLocked ? (
+      {noContentYet && !isLocked && client.subscriptionTier !== 'website_only' ? (
         <div className="mt-6">
           <EmptyState
             icon={<UploadIcon className="h-5 w-5" />}
@@ -202,7 +219,7 @@ export default function DashboardPage() {
         </div>
       ) : null}
 
-      {upcoming.length > 0 ? (
+      {upcoming.length > 0 && client.subscriptionTier !== 'website_only' ? (
         <section className="mt-6">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-slate-900">Going out soon</h2>
@@ -248,7 +265,7 @@ export default function DashboardPage() {
         </section>
       ) : null}
 
-      {recentlyPublished.length > 0 ? (
+      {recentlyPublished.length > 0 && client.subscriptionTier !== 'website_only' ? (
         <section className="mt-6">
           <h2 className="text-sm font-semibold text-slate-900">Recently live</h2>
           <div className="mt-3 grid grid-cols-3 gap-2">

@@ -76,7 +76,16 @@ export default function UploadPage() {
     } catch (err) {
       handlePortalAuthError(err);
       if (!ALLOW_MOCK_FALLBACK) {
-        toast.error('Please sign in', 'Your session has expired.');
+        // handlePortalAuthError already redirected for auth errors.
+        // Non-auth failures: drop the batch and surface a toast; the
+        // user can retry once the network settles.
+        toast.error('Could not upload', 'Something went wrong — try again in a moment.');
+        // Clear the pending rows we just added so they don't sit as "stuck".
+        const ids = new Set(batch.map((b) => b.id));
+        setUploads((prev) => {
+          for (const u of prev) if (ids.has(u.id)) URL.revokeObjectURL(u.url);
+          return prev.filter((u) => !ids.has(u.id));
+        });
         return;
       }
       clientId = mockClients[0]!.id;

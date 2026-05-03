@@ -296,3 +296,113 @@ clientsRouter.post(
     });
   },
 );
+
+/* ------------------------------------------------------------------ */
+/* Agency-side edit + delete                                          */
+/* ------------------------------------------------------------------ */
+
+const updateClientSchema = z.object({
+  businessName: z.string().min(1).max(200).optional(),
+  contactName: z.string().min(1).max(200).optional(),
+  email: z.string().email().max(200).optional(),
+  phone: z.string().max(30).optional().or(z.literal('')),
+  industry: z.string().max(100).optional(),
+  websiteUrl: z.string().url().max(500).optional().or(z.literal('')),
+  brandVoice: z.string().max(4000).optional(),
+  logoUrl: z.string().url().max(500).optional().or(z.literal('')),
+  subscriptionTier: z.enum(['social_only', 'website_only', 'full_package']).optional(),
+  isActive: z.boolean().optional(),
+});
+
+/** Agency-side update of any client field. */
+clientsRouter.patch(
+  '/:id',
+  requireAuth,
+  requireRole('agency_admin', 'agency_member'),
+  async (req, res, next) => {
+    try {
+      const id = String(req.params.id);
+      const patch = updateClientSchema.parse(req.body);
+      if (!isDbConfigured()) {
+        return res.json({ data: { id, ...patch } });
+      }
+      const db = getDb();
+      const set: Record<string, any> = { updatedAt: new Date() };
+      for (const [k, v] of Object.entries(patch)) {
+        if (v !== undefined) {
+          // Map camelCase to snake_case column names
+          const col = k.replace(/[A-Z]/g, (m) => `_${m.toLowerCase()}`);
+          set[col] = v === '' ? null : v;
+        }
+      }
+      const [row] = await db
+        .update(clients)
+        .set(set)
+        .where(eq(clients.id, id))
+        .returning();
+      if (!row) {
+        return res.status(404).json({ error: { message: 'Not found', code: 'NOT_FOUND' } });
+      }
+      res.json({ data: row });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+/**
+ * Delete a client and all associated data (images, posts, messages, etc.).
+ * Cascading deletes are handled by the FK constraints in the schema.
+ * Agency admin only — this is destructive and irreversible.
+ */
+clientsRouter.delete(
+  '/:id',
+  requireAuth,
+  requireRole('agency_admin'),
+  async (req, res, next) => {
+    try {
+      const id = String(req.params.id);
+      if (!isDbConfigured()) {
+        return res.json({ data: { id, deleted: true } });
+      }
+      const db = getDb();
+      const [row] = await db
+        .delete(clients)
+        .where(eq(clients.id, id))
+        .returning({ id: clients.id });
+      if (!row) {
+        return res.status(404).json({ error: { message: 'Not found', code: 'NOT_FOUND' } });
+      }
+      res.json({ data: { id: row.id, deleted: true } });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+/**
+ * Clear a client's website config. The public site reverts to the
+ * "coming soon" holding page. Non-destructive — the client record
+ * stays, only the config is wiped.
+ */
+clientsRouter.delete(
+  '/:id/website',
+  requireAuth,
+  requireRole('agency_admin', 'agency_member'),
+  async (req, res, next) => {
+    try {
+      const id = String(req.params.id);
+      if (!isDbConfigured()) {
+        return res.json({ data: { id, cleared: true } });
+      }
+      const db = getDb();
+      await db
+        .update(clients)
+        .set({ websiteConfig: null, websiteGeneratedAt: null })
+        .where(eq(clients.id, id));
+      res.json({ data: { id, cleared: true } });
+    } catch (e) {
+      next(e);
+    }
+  },
+);

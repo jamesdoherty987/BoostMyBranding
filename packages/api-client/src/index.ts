@@ -4,7 +4,7 @@
  */
 
 import type { ApiResponse, Client, Post, Message, ClientImage } from '@boost/core';
-import type { WebsiteConfig } from '@boost/core';
+import type { WebsiteConfig, SiteTemplate } from '@boost/core';
 
 export interface ApiConfig {
   baseUrl: string;
@@ -77,10 +77,43 @@ export class BoostApi {
       body: JSON.stringify({ email, redirectTo }),
     });
   }
+
+  /** Email + password login. Sets the session cookie on success. */
+  login(email: string, password: string) {
+    return this.request<{ ok: true }>('/api/v1/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    });
+  }
+
   /**
-   * Self-serve signup. Creates a user + client record, sends a magic link,
-   * and lands them in the portal with `subscriptionStatus: 'none'`. They
-   * subscribe from inside the portal.
+   * Create a client-role account with a password. No payment needed — they
+   * land with `subscription_status: 'none'` and pick a tier in-portal.
+   */
+  register(args: {
+    email: string;
+    password: string;
+    businessName: string;
+    contactName: string;
+    industry?: string;
+  }) {
+    return this.request<{ ok: true; clientId: string }>('/api/v1/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(args),
+    });
+  }
+
+  /** Create an agency team account. Domain-gated server-side. */
+  registerTeam(args: { email: string; password: string; name: string }) {
+    return this.request<{ ok: true }>('/api/v1/auth/register-team', {
+      method: 'POST',
+      body: JSON.stringify(args),
+    });
+  }
+
+  /**
+   * Legacy magic-link signup. Creates a user + client record, emails a
+   * magic link. Retained for callers that don't want to collect passwords.
    */
   signup(args: {
     email: string;
@@ -124,6 +157,44 @@ export class BoostApi {
       method: 'PATCH',
       body: JSON.stringify(patch),
     });
+  }
+
+  /** Agency-side update of any client field. */
+  updateClient(
+    id: string,
+    patch: {
+      businessName?: string;
+      contactName?: string;
+      email?: string;
+      phone?: string;
+      industry?: string;
+      websiteUrl?: string;
+      brandVoice?: string;
+      logoUrl?: string;
+      subscriptionTier?: 'social_only' | 'website_only' | 'full_package';
+      isActive?: boolean;
+    },
+  ) {
+    return this.request<Client>(`/api/v1/clients/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    });
+  }
+
+  /** Delete a client and all associated data. Agency admin only. */
+  deleteClient(id: string) {
+    return this.request<{ id: string; deleted: boolean }>(
+      `/api/v1/clients/${encodeURIComponent(id)}`,
+      { method: 'DELETE' },
+    );
+  }
+
+  /** Clear a client's website config (reverts to "coming soon"). */
+  deleteWebsiteConfig(clientId: string) {
+    return this.request<{ id: string; cleared: boolean }>(
+      `/api/v1/clients/${encodeURIComponent(clientId)}/website`,
+      { method: 'DELETE' },
+    );
   }
 
   // ----- Posts -----
@@ -316,22 +387,7 @@ export class BoostApi {
     services?: string[];
     hasBooking?: boolean;
     hasHours?: boolean;
-    template?:
-      | 'service'
-      | 'food'
-      | 'beauty'
-      | 'fitness'
-      | 'professional'
-      | 'retail'
-      | 'medical'
-      | 'creative'
-      | 'realestate'
-      | 'education'
-      | 'automotive'
-      | 'hospitality'
-      | 'legal'
-      | 'nonprofit'
-      | 'tech';
+    template?: SiteTemplate;
     suggestions?: string;
   }) {
     return this.request<{

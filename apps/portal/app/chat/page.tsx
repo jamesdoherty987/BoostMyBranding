@@ -19,6 +19,7 @@ import { handlePortalAuthError, ALLOW_MOCK_FALLBACK } from '@/lib/auth';
  */
 export default function ChatPage() {
   const [draft, setDraft] = useState('');
+  const [sending, setSending] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
 
   const { data: me } = useSWR('portal:me', async () => {
@@ -60,8 +61,9 @@ export default function ChatPage() {
 
   const send = async () => {
     const body = draft.trim();
-    if (!body) return;
+    if (!body || sending) return;
     setDraft('');
+    setSending(true);
 
     const optimistic: Message = {
       id: `tmp-${Date.now()}`,
@@ -80,6 +82,10 @@ export default function ChatPage() {
     } catch (e) {
       toast.error('Could not send', (e as Error).message);
       mutate((prev) => (prev ?? []).filter((m) => m.id !== optimistic.id), false);
+      // Put the draft back so the user doesn't have to retype.
+      setDraft(body);
+    } finally {
+      setSending(false);
     }
   };
 
@@ -149,11 +155,19 @@ export default function ChatPage() {
         />
         <button
           type="submit"
-          disabled={!draft.trim()}
-          className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-cta text-white shadow-brand disabled:opacity-40"
+          disabled={!draft.trim() || sending}
+          className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-cta text-white shadow-brand transition-opacity disabled:opacity-40"
           aria-label="Send"
+          aria-busy={sending || undefined}
         >
-          <Send className="h-4 w-4" />
+          {sending ? (
+            <span
+              className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-white border-t-transparent"
+              aria-hidden
+            />
+          ) : (
+            <Send className="h-4 w-4" />
+          )}
         </button>
       </form>
     </Shell>

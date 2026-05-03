@@ -12,11 +12,18 @@ import {
   requireAuth,
   isSafeRedirect,
   COOKIE_NAME,
+  registerClient,
+  registerAgencyMember,
+  authenticatePassword,
 } from '../services/auth.js';
 import { authLimiter } from '../middleware/rateLimit.js';
 import { env, features } from '../env.js';
 
 export const authRouter = Router();
+
+/* ------------------------------------------------------------------ */
+/* Magic-link flow (kept as a fallback / "forgot password" path)      */
+/* ------------------------------------------------------------------ */
 
 const sendSchema = z.object({
   email: z.string().email().max(200),
@@ -28,7 +35,6 @@ authRouter.post('/send', authLimiter, async (req, res, next) => {
     const { email, redirectTo } = sendSchema.parse(req.body);
     const host = `${req.protocol}://${req.get('host')}`;
     const result = await sendMagicLink({ email, callbackBase: host, redirectTo });
-    // Don't leak the dev link in prod even if Resend is misconfigured.
     res.json({
       data: {
         sent: true,
@@ -41,22 +47,109 @@ authRouter.post('/send', authLimiter, async (req, res, next) => {
   }
 });
 
+/* ------------------------------------------------------------------ */
+/* Password login                                                     */
+/* ------------------------------------------------------------------ */
+
+const loginSchema = z.object({
+  email: z.string().email().max(200),
+  password: z.string().min(1).max(200),
+});
+
+/** Sign in with email + password. Sets a session cookie on success. */
+authRouter.post('/login', authLimiter, async (req, res, next) => {
+  try {
+    const { email, password } = loginSchema.parse(req.body);
+    const result = await authenticatePassword(email, password);
+    if (!result) {
+      // Same message for "no user" and "wrong password" — no enumeration.
+      return res
+        .status(401)
+        .json({ error: { message: 'Invalid email or password.', code: 'BAD_CREDENTIALS' } });
+    }
+    const session = await createSession(result.userId);
+    setSessionCookie(res, session.token);
+    res.json({ data: { ok: true } });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/* ------------------------------------------------------------------ */
+/* Client self-serve signup (password)                                */
+/* ------------------------------------------------------------------ */
+
+const registerClientSchema = z.object({
+  email: z.string().email().max(200),
+  password: z.string().min(8).max(200),
+  businessName: z.string().min(1).max(200),
+  contactName: z.string().min(1).max(200),
+  industry: z.string().max(100).optional(),
+});
+
+/**
+ * Create a client-role account with email + password. No payment collected
+ * here — they land in the portal with `subscription_status: 'none'` and pick
+ * a plan when they want to use locked features.
+ */
+authRouter.post('/register', authLimiter, async (req, res, next) => {
+  try {
+    const body = registerClientSchema.parse(req.body);
+    const result = await registerClient(body);
+    if ('error' in result) {
+      return res.status(400).json({ error: { message: result.error, code: 'REGISTER_FAILED' } });
+    }
+    const session = await createSession(result.userId);
+    setSessionCookie(res, session.token);
+    res.json({ data: { ok: true, clientId: result.clientId } });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/* ------------------------------------------------------------------ */
+/* Team (agency) signup                                                */
+/* ------------------------------------------------------------------ */
+
+const registerAgencySchema = z.object({
+  email: z.string().email().max(200),
+  password: z.string().min(8).max(200),
+  name: z.string().min(1).max(200),
+});
+
+/**
+ * Create an agency team account. Domain-gated to @boostmybranding.com so a
+ * random signup can't escalate into agency privileges.
+ */
+authRouter.post('/register-team', authLimiter, async (req, res, next) => {
+  try {
+    const body = registerAgencySchema.parse(req.body);
+    const result = await registerAgencyMember(body);
+    if ('error' in result) {
+      return res.status(400).json({ error: { message: result.error, code: 'REGISTER_FAILED' } });
+    }
+    const session = await createSession(result.userId);
+    setSessionCookie(res, session.token);
+    res.json({ data: { ok: true } });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/* ------------------------------------------------------------------ */
+/* Legacy magic-link signup (kept for backwards compatibility)         */
+/* ------------------------------------------------------------------ */
+
 const signupSchema = z.object({
   email: z.string().email().max(200),
   businessName: z.string().min(1).max(200),
   contactName: z.string().min(1).max(200),
   industry: z.string().max(100).optional(),
   websiteUrl: z.string().url().max(500).optional().or(z.literal('')),
-  tier: z.enum(['social_only', 'website_only', 'full_package']).default('full_package'),
+  tier: z.enum(['social_only', 'website_only', 'full_package']).default('social_only'),
   redirectTo: z.string().url().optional(),
 });
 
-/**
- * Self-serve signup. Creates a client + user record and mails a magic link.
- * No payment required at this stage — the user lands in the portal with
- * `subscriptionStatus: 'none'` and pays in-app when they try to use a
- * locked feature.
- */
 authRouter.post('/signup', authLimiter, async (req, res, next) => {
   try {
     const body = signupSchema.parse(req.body);
@@ -83,6 +176,10 @@ authRouter.post('/signup', authLimiter, async (req, res, next) => {
   }
 });
 
+/* ------------------------------------------------------------------ */
+/* Session                                                             */
+/* ------------------------------------------------------------------ */
+
 authRouter.get('/callback', async (req, res) => {
   const token = String(req.query.token ?? '');
   const redirectTo = String(req.query.redirectTo ?? '');
@@ -94,7 +191,6 @@ authRouter.get('/callback', async (req, res) => {
   const session = await createSession(consumed.userId);
   setSessionCookie(res, session.token);
 
-  // Only redirect to URLs on our own apps to prevent open-redirect phishing.
   const target =
     redirectTo && isSafeRedirect(redirectTo) ? redirectTo : env.PORTAL_URL;
   res.redirect(target);

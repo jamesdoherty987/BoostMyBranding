@@ -58,6 +58,14 @@ export interface Client {
   onboardedAt: string;
   websiteUrl?: string;
   socialAccounts?: Record<string, string>;
+  /** Generated website config JSON blob. Present on DB rows once a site is generated. */
+  websiteConfig?: unknown;
+  websiteGeneratedAt?: string | Date | null;
+  /** Custom domain attached to the client's site (e.g. `murphysplumbing.com`).
+   *  Lowercase, no protocol. Null/undefined until the agency attaches one. */
+  customDomain?: string | null;
+  customDomainStatus?: 'pending' | 'provisioning' | 'verified' | 'failed' | null;
+  customDomainVerifiedAt?: string | Date | null;
   stats: {
     postsThisMonth: number;
     pendingApproval: number;

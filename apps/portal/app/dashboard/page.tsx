@@ -143,13 +143,17 @@ export default function DashboardPage() {
       )}
 
       <section className="mt-5 grid grid-cols-2 gap-3">
-        <QuickAction
-          href={isLocked ? '/subscription' : '/upload'}
-          icon={<ImageIcon className="h-5 w-5 text-[#1D9CA1]" />}
-          title="Upload photos"
-          subtitle={isLocked ? 'Subscribe to share photos' : 'Drop your latest shots'}
-          locked={isLocked}
-        />
+        {/* Upload tile only shown for tiers that actually upload photos.
+            Website-only clients don't do this. */}
+        {client.subscriptionTier !== 'website_only' ? (
+          <QuickAction
+            href={isLocked ? '/subscription' : '/upload'}
+            icon={<ImageIcon className="h-5 w-5 text-[#1D9CA1]" />}
+            title="Upload photos"
+            subtitle={isLocked ? 'Subscribe to share photos' : 'Drop your latest shots'}
+            locked={isLocked}
+          />
+        ) : null}
         <QuickAction
           href="/chat"
           icon={<MessageSquare className="h-5 w-5 text-[#1D9CA1]" />}

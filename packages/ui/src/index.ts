@@ -28,6 +28,7 @@ export { RetroGrid } from './retro-grid';
 // Polish primitives
 export { Skeleton } from './skeleton';
 export { Dialog } from './dialog';
+export { confirmDialog, type ConfirmOptions } from './confirm-dialog';
 export { ErrorBoundary } from './error-boundary';
 export { EmptyState } from './empty-state';
 export { Kbd } from './kbd';

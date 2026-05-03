@@ -19,11 +19,11 @@ import {
   Textarea,
   Spinner,
   toast,
+  confirmDialog,
 } from '@boost/ui';
 import { SiteRenderer } from '@boost/ui/site';
 import {
   ExternalLink,
-  Plus,
   Globe,
   Sparkles,
   Clock,
@@ -32,10 +32,13 @@ import {
   Wand2,
   ArrowRight,
   ChevronDown,
+  Trash2,
 } from 'lucide-react';
 import { PageHeader } from '@/components/PageHeader';
 import { SiteEditor } from '@/components/SiteEditor';
 import { api } from '@/lib/api';
+
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
 
 /**
  * Optional template override panel. The AI now auto-detects the right
@@ -101,6 +104,9 @@ export default function WebsitesPage() {
     hasHours: true,
     template: undefined as SiteTemplate | undefined,
     suggestions: '',
+    primaryColor: '',
+    accentColor: '',
+    logoUrl: '',
   });
   const [templateOverrideOpen, setTemplateOverrideOpen] = useState(false);
   const [running, setRunning] = useState(false);
@@ -143,6 +149,13 @@ export default function WebsitesPage() {
     }, 800);
 
     try {
+      // Build suggestions string that includes brand color overrides
+      const suggestionParts: string[] = [];
+      if (newSite.suggestions) suggestionParts.push(newSite.suggestions);
+      if (newSite.primaryColor) suggestionParts.push(`Use ${newSite.primaryColor} as the primary brand color.`);
+      if (newSite.accentColor) suggestionParts.push(`Use ${newSite.accentColor} as the accent color.`);
+      if (newSite.logoUrl) suggestionParts.push(`The business logo is at: ${newSite.logoUrl}`);
+
       const result = await api.generateWebsite({
         clientId: newSite.clientId,
         description: newSite.description,
@@ -153,7 +166,7 @@ export default function WebsitesPage() {
         hasBooking: newSite.hasBooking,
         hasHours: newSite.hasHours,
         template: newSite.template, // may be undefined → Claude auto-detects
-        suggestions: newSite.suggestions || undefined,
+        suggestions: suggestionParts.join('\n') || undefined,
       });
       clearInterval(tick);
       setSteps((prev) => prev.map((s) => ({ ...s, status: 'done' })));
@@ -219,12 +232,6 @@ export default function WebsitesPage() {
       <PageHeader
         title="Websites"
         subtitle="Spin up a new client site in minutes. Drop in a description, we generate the full config."
-        action={
-          <Button size="sm">
-            <Plus className="h-4 w-4" />
-            New website
-          </Button>
-        }
       />
 
       <div className="px-4 py-4 md:px-10 md:py-6 space-y-8">
@@ -319,6 +326,89 @@ export default function WebsitesPage() {
                   placeholder="e.g. Use dark hero, beams variant, emphasise 24/7 availability..."
                 />
               </div>
+
+              {/* Brand colors + logo */}
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                <div>
+                  <label className="text-xs font-medium text-slate-600">
+                    Primary color <span className="text-slate-400">(optional)</span>
+                  </label>
+                  <div className="mt-1 flex items-center gap-2">
+                    <input
+                      type="color"
+                      value={newSite.primaryColor || '#1D9CA1'}
+                      onChange={(e) => setNewSite((s) => ({ ...s, primaryColor: e.target.value }))}
+                      className="h-9 w-9 cursor-pointer rounded-lg border border-slate-200"
+                    />
+                    <Input
+                      value={newSite.primaryColor}
+                      onChange={(e) => setNewSite((s) => ({ ...s, primaryColor: e.target.value }))}
+                      className="h-9 flex-1 font-mono text-xs"
+                      placeholder="Auto-detect"
+                      maxLength={7}
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-slate-600">
+                    Accent color <span className="text-slate-400">(optional)</span>
+                  </label>
+                  <div className="mt-1 flex items-center gap-2">
+                    <input
+                      type="color"
+                      value={newSite.accentColor || '#48D886'}
+                      onChange={(e) => setNewSite((s) => ({ ...s, accentColor: e.target.value }))}
+                      className="h-9 w-9 cursor-pointer rounded-lg border border-slate-200"
+                    />
+                    <Input
+                      value={newSite.accentColor}
+                      onChange={(e) => setNewSite((s) => ({ ...s, accentColor: e.target.value }))}
+                      className="h-9 flex-1 font-mono text-xs"
+                      placeholder="Auto-detect"
+                      maxLength={7}
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-slate-600">
+                    Logo URL <span className="text-slate-400">(optional)</span>
+                  </label>
+                  <Input
+                    className="mt-1 h-9 text-xs"
+                    value={newSite.logoUrl}
+                    onChange={(e) => setNewSite((s) => ({ ...s, logoUrl: e.target.value }))}
+                    placeholder="https://..."
+                  />
+                </div>
+              </div>
+
+              {/* Client images preview */}
+              {clientImages.length > 0 && (
+                <div>
+                  <label className="text-xs font-medium text-slate-600">
+                    Client images ({clientImages.length} available)
+                  </label>
+                  <p className="mt-0.5 text-[11px] text-slate-400">
+                    The AI will review these and pick the best ones for the hero, gallery, and about sections.
+                  </p>
+                  <div className="mt-2 flex gap-2 overflow-x-auto rounded-xl border border-slate-200 bg-slate-50 p-2">
+                    {clientImages.slice(0, 12).map((src, i) => (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        key={`${src}-${i}`}
+                        src={src}
+                        alt=""
+                        className="h-16 w-16 shrink-0 rounded-lg object-cover"
+                      />
+                    ))}
+                    {clientImages.length > 12 && (
+                      <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-lg bg-slate-200 text-xs font-semibold text-slate-600">
+                        +{clientImages.length - 12}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
               <div className="flex flex-wrap items-center gap-4">
                 <label className="inline-flex items-center gap-2 text-xs text-slate-700">
@@ -470,27 +560,56 @@ export default function WebsitesPage() {
             <Card>
               <CardContent className="p-6">
                 <h2 className="text-sm font-semibold text-slate-900">Live client sites</h2>
+                <p className="mt-1 text-[11px] text-slate-500">
+                  Clients with a generated site. Shows custom domain if attached,
+                  otherwise the default /sites/ URL.
+                </p>
                 <div className="mt-4 space-y-3">
-                  {mockClients
-                    .filter((c) => c.subscriptionTier !== 'social_only')
-                    .map((c) => (
-                      <a
-                        key={c.id}
-                        href="#"
-                        className="flex items-center gap-3 rounded-xl border border-slate-200 p-3 transition-colors hover:bg-slate-50"
-                      >
-                        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-cta text-white">
-                          <Globe className="h-4 w-4" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm font-medium text-slate-900">
-                            {c.businessName.toLowerCase().replace(/[^a-z]+/g, '')}.com
+                  {clients
+                    .filter((c) => c.subscriptionTier !== 'social_only' && c.websiteConfig)
+                    .slice(0, 8)
+                    .map((c) => {
+                      const hasCustom =
+                        c.customDomain && c.customDomainStatus === 'verified';
+                      const host = hasCustom
+                        ? (c.customDomain as string)
+                        : `${APP_URL.replace(/^https?:\/\//, '')}/sites/${c.slug ?? slugify(c.businessName)}`;
+                      const href = hasCustom
+                        ? `https://${c.customDomain}`
+                        : `${APP_URL}/sites/${c.slug ?? slugify(c.businessName)}`;
+                      return (
+                        <a
+                          key={c.id}
+                          href={href}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-3 rounded-xl border border-slate-200 p-3 transition-colors hover:bg-slate-50"
+                        >
+                          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-cta text-white">
+                            <Globe className="h-4 w-4" />
                           </div>
-                          <div className="text-[11px] text-slate-500">Last deploy 2d ago</div>
-                        </div>
-                        <ExternalLink className="h-3.5 w-3.5 text-slate-400" />
-                      </a>
-                    ))}
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-sm font-medium text-slate-900">
+                              {c.businessName}
+                            </div>
+                            <div className="truncate text-[11px] text-slate-500">{host}</div>
+                          </div>
+                          {hasCustom ? (
+                            <Badge tone="success">
+                              <span className="text-[10px] font-semibold uppercase">
+                                Custom
+                              </span>
+                            </Badge>
+                          ) : null}
+                          <ExternalLink className="h-3.5 w-3.5 text-slate-400" />
+                        </a>
+                      );
+                    })}
+                  {clients.filter((c) => c.websiteConfig).length === 0 && (
+                    <p className="py-2 text-center text-[11px] text-slate-400">
+                      No sites generated yet.
+                    </p>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -551,16 +670,55 @@ export default function WebsitesPage() {
                     </Badge>
                   ) : null}
                 </div>
-                <a
-                  href={`/sites/${slugify(selectedClient?.businessName ?? '')}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  <Button size="sm" variant="outline">
-                    Open full page
-                    <ArrowRight className="h-3 w-3" />
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={async () => {
+                      if (
+                        !(await confirmDialog({
+                          title: 'Delete this website config?',
+                          description:
+                            'The client will see a "coming soon" page until you regenerate.',
+                          confirmLabel: 'Delete site',
+                          danger: true,
+                        }))
+                      )
+                        return;
+                      try {
+                        await api.deleteWebsiteConfig(newSite.clientId);
+                        setConfig(null);
+                        setEditMode(false);
+                        toast.success('Website config cleared');
+                      } catch (e) {
+                        toast.error('Delete failed', (e as Error).message);
+                      }
+                    }}
+                    className="text-rose-600 hover:bg-rose-50"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                    Delete
                   </Button>
-                </a>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={generate}
+                    disabled={running}
+                  >
+                    <Sparkles className="h-3 w-3" />
+                    Regenerate
+                  </Button>
+                  <a
+                    href={`${APP_URL}/sites/${selectedClient?.slug ?? slugify(selectedClient?.businessName ?? '')}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <Button size="sm" variant="outline">
+                      Open full page
+                      <ArrowRight className="h-3 w-3" />
+                    </Button>
+                  </a>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_380px]">

@@ -123,12 +123,6 @@ export interface WebsiteConfig {
      * full site regeneration.
      */
     aiImagePrompt?: string;
-    /** Legacy per-effect toggles. Kept for backwards compatibility. */
-    effects?: {
-      aurora?: boolean;
-      particles?: boolean;
-      grid?: boolean;
-    };
   };
 
   about?: {
@@ -235,6 +229,30 @@ export const HERO_VARIANTS: HeroVariant[] = [
   'parallax-layers',
   'gradient-mesh',
 ];
+
+/**
+ * All site templates as a const tuple, used to build Zod enums at the API
+ * boundary. Keeping this single source of truth prevents template lists
+ * drifting between the prompt, the schema, the API validators, and the
+ * dashboard picker. Adding a template is a single-file change.
+ */
+export const SITE_TEMPLATES = [
+  'service',
+  'food',
+  'beauty',
+  'fitness',
+  'professional',
+  'retail',
+  'medical',
+  'creative',
+  'realestate',
+  'education',
+  'automotive',
+  'hospitality',
+  'legal',
+  'nonprofit',
+  'tech',
+] as const satisfies readonly SiteTemplate[];
 
 /** Brand palette derived from a primary color. Used when the generator misses one. */
 export const BRAND_FALLBACK = {

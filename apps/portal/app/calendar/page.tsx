@@ -16,12 +16,16 @@ import {
 import { Shell } from '@/components/Shell';
 import { api } from '@/lib/api';
 import { handlePortalAuthError, ALLOW_MOCK_FALLBACK } from '@/lib/auth';
+import { useTierGate } from '@/lib/tier-gate';
 
 /**
  * Read-only monthly calendar. Clients see what's scheduled and what's
  * already live; if they want to change anything they chat us.
  */
 export default function CalendarPage() {
+  // Calendar shows social posts — only relevant to social tiers.
+  useTierGate(['social_only', 'full_package']);
+
   const { data, isLoading } = useSWR('portal:calendar', async () => {
     try {
       const me = await api.getMyClient();

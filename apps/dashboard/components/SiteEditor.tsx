@@ -12,6 +12,7 @@ import {
   Textarea,
   Spinner,
   toast,
+  confirmDialog,
 } from '@boost/ui';
 import {
   GripVertical,
@@ -1029,7 +1030,15 @@ function DomainEditor({ clientId }: { clientId: string }) {
   };
 
   const detach = async () => {
-    if (!confirm('Remove this custom domain? The site will go back to the /sites/... URL.'))
+    if (
+      !(await confirmDialog({
+        title: 'Remove this custom domain?',
+        description:
+          'The site will go back to the default /sites/ URL. The client can reattach it later.',
+        confirmLabel: 'Remove domain',
+        danger: true,
+      }))
+    )
       return;
     setLoading(true);
     try {

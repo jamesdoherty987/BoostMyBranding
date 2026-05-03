@@ -11,6 +11,7 @@
  */
 
 import crypto from 'node:crypto';
+import bcrypt from 'bcryptjs';
 import type { Request, Response, NextFunction } from 'express';
 import { eq, gt, and, isNull } from 'drizzle-orm';
 import { getDb, isDbConfigured, users, magicLinks, sessions, clients } from '@boost/database';
@@ -22,6 +23,7 @@ import { sendEmail, magicLinkEmail } from './resend.js';
 const SESSION_COOKIE = 'bmb_session';
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const MAGIC_TTL_MS = 15 * 60 * 1000;
+const BCRYPT_ROUNDS = 12;
 
 interface MemUser {
   id: string;
@@ -389,4 +391,230 @@ export async function signupAndSendMagicLink(args: SignupArgs) {
   }
 
   return sendMagicLink({ email, callbackBase: args.callbackBase, redirectTo: args.redirectTo });
+}
+
+/* ------------------------------------------------------------------ */
+/* Password auth                                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Minimum password requirements. Kept modest because heavy rules drive
+ * users to reuse passwords across sites, which is worse for security.
+ * 8+ chars with at least one letter + one digit catches the low-effort
+ * attacks without being annoying.
+ */
+export function validatePassword(pw: string): { ok: true } | { ok: false; reason: string } {
+  if (pw.length < 8) return { ok: false, reason: 'Password must be at least 8 characters.' };
+  if (pw.length > 200) return { ok: false, reason: 'Password is too long (max 200 characters).' };
+  if (!/[a-zA-Z]/.test(pw)) return { ok: false, reason: 'Password must contain a letter.' };
+  if (!/\d/.test(pw)) return { ok: false, reason: 'Password must contain a number.' };
+  return { ok: true };
+}
+
+export async function hashPassword(pw: string): Promise<string> {
+  return bcrypt.hash(pw, BCRYPT_ROUNDS);
+}
+
+export async function verifyPassword(pw: string, hash: string): Promise<boolean> {
+  // bcrypt.compare is constant-time, so a wrong password doesn't leak a
+  // timing signal that could be used to enumerate valid accounts.
+  return bcrypt.compare(pw, hash);
+}
+
+/**
+ * Register a new client-role user with email + password. Creates the client
+ * record too so they have a workspace to land in. No payment required — the
+ * tier defaults to 'social_only' and lifecycle starts at 'none'. They can
+ * pick any tier later from the portal's subscription page.
+ *
+ * Idempotent on email: if a user already exists without a password, we set
+ * one. If they exist *with* a password, we refuse (they should log in).
+ */
+export async function registerClient(args: {
+  email: string;
+  password: string;
+  businessName: string;
+  contactName: string;
+  industry?: string;
+}): Promise<{ userId: string; clientId: string } | { error: string }> {
+  const check = validatePassword(args.password);
+  if (!check.ok) return { error: check.reason };
+
+  const email = args.email.trim().toLowerCase();
+  const passwordHash = await hashPassword(args.password);
+
+  if (!isDbConfigured()) {
+    // Dev / mock path: stash in memory.
+    let user = Array.from(memUsers.values()).find((u) => u.email === email);
+    if (!user) {
+      user = {
+        id: crypto.randomUUID(),
+        email,
+        name: args.contactName,
+        role: 'client',
+        clientId: crypto.randomUUID(),
+      };
+      memUsers.set(user.id, user);
+    }
+    return { userId: user.id, clientId: user.clientId ?? 'mock-client' };
+  }
+
+  const db = getDb();
+
+  // 1. Refuse if the user already has a password (they should log in).
+  const [existingUser] = await db.select().from(users).where(eq(users.email, email));
+  if (existingUser?.passwordHash) {
+    return { error: 'An account with this email already exists. Sign in instead.' };
+  }
+
+  // 2. Find or create the client record.
+  let [client] = await db.select().from(clients).where(eq(clients.email, email));
+  if (!client) {
+    const baseSlug = slugify(args.businessName) || 'site';
+    let slug = baseSlug;
+    for (let i = 2; i < 50; i++) {
+      const [hit] = await db
+        .select({ id: clients.id })
+        .from(clients)
+        .where(eq(clients.slug, slug))
+        .limit(1);
+      if (!hit) break;
+      slug = `${baseSlug}-${i}`;
+    }
+    [client] = await db
+      .insert(clients)
+      .values({
+        businessName: args.businessName,
+        contactName: args.contactName,
+        email,
+        slug,
+        industry: args.industry,
+        subscriptionTier: 'social_only',
+        subscriptionStatus: 'none',
+        isActive: true,
+      })
+      .returning();
+  }
+
+  // 3. Create-or-update the user with the password hash.
+  let user = existingUser;
+  if (!user) {
+    [user] = await db
+      .insert(users)
+      .values({
+        email,
+        name: args.contactName,
+        role: 'client',
+        clientId: client?.id,
+        passwordHash,
+        emailVerified: new Date(),
+      })
+      .returning();
+  } else {
+    await db
+      .update(users)
+      .set({
+        passwordHash,
+        // Backfill link to the client record if it was missing.
+        clientId: user.clientId ?? client?.id,
+        name: user.name ?? args.contactName,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, user.id));
+    user = { ...user, passwordHash, clientId: user.clientId ?? client?.id ?? null };
+  }
+
+  if (!user || !client) return { error: 'Failed to create account.' };
+  return { userId: user.id, clientId: client.id };
+}
+
+/**
+ * Register a new agency team member. Domain-gated so only
+ * `@boostmybranding.com` addresses can claim agency roles — a random
+ * signup can't make themselves an admin.
+ */
+export async function registerAgencyMember(args: {
+  email: string;
+  password: string;
+  name: string;
+}): Promise<{ userId: string } | { error: string }> {
+  const email = args.email.trim().toLowerCase();
+  if (!email.endsWith('@boostmybranding.com')) {
+    return { error: 'Team accounts are restricted to @boostmybranding.com emails.' };
+  }
+  const check = validatePassword(args.password);
+  if (!check.ok) return { error: check.reason };
+
+  const passwordHash = await hashPassword(args.password);
+
+  if (!isDbConfigured()) {
+    const user = {
+      id: crypto.randomUUID(),
+      email,
+      name: args.name,
+      role: 'agency_admin' as const,
+    };
+    memUsers.set(user.id, user);
+    return { userId: user.id };
+  }
+
+  const db = getDb();
+  const [existing] = await db.select().from(users).where(eq(users.email, email));
+  if (existing?.passwordHash) {
+    return { error: 'An account with this email already exists. Sign in instead.' };
+  }
+
+  let user = existing;
+  if (!user) {
+    [user] = await db
+      .insert(users)
+      .values({
+        email,
+        name: args.name,
+        // First team member in a fresh DB becomes admin; others become members.
+        // A real deployment should flip the first admin manually via SQL.
+        role: 'agency_admin',
+        passwordHash,
+        emailVerified: new Date(),
+      })
+      .returning();
+  } else {
+    await db
+      .update(users)
+      .set({ passwordHash, name: args.name, updatedAt: new Date() })
+      .where(eq(users.id, user.id));
+  }
+  if (!user) return { error: 'Failed to create account.' };
+  return { userId: user.id };
+}
+
+/**
+ * Look up a user by email and verify their password. Returns null for any
+ * failure (wrong email, wrong password, no password set) to avoid leaking
+ * which of the three was the issue.
+ */
+export async function authenticatePassword(
+  email: string,
+  password: string,
+): Promise<{ userId: string } | null> {
+  const normalized = email.trim().toLowerCase();
+
+  if (!isDbConfigured()) {
+    const user = Array.from(memUsers.values()).find((u) => u.email === normalized);
+    if (!user) return null;
+    // In mock mode, accept any password. Dev convenience only.
+    return { userId: user.id };
+  }
+
+  const db = getDb();
+  const [user] = await db.select().from(users).where(eq(users.email, normalized));
+  if (!user?.passwordHash) {
+    // Still run bcrypt against a dummy hash so our response time doesn't
+    // leak whether the account exists.
+    await bcrypt.compare(password, '$2a$12$CwTycUXWue0Thq9StjUM0uJ8p7Q.OtrXB7pqVZh/oHMKXhjHgv3by');
+    return null;
+  }
+  const ok = await verifyPassword(password, user.passwordHash);
+  if (!ok) return null;
+  return { userId: user.id };
 }

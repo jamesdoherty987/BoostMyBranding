@@ -1,50 +1,73 @@
 'use client';
 
 /**
- * Secret team sign-in route. Not linked from the public site — team
- * members reach it by typing /team directly. Sends a magic link to an
- * agency email and redirects the callback to the dashboard.
+ * Team (agency) sign-in. Password-based login with a toggle to create a
+ * new team account. Agency role is domain-gated server-side — only emails
+ * ending in `@boostmybranding.com` can claim team privileges. A random
+ * visitor who reaches this URL and tries to register with a non-agency
+ * email gets a polite rejection from the API.
  *
- * Security: agency role is assigned server-side based on the email
- * domain (`@boostmybranding.com`). A random visitor who guesses this URL
- * and submits their own email won't get agency access — they'll get a
- * client-role user and bounce off dashboard auth checks.
+ * Magic link is retained as a "forgot password" fallback.
  */
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Button, Input, Logo } from '@boost/ui';
+import { Button, Input, Logo, toast, Toaster } from '@boost/ui';
 import { api } from '@/lib/api';
-import { ArrowRight, CheckCircle2, ExternalLink } from 'lucide-react';
+import { ApiError } from '@boost/api-client';
+import { ArrowRight, Lock, User, Mail, Loader2 } from 'lucide-react';
 
 const DASHBOARD_URL = process.env.NEXT_PUBLIC_DASHBOARD_URL ?? 'http://localhost:3002';
 
-export default function TeamLoginPage() {
-  const [email, setEmail] = useState('');
-  const [sent, setSent] = useState(false);
-  const [devLink, setDevLink] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const router = useRouter();
+type Mode = 'login' | 'register' | 'forgot';
 
-  async function onSubmit(e: React.FormEvent) {
+export default function TeamAuthPage() {
+  const [mode, setMode] = useState<Mode>('login');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [forgotSent, setForgotSent] = useState(false);
+
+  const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
+    if (loading) return;
     setLoading(true);
     try {
-      const result = await api.sendMagicLink(email.trim(), DASHBOARD_URL);
-      setSent(true);
-      if (result.devLink) setDevLink(result.devLink);
+      if (mode === 'login') {
+        await api.login(email.trim(), password);
+        window.location.href = DASHBOARD_URL;
+      } else if (mode === 'register') {
+        await api.registerTeam({
+          email: email.trim(),
+          password,
+          name: name.trim() || email.split('@')[0]!,
+        });
+        window.location.href = DASHBOARD_URL;
+      } else {
+        await api.sendMagicLink(email.trim(), DASHBOARD_URL);
+        setForgotSent(true);
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong');
+      const msg =
+        err instanceof ApiError ? err.message : (err as Error).message ?? 'Something went wrong';
+      if (mode === 'register' && /already exists/i.test(msg)) {
+        toast.info('You already have an account', 'Switched to sign in.');
+        setMode('login');
+        setPassword('');
+      } else if (mode === 'login' && /invalid email or password/i.test(msg)) {
+        toast.error('Wrong email or password', 'Double-check and try again.');
+      } else {
+        toast.error(msg);
+      }
     } finally {
       setLoading(false);
     }
-  }
+  };
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
+      <Toaster />
       <div className="w-full max-w-md">
         <div className="mb-8 flex justify-center">
           <Link href="/" aria-label="BoostMyBranding home">
@@ -53,71 +76,129 @@ export default function TeamLoginPage() {
         </div>
 
         <div className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
-          {sent ? (
-            <div className="space-y-4 text-center">
-              <div className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
-                <CheckCircle2 className="h-6 w-6" />
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold tracking-tight">Check your inbox</h1>
-                <p className="mt-2 text-sm text-slate-600">
-                  We sent a sign-in link to <span className="font-semibold">{email}</span>.
-                  Click it to access the dashboard.
-                </p>
-              </div>
+          <h1 className="text-2xl font-bold tracking-tight">
+            {mode === 'login'
+              ? 'Team sign in'
+              : mode === 'register'
+                ? 'Create a team account'
+                : 'Email me a sign-in link'}
+          </h1>
+          <p className="mt-2 text-sm text-slate-600">
+            {mode === 'login'
+              ? 'Agency dashboard access. Sign in with your work email and password.'
+              : mode === 'register'
+                ? 'Only @boostmybranding.com emails can make team accounts.'
+                : "We'll email you a one-click link to sign back in."}
+          </p>
 
-              {devLink ? (
-                <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-left text-xs text-amber-900">
-                  <div className="font-semibold">Dev mode link</div>
-                  <p className="mt-1 text-amber-800/80">
-                    Resend isn&apos;t configured, so the magic link is shown here.
-                  </p>
-                  <a
-                    href={devLink}
-                    className="mt-2 inline-flex items-center gap-1.5 break-all font-mono text-[11px] text-amber-900 underline"
-                  >
-                    Open link
-                    <ExternalLink className="h-3 w-3 shrink-0" />
-                  </a>
-                </div>
-              ) : null}
+          {forgotSent ? (
+            <div className="mt-6 rounded-xl bg-emerald-50 p-4 text-sm text-emerald-900">
+              <p className="font-semibold">Check your inbox</p>
+              <p className="mt-1">
+                We sent a sign-in link to <span className="font-semibold">{email}</span>.
+              </p>
             </div>
           ) : (
-            <>
-              <h1 className="text-2xl font-bold tracking-tight">Team sign in</h1>
-              <p className="mt-2 text-sm text-slate-600">
-                Enter your work email and we&apos;ll send you a sign-in link.
-              </p>
-
-              <form onSubmit={onSubmit} className="mt-6 space-y-4">
-                <div>
-                  <label htmlFor="email" className="text-xs font-semibold text-slate-700">
-                    Work email
-                  </label>
+            <form onSubmit={onSubmit} className="mt-6 space-y-4">
+              {mode === 'register' ? (
+                <Field label="Your name" icon={User}>
                   <Input
-                    id="email"
-                    type="email"
+                    type="text"
                     required
-                    autoFocus
-                    autoComplete="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="you@boostmybranding.com"
-                    className="mt-1.5"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Sam Agency"
+                    className="pl-9"
+                    autoComplete="name"
                   />
-                </div>
+                </Field>
+              ) : null}
 
-                {error ? (
-                  <div className="rounded-xl bg-rose-50 p-3 text-xs text-rose-900">{error}</div>
-                ) : null}
+              <Field label="Work email" icon={Mail}>
+                <Input
+                  type="email"
+                  required
+                  autoFocus
+                  autoComplete="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@boostmybranding.com"
+                  className="pl-9"
+                />
+              </Field>
 
-                <Button type="submit" className="w-full" disabled={loading}>
-                  {loading ? 'Sending…' : 'Send sign-in link'}
-                  <ArrowRight className="h-4 w-4" />
-                </Button>
-              </form>
-            </>
+              {mode !== 'forgot' ? (
+                <Field label="Password" icon={Lock}>
+                  <Input
+                    type="password"
+                    required
+                    autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                    minLength={8}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder={mode === 'register' ? 'At least 8 characters' : ''}
+                    className="pl-9"
+                  />
+                </Field>
+              ) : null}
+
+              <Button type="submit" className="w-full" disabled={loading}>
+                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                {mode === 'login'
+                  ? loading
+                    ? 'Signing in…'
+                    : 'Sign in'
+                  : mode === 'register'
+                    ? loading
+                      ? 'Creating account…'
+                      : 'Create account'
+                    : loading
+                      ? 'Sending…'
+                      : 'Send sign-in link'}
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+            </form>
           )}
+
+          {/* Mode toggle */}
+          <div className="mt-6 border-t border-slate-100 pt-4 text-center text-xs text-slate-600">
+            {mode === 'login' ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode('register');
+                    setForgotSent(false);
+                  }}
+                  className="font-semibold text-slate-900 hover:underline"
+                >
+                  Create a team account
+                </button>
+                <span className="mx-2 text-slate-300">·</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode('forgot');
+                    setForgotSent(false);
+                  }}
+                  className="font-semibold text-slate-900 hover:underline"
+                >
+                  Forgot password?
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setMode('login');
+                  setForgotSent(false);
+                }}
+                className="font-semibold text-slate-900 hover:underline"
+              >
+                ← Back to sign in
+              </button>
+            )}
+          </div>
         </div>
 
         <p className="mt-6 text-center text-xs text-slate-500">
@@ -128,5 +209,25 @@ export default function TeamLoginPage() {
         </p>
       </div>
     </main>
+  );
+}
+
+function Field({
+  label,
+  icon: Icon,
+  children,
+}: {
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className="block">
+      <span className="text-xs font-semibold text-slate-700">{label}</span>
+      <div className="relative mt-1.5">
+        <Icon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+        {children}
+      </div>
+    </label>
   );
 }

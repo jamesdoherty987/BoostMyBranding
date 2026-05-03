@@ -13,7 +13,7 @@
  */
 
 import type { WebsiteConfig, HeroVariant, SiteTemplate } from '@boost/core';
-import { DEFAULT_HERO_VARIANT } from '@boost/core';
+import { DEFAULT_HERO_VARIANT, HERO_VARIANTS } from '@boost/core';
 import {
   HeroSpotlight,
   HeroBeams,
@@ -42,7 +42,22 @@ interface SiteHeroProps {
 export function SiteHero({ config, images, businessName, embedded }: SiteHeroProps) {
   const template: SiteTemplate = (config.template ?? 'service') as SiteTemplate;
   const templateDefault = DEFAULT_HERO_VARIANT[template] ?? 'parallax-layers';
-  const variant: HeroVariant = config.hero?.variant ?? templateDefault;
+  const rawVariant = config.hero?.variant;
+  // Validate against the known list so a stale config (from an older schema,
+  // or a Claude response that drifted) falls back predictably rather than
+  // rendering nothing.
+  const variant: HeroVariant =
+    rawVariant && (HERO_VARIANTS as readonly string[]).includes(rawVariant)
+      ? rawVariant
+      : templateDefault;
+  if (rawVariant && variant !== rawVariant) {
+    // Dev-only warning — swallowed in production via the console noise filter.
+    if (typeof console !== 'undefined') {
+      console.warn(
+        `[SiteHero] Unknown hero variant "${rawVariant}", falling back to "${variant}"`,
+      );
+    }
+  }
 
   // Resolve which image (if any) the hero should use. Precedence:
   //   1. Explicit client image index

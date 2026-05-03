@@ -184,7 +184,16 @@ export function Sidebar() {
             <button
               className="rounded-md p-1.5 text-slate-400 hover:bg-white hover:text-slate-700"
               aria-label="Log out"
-              onClick={() => api.logout().then(() => (window.location.href = '/'))}
+              onClick={async () => {
+                try {
+                  await api.logout();
+                } catch {
+                  // Even if server-side revoke fails, we still blow away
+                  // the local session by redirecting. Nothing sensitive
+                  // is retained client-side.
+                }
+                window.location.href = '/';
+              }}
             >
               <LogOut className="h-3.5 w-3.5" />
             </button>

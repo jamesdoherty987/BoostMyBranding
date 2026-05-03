@@ -18,6 +18,7 @@ import {
   Input,
   Spinner,
   toast,
+  confirmDialog,
 } from '@boost/ui';
 import {
   Video,
@@ -154,7 +155,15 @@ export function VideosPanel({ clientId, client }: Props) {
   };
 
   const del = async (id: string) => {
-    if (!confirm('Delete this video? This cannot be undone.')) return;
+    if (
+      !(await confirmDialog({
+        title: 'Delete this video?',
+        description: 'This cannot be undone.',
+        confirmLabel: 'Delete',
+        danger: true,
+      }))
+    )
+      return;
     mutate((prev) => prev?.filter((v) => v.id !== id), false);
     try {
       await api.deleteImage(id);

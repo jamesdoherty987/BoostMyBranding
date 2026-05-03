@@ -3,6 +3,8 @@
  * mustache-style slots so they can be fed into Claude verbatim.
  */
 
+import type { SiteTemplate } from '@boost/core';
+
 export function brandVoicePrompt(vars: {
   websiteMarkdown: string;
   businessName: string;
@@ -146,22 +148,7 @@ export function websiteConfigPrompt(vars: {
   hasHours?: boolean;
   hasBooking?: boolean;
   imageDescriptions?: string;
-  template?:
-    | 'service'
-    | 'food'
-    | 'beauty'
-    | 'fitness'
-    | 'professional'
-    | 'retail'
-    | 'medical'
-    | 'creative'
-    | 'realestate'
-    | 'education'
-    | 'automotive'
-    | 'hospitality'
-    | 'legal'
-    | 'nonprofit'
-    | 'tech';
+  template?: SiteTemplate;
   suggestions?: string;
 }) {
   return `You are a senior brand & web designer + copywriter. Generate a complete, high-quality website config JSON for "${vars.businessName}", a ${vars.industry} business.

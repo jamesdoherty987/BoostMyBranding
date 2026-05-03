@@ -22,6 +22,7 @@ import {
   Spinner,
   Textarea,
   toast,
+  confirmDialog,
 } from '@boost/ui';
 import {
   Sparkles,
@@ -174,7 +175,15 @@ export function PostsPanel({ clientId, businessName }: Props) {
   };
 
   const del = async (p: Post) => {
-    if (!confirm('Delete this post? This cannot be undone.')) return;
+    if (
+      !(await confirmDialog({
+        title: 'Delete this post?',
+        description: 'This cannot be undone.',
+        confirmLabel: 'Delete',
+        danger: true,
+      }))
+    )
+      return;
     mutate((prev) => prev?.filter((x) => x.id !== p.id), false);
     try {
       await api.deletePost(p.id);
@@ -235,7 +244,14 @@ export function PostsPanel({ clientId, businessName }: Props) {
       .filter((p) => p.status === 'pending_approval' || p.status === 'pending_internal')
       .map((p) => p.id);
     if (ids.length === 0) return;
-    if (!confirm(`Approve ${ids.length} pending post${ids.length === 1 ? '' : 's'}?`)) return;
+    if (
+      !(await confirmDialog({
+        title: `Approve ${ids.length} pending post${ids.length === 1 ? '' : 's'}?`,
+        description: 'All selected posts will be marked as approved and scheduled.',
+        confirmLabel: 'Approve all',
+      }))
+    )
+      return;
     try {
       await api.batchApprove(ids);
       toast.success('Batch approved', `${ids.length} post${ids.length === 1 ? '' : 's'} scheduled`);

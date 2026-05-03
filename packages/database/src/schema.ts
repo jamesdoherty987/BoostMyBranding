@@ -88,6 +88,22 @@ export const subscriptionStatusEnum = pgEnum('subscription_status', [
   'canceled',
 ]);
 
+/**
+ * Lifecycle states for a client's custom domain. Enforced at the DB level
+ * so a bad write can't leave the row in a state the dashboard can't render.
+ *
+ *   pending       — row saved, waiting for the agency to add it to Vercel.
+ *   provisioning  — added to Vercel, waiting for DNS to propagate.
+ *   verified      — Vercel confirmed the domain is serving traffic.
+ *   failed        — DNS/verification failed. Check custom_domain_error.
+ */
+export const customDomainStatusEnum = pgEnum('custom_domain_status', [
+  'pending',
+  'provisioning',
+  'verified',
+  'failed',
+]);
+
 export const roleEnum = pgEnum('role', ['agency_admin', 'agency_member', 'client']);
 
 // ----- Users + Auth -----
@@ -101,6 +117,12 @@ export const users = pgTable(
     clientId: uuid('client_id'), // set when role='client'
     emailVerified: timestamp('email_verified'),
     image: text('image'),
+    /**
+     * bcrypt hash of the user's password. Null for users who only use
+     * magic-link sign-in (or who were created before password auth landed).
+     * Never logged; only compared via `bcrypt.compare`.
+     */
+    passwordHash: text('password_hash'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
   },
@@ -187,7 +209,7 @@ export const clients = pgTable(
      *   verified      — Vercel confirmed the domain is serving traffic.
      *   failed        — DNS/verification failed. Check customDomainError.
      */
-    customDomainStatus: text('custom_domain_status'),
+    customDomainStatus: customDomainStatusEnum('custom_domain_status'),
     customDomainVerifiedAt: timestamp('custom_domain_verified_at'),
     customDomainError: text('custom_domain_error'),
     createdAt: timestamp('created_at').defaultNow().notNull(),

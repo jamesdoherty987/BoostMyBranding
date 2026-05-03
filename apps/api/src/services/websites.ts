@@ -16,7 +16,7 @@
 import { eq, desc } from 'drizzle-orm';
 import { getDb, isDbConfigured, clients, clientImages } from '@boost/database';
 import type { WebsiteConfig, SiteTemplate, HeroVariant } from '@boost/core';
-import { DEFAULT_LAYOUT, DEFAULT_HERO_VARIANT } from '@boost/core';
+import { DEFAULT_LAYOUT, DEFAULT_HERO_VARIANT, HERO_VARIANTS } from '@boost/core';
 import { generateJSON } from './claude.js';
 import { scrapeWebsite } from './scraper.js';
 import { websiteConfigPrompt } from './prompts.js';
@@ -307,16 +307,11 @@ function normalizeConfig(raw: Partial<WebsiteConfig>, template: SiteTemplate): W
 
   // Clamp hero.variant to a known value — unknown strings fall back to the
   // template's default variant so the dispatcher never hits a dead branch.
-  const validVariants: HeroVariant[] = [
-    'spotlight',
-    'beams',
-    'floating-icons',
-    'parallax-layers',
-    'gradient-mesh',
-  ];
-  const variant: HeroVariant = validVariants.includes(raw.hero?.variant as HeroVariant)
-    ? (raw.hero!.variant as HeroVariant)
-    : DEFAULT_HERO_VARIANT[template];
+  const rawVariant = raw.hero?.variant;
+  const variant: HeroVariant =
+    rawVariant && (HERO_VARIANTS as readonly string[]).includes(rawVariant)
+      ? rawVariant
+      : DEFAULT_HERO_VARIANT[template];
 
   return {
     template: raw.template ?? template,
@@ -338,7 +333,6 @@ function normalizeConfig(raw: Partial<WebsiteConfig>, template: SiteTemplate): W
       floatingIcons: raw.hero?.floatingIcons,
       aiImageUrl: raw.hero?.aiImageUrl ?? null,
       aiImagePrompt: raw.hero?.aiImagePrompt,
-      effects: raw.hero?.effects,
     },
     about: raw.about,
     stats: raw.stats,

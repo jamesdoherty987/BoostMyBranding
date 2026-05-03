@@ -3,7 +3,14 @@ import { notFound } from 'next/navigation';
 import { SiteRenderer } from '@boost/ui/site';
 import type { WebsiteConfig } from '@boost/core';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+// Server-side fetch, so we need the absolute API URL (relative won't
+// work from a Node environment). In prod, API_UPSTREAM points at the
+// Render deployment; in dev, NEXT_PUBLIC_API_URL is the localhost:4000
+// fallback.
+const API_URL =
+  process.env.API_UPSTREAM ??
+  process.env.NEXT_PUBLIC_API_URL ??
+  'http://localhost:4000';
 
 interface SiteData {
   businessName: string;

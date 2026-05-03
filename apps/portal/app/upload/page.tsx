@@ -10,6 +10,7 @@ import { api } from '@/lib/api';
 import { handlePortalAuthError, ALLOW_MOCK_FALLBACK } from '@/lib/auth';
 import { mockClients } from '@boost/core';
 import { useSubscription } from '@/lib/subscription';
+import { useTierGate } from '@/lib/tier-gate';
 
 interface PendingUpload {
   id: string;
@@ -26,6 +27,10 @@ const MAX_PER_BATCH = 10;
 const MAX_SIZE_MB = 15;
 
 export default function UploadPage() {
+  // Upload is a social-pipeline thing. Website-only clients get redirected
+  // to /dashboard rather than landing here with nothing to do.
+  useTierGate(['social_only', 'full_package']);
+
   const { subscription } = useSubscription();
   const inputRef = useRef<HTMLInputElement>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
@@ -116,6 +121,10 @@ export default function UploadPage() {
     });
 
   const locked = subscription ? !subscription.active : false;
+  // Show in-flight state when any upload is still running. Lets the page
+  // dim the "take photo" / "from gallery" controls so mid-upload the user
+  // isn't tempted to queue more files at the same time.
+  const busy = uploads.some((u) => !u.done);
 
   return (
     <Shell
@@ -130,7 +139,8 @@ export default function UploadPage() {
             <button
               type="button"
               onClick={() => cameraRef.current?.click()}
-              className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white p-4 transition-colors hover:border-[#48D886] active:scale-[0.99]"
+              disabled={busy}
+              className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white p-4 transition-colors hover:border-[#48D886] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-slate-200"
             >
               <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-cta text-white">
                 <Camera className="h-5 w-5" />
@@ -140,7 +150,8 @@ export default function UploadPage() {
             <button
               type="button"
               onClick={() => inputRef.current?.click()}
-              className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white p-4 transition-colors hover:border-[#48D886] active:scale-[0.99]"
+              disabled={busy}
+              className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white p-4 transition-colors hover:border-[#48D886] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-slate-200"
             >
               <div className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-900 text-white">
                 <Upload className="h-5 w-5" />
@@ -151,20 +162,28 @@ export default function UploadPage() {
 
           <div
             onDragOver={(e) => {
+              if (busy) return;
               e.preventDefault();
               setDragOver(true);
             }}
             onDragLeave={() => setDragOver(false)}
             onDrop={(e) => {
+              if (busy) return;
               e.preventDefault();
               setDragOver(false);
               addFiles(e.dataTransfer.files);
             }}
             className={`mt-4 rounded-2xl border-2 border-dashed p-6 text-center transition-colors ${
-              dragOver ? 'border-[#48D886] bg-[#48D886]/5' : 'border-slate-300 bg-white'
+              busy
+                ? 'border-slate-200 bg-slate-50 opacity-60'
+                : dragOver
+                  ? 'border-[#48D886] bg-[#48D886]/5'
+                  : 'border-slate-300 bg-white'
             }`}
           >
-            <p className="text-sm text-slate-600">Or drag &amp; drop here</p>
+            <p className="text-sm text-slate-600">
+              {busy ? 'Uploading — hold on a moment' : 'Or drag & drop here'}
+            </p>
           </div>
 
           <input

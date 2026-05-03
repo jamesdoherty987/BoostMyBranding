@@ -22,7 +22,16 @@
 
 import { NextResponse, type NextRequest } from 'next/server';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+/**
+ * API URL — in production, middleware runs server-side at the edge and
+ * needs the full URL to reach the API deployment. In dev it's set to the
+ * local API port. The public `NEXT_PUBLIC_API_URL` is a relative path
+ * (`/api`) in prod for browser calls; this internal one has to be absolute.
+ */
+const API_URL =
+  process.env.API_UPSTREAM ??
+  process.env.NEXT_PUBLIC_API_URL ??
+  'http://localhost:4000';
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? process.env.APP_URL ?? '';
 
 /** Hosts the middleware should always pass through without a lookup. */

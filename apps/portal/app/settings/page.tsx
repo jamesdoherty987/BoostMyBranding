@@ -234,7 +234,7 @@ export default function SettingsPage() {
         open={confirmLogout}
         onClose={() => setConfirmLogout(false)}
         title="Log out of the portal?"
-        description="You'll need the magic link email to sign back in."
+        description="You'll need your password to sign back in."
       >
         <div className="flex flex-col gap-2">
           <Button variant="outline" onClick={logout}>

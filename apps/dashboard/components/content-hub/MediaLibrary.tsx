@@ -9,7 +9,7 @@ import { useCallback, useRef, useState } from 'react';
 import Image from 'next/image';
 import useSWR from 'swr';
 import type { ClientImage } from '@boost/core';
-import { Badge, Button, Spinner, toast } from '@boost/ui';
+import { Badge, Button, Spinner, toast, confirmDialog } from '@boost/ui';
 import {
   Upload,
   Trash2,
@@ -97,7 +97,15 @@ export function MediaLibrary({ clientId }: Props) {
 
   const deleteSelected = async () => {
     if (selected.size === 0) return;
-    if (!confirm(`Delete ${selected.size} item${selected.size === 1 ? '' : 's'}? This cannot be undone.`)) return;
+    if (
+      !(await confirmDialog({
+        title: `Delete ${selected.size} item${selected.size === 1 ? '' : 's'}?`,
+        description: 'This cannot be undone.',
+        confirmLabel: `Delete ${selected.size}`,
+        danger: true,
+      }))
+    )
+      return;
     const ids = Array.from(selected);
     setSelected(new Set());
     // Optimistic UI
@@ -113,7 +121,15 @@ export function MediaLibrary({ clientId }: Props) {
   };
 
   const deleteOne = async (id: string) => {
-    if (!confirm('Delete this file? This cannot be undone.')) return;
+    if (
+      !(await confirmDialog({
+        title: 'Delete this file?',
+        description: 'This cannot be undone.',
+        confirmLabel: 'Delete',
+        danger: true,
+      }))
+    )
+      return;
     mutate((prev) => prev?.filter((m) => m.id !== id) ?? [], false);
     try {
       await api.deleteImage(id);

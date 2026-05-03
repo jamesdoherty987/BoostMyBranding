@@ -5,6 +5,7 @@
 
 import { Router } from 'express';
 import { z } from 'zod';
+import { SITE_TEMPLATES } from '@boost/core';
 import { runMonthlyGeneration } from '../services/automation.js';
 import {
   generateWebsite,
@@ -67,25 +68,8 @@ const generateWebsiteSchema = z.object({
   services: z.array(z.string().max(100)).max(20).optional(),
   hasBooking: z.boolean().optional(),
   hasHours: z.boolean().optional(),
-  template: z
-    .enum([
-      'service',
-      'food',
-      'beauty',
-      'fitness',
-      'professional',
-      'retail',
-      'medical',
-      'creative',
-      'realestate',
-      'education',
-      'automotive',
-      'hospitality',
-      'legal',
-      'nonprofit',
-      'tech',
-    ])
-    .optional(),
+  // Pulled from @boost/core so adding a template is a single-file change.
+  template: z.enum(SITE_TEMPLATES).optional(),
   /** Free-text suggestions from the agency to steer the AI output. */
   suggestions: z.string().max(2000).optional(),
 });

@@ -7,6 +7,8 @@ import { useSiteContext } from '../context';
 import { brandGradient } from '../theme';
 import { InlineEditable } from '../InlineEditable';
 import { InlineImage } from '../InlineImage';
+import { TeamAnimatedTooltip } from './team/TeamAnimatedTooltip';
+import { TeamHoverEffect } from './team/TeamHoverEffect';
 
 interface SiteTeamProps {
   config: WebsiteConfig;
@@ -40,8 +42,48 @@ export function SiteTeam({ config, images }: SiteTeamProps) {
 
   const blockVariant: TeamVariant = team.variant ?? 'portrait';
 
+  // Variants that replace the entire grid with a custom layout. For these
+  // we render the section wrapper + header, then hand off the content area
+  // to a standalone component. The default grid (below) is used for any
+  // variant not in this switch.
+  if (blockVariant === 'small-avatars' || blockVariant === 'card-hover') {
+    return (
+      <SectionWrapper immediate={embedded} id="team" className="bg-white py-20 md:py-28">
+        <div className="mx-auto max-w-6xl px-4">
+          <div className="mx-auto max-w-2xl text-center">
+            <InlineEditable
+              path="team.eyebrow"
+              value={team.eyebrow ?? 'The team'}
+              as="p"
+              className="text-xs font-semibold uppercase tracking-[0.25em]"
+              style={{ color: 'var(--bmb-site-primary)' }}
+              placeholder="Section eyebrow…"
+            />
+            <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 md:text-5xl">
+              <InlineEditable
+                path="team.heading"
+                value={team.heading ?? 'Meet the people.'}
+                as="span"
+                placeholder="Section heading…"
+              />
+            </h2>
+          </div>
+          {blockVariant === 'small-avatars' ? (
+            <TeamAnimatedTooltip config={config} />
+          ) : (
+            <div className="mt-12">
+              <TeamHoverEffect config={config} />
+            </div>
+          )}
+        </div>
+      </SectionWrapper>
+    );
+  }
+
   // Pick a grid class based on the dominant variant. Mixed rows use the
   // default container and let each card shrink/grow via `col-span-*`.
+  // `light-bg` shares the default grid but gets a lighter background —
+  // that's handled by the section's bg class below.
   const gridClass =
     blockVariant === 'minimal'
       ? 'mt-12 grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 md:gap-5'

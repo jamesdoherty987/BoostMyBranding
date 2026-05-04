@@ -34,6 +34,9 @@ import {
   ChevronDown,
   Trash2,
   Edit3,
+  Monitor,
+  Tablet,
+  Smartphone,
 } from 'lucide-react';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { SiteEditor } from '@/components/dashboard/SiteEditor';
@@ -169,6 +172,23 @@ export default function WebsitesPage() {
    * Resets to 'home' whenever a new site is generated or picked.
    */
   const [previewPageSlug, setPreviewPageSlug] = useState<string>('home');
+
+  /**
+   * Device the preview is simulating. Lets agencies sanity-check mobile
+   * layouts without a second browser window. Values:
+   *   desktop — full container width (default)
+   *   tablet  — 768px fixed
+   *   mobile  — 390px fixed (iPhone 14/15 viewport)
+   *
+   * We render the same SiteRenderer at a constrained width; Tailwind's
+   * responsive breakpoints respond to the container width via `container
+   * queries` where used, and to the viewport otherwise. That's a
+   * limitation — some `md:` styles will still render because the viewport
+   * is desktop — but for most layouts this catches the obvious issues
+   * (text overflow, too-wide cards, hero cutoffs).
+   */
+  type DeviceMode = 'desktop' | 'tablet' | 'mobile';
+  const [device, setDevice] = useState<DeviceMode>('desktop');
 
   /**
    * When the user clicks an image in edit mode, we open a picker overlay
@@ -1082,6 +1102,41 @@ export default function WebsitesPage() {
                       <div className="ml-3 flex-1 truncate rounded-md bg-white px-3 py-1 text-[11px] text-slate-500">
                         {config.meta.title}
                       </div>
+                      {/* Device-mode toggle — constrain the preview width so
+                          mobile / tablet layouts can be eyeballed without
+                          opening a second browser window. */}
+                      <div
+                        className="flex items-center gap-0.5 rounded-lg border border-slate-200 bg-white p-0.5"
+                        role="radiogroup"
+                        aria-label="Preview device size"
+                      >
+                        {(
+                          [
+                            { id: 'desktop', label: 'Desktop', Icon: Monitor },
+                            { id: 'tablet', label: 'Tablet', Icon: Tablet },
+                            { id: 'mobile', label: 'Mobile', Icon: Smartphone },
+                          ] as const
+                        ).map(({ id, label, Icon }) => {
+                          const active = device === id;
+                          return (
+                            <button
+                              key={id}
+                              role="radio"
+                              aria-checked={active}
+                              aria-label={label}
+                              title={label}
+                              onClick={() => setDevice(id)}
+                              className={`flex h-6 w-7 items-center justify-center rounded-md transition-colors ${
+                                active
+                                  ? 'bg-[#1D9CA1] text-white'
+                                  : 'text-slate-500 hover:bg-slate-100'
+                              }`}
+                            >
+                              <Icon className="h-3.5 w-3.5" />
+                            </button>
+                          );
+                        })}
+                      </div>
                       {(config.pages?.length ?? 0) > 1 ? (
                         <PagePicker
                           pages={config.pages!}
@@ -1098,30 +1153,53 @@ export default function WebsitesPage() {
                         Click any headline, subheading, or service card in the preview below to edit. Press Enter to save, Esc to cancel.
                       </div>
                     ) : null}
-                    <div className="max-h-[85vh] overflow-y-auto bg-white">
-                      <SiteRenderer
-                        config={config}
-                        businessName={selectedClient?.businessName ?? 'Your Business'}
-                        images={clientImages}
-                        clientId={newSite.clientId}
-                        embedded
-                        editMode={editMode}
-                        onFieldChange={handleFieldChange}
-                        onImageClick={(ctx) => setImagePicker(ctx)}
-                        onAIEdit={async (instruction) => {
-                          if (!config || !newSite.clientId) {
-                            throw new Error('No site loaded yet');
-                          }
-                          const result = await api.editWebsiteWithAI({
-                            clientId: newSite.clientId,
-                            currentConfig: config as unknown as Record<string, unknown>,
-                            instruction,
-                          });
-                          setConfig(sanitizeConfig(result.config));
-                          return result.summary ?? 'Done — site updated.';
-                        }}
-                        pageSlug={previewPageSlug}
-                      />
+                    <div
+                      className={`max-h-[85vh] overflow-y-auto bg-slate-100 transition-all ${
+                        device === 'desktop' ? 'p-0' : 'flex justify-center p-4 md:p-6'
+                      }`}
+                    >
+                      {/* When the user picks a narrower device, we wrap the
+                          renderer in a fixed-width frame with a subtle device
+                          chrome. Width matches common real devices:
+                            - mobile  : 390px (iPhone 14/15)
+                            - tablet  : 768px (iPad portrait)
+                          The renderer still uses its responsive classes, so
+                          anything that checks viewport (not container) won't
+                          flip — but container-based layouts will. It's a very
+                          good approximation for ~90% of our blocks. */}
+                      <div
+                        className={
+                          device === 'desktop'
+                            ? 'w-full'
+                            : device === 'tablet'
+                              ? 'w-full max-w-[768px] rounded-2xl border border-slate-300 bg-white shadow-lg overflow-hidden'
+                              : 'w-full max-w-[390px] rounded-[2rem] border-[10px] border-slate-900 bg-white shadow-2xl overflow-hidden'
+                        }
+                      >
+                        <SiteRenderer
+                          config={config}
+                          businessName={selectedClient?.businessName ?? 'Your Business'}
+                          images={clientImages}
+                          clientId={newSite.clientId}
+                          embedded
+                          editMode={editMode}
+                          onFieldChange={handleFieldChange}
+                          onImageClick={(ctx) => setImagePicker(ctx)}
+                          onAIEdit={async (instruction) => {
+                            if (!config || !newSite.clientId) {
+                              throw new Error('No site loaded yet');
+                            }
+                            const result = await api.editWebsiteWithAI({
+                              clientId: newSite.clientId,
+                              currentConfig: config as unknown as Record<string, unknown>,
+                              instruction,
+                            });
+                            setConfig(sanitizeConfig(result.config));
+                            return result.summary ?? 'Done — site updated.';
+                          }}
+                          pageSlug={previewPageSlug}
+                        />
+                      </div>
                     </div>
                   </CardContent>
                 </Card>

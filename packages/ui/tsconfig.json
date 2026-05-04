@@ -1,7 +1,21 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "outDir": "dist"
+    "outDir": "dist",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    }
   },
-  "include": ["src/**/*"]
+  "include": ["src/**/*"],
+  "exclude": [
+    "node_modules",
+    "dist",
+    // Aceternity primitives + demos are vendored third-party code with
+    // looser type hygiene than our strict project defaults. They compile
+    // fine at runtime (Next transpiles them) but need relaxed settings
+    // to pass strict typecheck. Check them explicitly with
+    // `tsc -p tsconfig.aceternity.json` if needed.
+    "src/aceternity/**/*"
+  ]
 }

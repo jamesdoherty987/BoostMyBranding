@@ -8,8 +8,18 @@ import type {
   SiteBlockKey,
   HeroVariant,
   PageConfig,
+  VariantOption,
 } from '@boost/core';
-import { DEFAULT_LAYOUT, HERO_VARIANTS, slugify } from '@boost/core';
+import {
+  DEFAULT_LAYOUT,
+  HERO_VARIANTS,
+  slugify,
+  getVariantsFor,
+  hasVariants,
+  findVariant,
+  ALL_VARIANT_TAGS,
+  type VariantTag,
+} from '@boost/core';
 import {
   Button,
   Card,
@@ -392,6 +402,50 @@ const HERO_VARIANT_META: Record<HeroVariant, { label: string; description: strin
     label: 'Gradient mesh',
     description: 'Slow-shifting animated gradient. No image required.',
   },
+  aurora: {
+    label: 'Aurora',
+    description: 'Aceternity aurora lights sweep behind the headline.',
+  },
+  wavy: {
+    label: 'Wavy',
+    description: 'Flowing simplex-noise waves in brand colors. Smooth.',
+  },
+  sparkles: {
+    label: 'Sparkles',
+    description: 'Drifting particle field on deep black. Gala / event feel.',
+  },
+  'hero-highlight': {
+    label: 'Highlight',
+    description: 'Dot-grid background with a highlighted phrase. Minimal.',
+  },
+  dither: {
+    label: 'Dither',
+    description: 'Retro stippled pattern on dark. Tech-adjacent, modern.',
+  },
+  multicolor: {
+    label: 'Multicolor',
+    description: 'Soft color orbs in brand palette. Bold, playful.',
+  },
+  'full-bg-image': {
+    label: 'Full-bleed photo',
+    description: 'Large client photo with overlay text. Immersive.',
+  },
+  'two-column-image': {
+    label: 'Two-column',
+    description: 'Copy + CTAs left, photo right. Classic local biz.',
+  },
+  meteors: {
+    label: 'Meteors',
+    description: 'Falling meteor trails on dark. Event / launch feel.',
+  },
+  vortex: {
+    label: 'Vortex',
+    description: 'Swirling particles behind centered copy. Premium.',
+  },
+  lamp: {
+    label: 'Lamp',
+    description: 'Dramatic overhead spotlight. Luxury, cinematic.',
+  },
 };
 
 interface SiteEditorProps {
@@ -458,7 +512,6 @@ export function SiteEditor({
     'sections' | 'content' | 'pages' | 'items' | 'images' | 'hero' | 'brand' | 'ai' | 'domain' | 'code'
   >('content');
 
-  const hasPages = (config.pages?.length ?? 0) > 0;
   const tabs = [
     { id: 'content' as const, label: 'Content', icon: Edit3 },
     { id: 'items' as const, label: 'Items', icon: List },
@@ -672,7 +725,7 @@ function SectionManager({
     setLayout(layout.filter((b) => b !== block));
   };
 
-  const addBlock = (block: SiteBlockKey) => {
+  const addBlock = (block: SiteBlockKey, variant?: string) => {
     const footerIdx = layout.indexOf('footer');
     const newLayout = [...layout];
     if (footerIdx >= 0) {
@@ -690,20 +743,50 @@ function SectionManager({
     // a block to a page that already has data (e.g. via a previous AI
     // edit) doesn't stomp the real content.
     const seeded = seedBlockData(config, block);
+
+    // If the user picked a specific variant from the picker, stamp it into
+    // the block's config. Falls back to the block's current variant (or the
+    // block default) when no variant was supplied.
+    const variantPatch: Partial<WebsiteConfig> = {};
+    if (variant) {
+      if (block === 'hero') {
+        variantPatch.hero = { ...(seeded.hero ?? config.hero ?? {}), variant: variant as HeroVariant };
+      } else {
+        const key = block as keyof WebsiteConfig;
+        const existingOrSeeded =
+          (seeded as Partial<WebsiteConfig>)[key] ??
+          (config[key] as Record<string, unknown> | undefined) ??
+          {};
+        // We cast broadly here because `variant` is a generic field across
+        // many block types — the specific type narrowing happens in each
+        // block's renderer.
+        (variantPatch as Record<string, unknown>)[key] = {
+          ...(existingOrSeeded as Record<string, unknown>),
+          variant,
+        };
+      }
+    }
+
     if (isMultipage && activePage) {
       onChange({
         ...config,
         ...seeded,
+        ...variantPatch,
         pages: pages.map((p) =>
           p.slug === activePage.slug ? { ...p, layout: newLayout } : p,
         ),
       });
     } else {
-      onChange({ ...config, ...seeded, layout: newLayout });
+      onChange({ ...config, ...seeded, ...variantPatch, layout: newLayout });
     }
 
+    const variantLabel = variant
+      ? findVariant(block, variant)?.label
+      : undefined;
     toast.success(
-      `${BLOCK_LABELS[block]} added`,
+      variantLabel
+        ? `${BLOCK_LABELS[block]} · ${variantLabel} added`
+        : `${BLOCK_LABELS[block]} added`,
       seededMessage(block, seeded) ?? 'Reorder from the list above.',
     );
   };
@@ -712,6 +795,10 @@ function SectionManager({
     setLayout(DEFAULT_LAYOUT[config.template ?? 'service']);
     toast.success('Layout reset to template default');
   };
+
+  // Variant picker overlay state. When `pickerBlock` is set, the visual
+  // variant gallery opens so the user can see thumbnails before committing.
+  const [pickerBlock, setPickerBlock] = useState<SiteBlockKey | null>(null);
 
   return (
     <div className="space-y-4">
@@ -738,26 +825,57 @@ function SectionManager({
         onReorder={(newOrder) => setLayout(newOrder as SiteBlockKey[])}
         className="space-y-1.5"
       >
-        {layout.map((block) => (
-          <Reorder.Item
-            key={block}
-            value={block}
-            className="flex cursor-grab items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 active:cursor-grabbing active:shadow-md"
-          >
-            <GripVertical className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-            <span className="flex-1 text-sm font-medium text-slate-900">
-              {BLOCK_LABELS[block]}
-            </span>
-            {block !== 'nav' && block !== 'footer' && (
-              <button
-                onClick={() => removeBlock(block)}
-                className="rounded-lg p-1 text-slate-400 hover:bg-red-50 hover:text-red-500"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
-            )}
-          </Reorder.Item>
-        ))}
+        {layout.map((block) => {
+          // Surface the currently-active variant (if any) next to the block
+          // name so it's clear what the user is looking at. Variant is
+          // sourced from the block's config (e.g. `hero.variant`) via the
+          // registry lookup.
+          const currentVariantId = (() => {
+            if (block === 'hero') return config.hero?.variant;
+            const entry = config[block as keyof WebsiteConfig] as
+              | { variant?: string }
+              | undefined;
+            return entry?.variant;
+          })();
+          const currentVariant = findVariant(block, currentVariantId);
+          const canSwapVariant = hasVariants(block);
+          return (
+            <Reorder.Item
+              key={block}
+              value={block}
+              className="flex cursor-grab items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 active:cursor-grabbing active:shadow-md"
+            >
+              <GripVertical className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+              <div className="flex-1 min-w-0">
+                <span className="text-sm font-medium text-slate-900">
+                  {BLOCK_LABELS[block]}
+                </span>
+                {currentVariant ? (
+                  <span className="ml-2 text-[10px] font-medium text-slate-500">
+                    · {currentVariant.label}
+                  </span>
+                ) : null}
+              </div>
+              {canSwapVariant ? (
+                <button
+                  onClick={() => setPickerBlock(block)}
+                  title="Change variant"
+                  className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-[#1D9CA1]"
+                >
+                  <Layers className="h-3.5 w-3.5" />
+                </button>
+              ) : null}
+              {block !== 'nav' && block !== 'footer' && (
+                <button
+                  onClick={() => removeBlock(block)}
+                  className="rounded-lg p-1 text-slate-400 hover:bg-red-50 hover:text-red-500"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </Reorder.Item>
+          );
+        })}
       </Reorder.Group>
 
       {available.length > 0 && (
@@ -767,16 +885,73 @@ function SectionManager({
             {available.map((block) => (
               <button
                 key={block}
-                onClick={() => addBlock(block)}
+                onClick={() => {
+                  // Variant-capable blocks open the picker so the user can
+                  // preview before committing. Blocks without variants add
+                  // immediately with their default layout.
+                  if (hasVariants(block)) {
+                    setPickerBlock(block);
+                  } else {
+                    addBlock(block);
+                  }
+                }}
                 className="flex items-center gap-1 rounded-lg border border-dashed border-slate-300 px-2.5 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:border-[#1D9CA1] hover:text-[#1D9CA1]"
               >
                 <Plus className="h-3 w-3" />
                 {BLOCK_LABELS[block]}
+                {hasVariants(block) ? (
+                  <span className="ml-0.5 text-[9px] text-slate-400">
+                    {getVariantsFor(block).length} styles
+                  </span>
+                ) : null}
               </button>
             ))}
           </div>
         </div>
       )}
+
+      {/* Variant picker overlay — visible when the user clicks Add on a
+          variant-capable block or the Layers icon on an existing block.
+          Shows a gallery of thumbnails + descriptions. Picking one adds
+          the block if it wasn't already in the layout, or swaps the
+          variant in place if it was. */}
+      {pickerBlock ? (
+        <VariantPickerSheet
+          block={pickerBlock}
+          currentVariantId={(() => {
+            if (pickerBlock === 'hero') return config.hero?.variant;
+            const entry = config[pickerBlock as keyof WebsiteConfig] as
+              | { variant?: string }
+              | undefined;
+            return entry?.variant;
+          })()}
+          alreadyInLayout={layout.includes(pickerBlock)}
+          onClose={() => setPickerBlock(null)}
+          onPick={(variantId) => {
+            if (layout.includes(pickerBlock)) {
+              // Block already present — just swap variant. Keep all other
+              // data (members, reviews, etc.) untouched.
+              const patch: Partial<WebsiteConfig> = {};
+              if (pickerBlock === 'hero') {
+                patch.hero = { ...(config.hero ?? {}), variant: variantId as HeroVariant };
+              } else {
+                const key = pickerBlock as keyof WebsiteConfig;
+                const current = (config[key] as Record<string, unknown> | undefined) ?? {};
+                (patch as Record<string, unknown>)[key] = { ...current, variant: variantId };
+              }
+              onChange({ ...config, ...patch });
+              toast.success(
+                `${BLOCK_LABELS[pickerBlock]} style changed`,
+                findVariant(pickerBlock, variantId)?.label,
+              );
+            } else {
+              // Not yet in layout — add it with the chosen variant.
+              addBlock(pickerBlock, variantId);
+            }
+            setPickerBlock(null);
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -2625,8 +2800,19 @@ function ItemsEditor({
                 <VariantPicker
                   label="This member's card"
                   value={m.variant}
-                  options={TEAM_VARIANT_OPTIONS}
-                  blockDefault={config.team!.variant ?? 'portrait'}
+                  options={TEAM_MEMBER_VARIANT_OPTIONS}
+                  // Coerce the block-level default to the narrower member
+                  // type. If the block uses a full-section variant (e.g.
+                  // `small-avatars` or `card-hover`) the per-card picker
+                  // has no matching option, so we fall back to `portrait`.
+                  blockDefault={
+                    config.team!.variant === 'light-bg' ||
+                    config.team!.variant === 'small-avatars' ||
+                    config.team!.variant === 'card-hover' ||
+                    !config.team!.variant
+                      ? 'portrait'
+                      : config.team!.variant
+                  }
                   onChange={(v) => {
                     const next = [...(config.team!.members ?? [])];
                     next[i] = { ...next[i]!, variant: v ?? undefined };
@@ -3997,8 +4183,29 @@ const TEAM_VARIANT_OPTIONS = [
   { value: 'minimal', label: 'Minimal', hint: 'Avatar + name + role' },
   { value: 'quote', label: 'Quote', hint: 'Avatar + bio as a quote card' },
   { value: 'banner', label: 'Banner', hint: 'Wide landscape with overlay' },
+  { value: 'light-bg', label: 'Light cards', hint: 'Aceternity light cards with hover lift' },
+  { value: 'small-avatars', label: 'Stacked avatars', hint: 'Aceternity overlapping avatars with tooltips' },
+  { value: 'card-hover', label: 'Hover-glow cards', hint: 'Aceternity dark cards with moving hover glow' },
 ] as const satisfies Array<{
   value: NonNullable<NonNullable<WebsiteConfig['team']>['variant']>;
+  label: string;
+  hint?: string;
+}>;
+
+/**
+ * Member-level variants — only the card layouts, because the full-section
+ * variants (`light-bg`, `small-avatars`) replace the entire grid and
+ * don't make sense as per-card overrides.
+ */
+const TEAM_MEMBER_VARIANT_OPTIONS = [
+  { value: 'portrait', label: 'Portrait', hint: 'Tall photo + full info' },
+  { value: 'minimal', label: 'Minimal', hint: 'Avatar + name + role' },
+  { value: 'quote', label: 'Quote', hint: 'Avatar + bio as a quote card' },
+  { value: 'banner', label: 'Banner', hint: 'Wide landscape with overlay' },
+] as const satisfies Array<{
+  value: NonNullable<
+    NonNullable<NonNullable<WebsiteConfig['team']>['members']>[number]['variant']
+  >;
   label: string;
   hint?: string;
 }>;
@@ -4311,5 +4518,250 @@ function CodeEditor({
         root) are refused before they can reach the renderer.
       </p>
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Variant picker sheet — the preview-before-add gallery              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Full-panel overlay that shows every available variant for a block as a
+ * thumbnail grid. Lets the user see what they're adding before committing.
+ *
+ * Behaviour:
+ *   - Opens when the user clicks "Add section" on a variant-capable block
+ *     or the Layers icon next to an existing block
+ *   - Click a card → `onPick(variantId)` fires
+ *   - Click outside / Close / Esc → `onClose()` fires
+ *   - Filter by tag (Modern, Minimal, Local, etc.) narrows the grid
+ *   - Search bar filters by label / description
+ *
+ * Renders its own portal-free overlay inside the editor card — keeps the
+ * preview visible behind it so you can still eyeball the current state
+ * while picking.
+ */
+function VariantPickerSheet({
+  block,
+  currentVariantId,
+  alreadyInLayout,
+  onClose,
+  onPick,
+}: {
+  block: SiteBlockKey;
+  currentVariantId: string | undefined;
+  alreadyInLayout: boolean;
+  onClose: () => void;
+  onPick: (variantId: string) => void;
+}) {
+  const variants = getVariantsFor(block);
+  const [query, setQuery] = useState('');
+  const [activeTag, setActiveTag] = useState<VariantTag | 'all'>('all');
+
+  // Build the tag list from what's actually in use. No point showing
+  // "Playful" if nothing in the current block supports it.
+  const tagsInUse = useMemo(() => {
+    const set = new Set<VariantTag>();
+    for (const v of variants) {
+      for (const t of v.tags ?? []) set.add(t);
+    }
+    return ALL_VARIANT_TAGS.filter((t) => set.has(t));
+  }, [variants]);
+
+  const filtered = variants.filter((v) => {
+    if (activeTag !== 'all' && !(v.tags ?? []).includes(activeTag)) return false;
+    if (!query) return true;
+    const q = query.toLowerCase();
+    return (
+      v.label.toLowerCase().includes(q) ||
+      v.description.toLowerCase().includes(q)
+    );
+  });
+
+  // Close on Escape.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/60 p-0 md:items-center md:p-6"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div
+        className="w-full max-w-4xl max-h-[90vh] overflow-hidden rounded-t-2xl bg-white shadow-2xl md:rounded-2xl"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Pick a ${BLOCK_LABELS[block]} style`}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-900">
+              {alreadyInLayout ? 'Change' : 'Pick'} a {BLOCK_LABELS[block]} style
+            </h3>
+            <p className="mt-0.5 text-[11px] text-slate-500">
+              {variants.length} {variants.length === 1 ? 'option' : 'options'}.
+              Click to {alreadyInLayout ? 'swap' : 'add'}.
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+            aria-label="Close"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Search + tag filter */}
+        <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 bg-slate-50 px-5 py-2.5">
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search styles…"
+            className="h-8 max-w-[200px] flex-1 text-xs"
+          />
+          <div className="flex flex-wrap gap-1">
+            <TagPill
+              label="All"
+              active={activeTag === 'all'}
+              onClick={() => setActiveTag('all')}
+            />
+            {tagsInUse.map((t) => (
+              <TagPill
+                key={t}
+                label={t.charAt(0).toUpperCase() + t.slice(1).replace('-', ' ')}
+                active={activeTag === t}
+                onClick={() => setActiveTag(t)}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* Grid */}
+        <div className="grid max-h-[70vh] grid-cols-1 gap-3 overflow-y-auto p-5 sm:grid-cols-2 lg:grid-cols-3">
+          {filtered.length === 0 ? (
+            <div className="col-span-full py-12 text-center text-sm text-slate-500">
+              No styles match that filter.
+            </div>
+          ) : (
+            filtered.map((v) => (
+              <VariantCard
+                key={v.id}
+                variant={v}
+                isCurrent={v.id === currentVariantId}
+                onClick={() => onPick(v.id)}
+              />
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Small filter pill used in the picker's tag row. */
+function TagPill({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors ${
+        active
+          ? 'bg-[#1D9CA1] text-white'
+          : 'bg-white text-slate-600 border border-slate-200 hover:border-[#1D9CA1] hover:text-[#1D9CA1]'
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
+/** Individual thumbnail card in the picker grid. */
+function VariantCard({
+  variant,
+  isCurrent,
+  onClick,
+}: {
+  variant: VariantOption;
+  isCurrent: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={variant.comingSoon}
+      className={`group relative flex flex-col overflow-hidden rounded-xl border bg-white text-left transition-all hover:-translate-y-0.5 hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-none ${
+        isCurrent
+          ? 'border-[#1D9CA1] ring-2 ring-[#1D9CA1]/30'
+          : 'border-slate-200 hover:border-[#1D9CA1]/60'
+      }`}
+    >
+      {/* Thumbnail */}
+      <div className="relative aspect-[3/2] w-full overflow-hidden bg-slate-50">
+        {/* The preview is an SVG data URI — it's the registry's stylized
+            thumbnail for this variant. Alt is intentionally descriptive. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={variant.preview}
+          alt={`${variant.label} preview`}
+          className="h-full w-full object-cover"
+        />
+        {variant.aceternity ? (
+          <span className="absolute left-2 top-2 rounded-md bg-slate-900/80 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-white">
+            Pro
+          </span>
+        ) : null}
+        {variant.animated ? (
+          <span
+            className="absolute right-2 top-2 rounded-md bg-white/90 px-1.5 py-0.5 text-[9px] font-semibold text-slate-700"
+            title="This variant has motion"
+          >
+            ⚡ Animated
+          </span>
+        ) : null}
+        {isCurrent ? (
+          <span className="absolute bottom-2 right-2 inline-flex items-center gap-1 rounded-md bg-[#1D9CA1] px-1.5 py-0.5 text-[10px] font-semibold text-white">
+            <Check className="h-2.5 w-2.5" />
+            Current
+          </span>
+        ) : null}
+      </div>
+
+      {/* Text */}
+      <div className="flex flex-1 flex-col p-3">
+        <p className="text-xs font-semibold text-slate-900">{variant.label}</p>
+        <p className="mt-1 line-clamp-2 text-[10px] leading-relaxed text-slate-500">
+          {variant.description}
+        </p>
+        {variant.requires && variant.requires.length > 0 ? (
+          <div className="mt-2 flex flex-wrap gap-1">
+            {variant.requires.map((r) => (
+              <span
+                key={r.field}
+                className="rounded bg-amber-50 px-1.5 py-0.5 text-[9px] font-medium text-amber-800"
+                title={r.field}
+              >
+                {r.hint}
+              </span>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    </button>
   );
 }

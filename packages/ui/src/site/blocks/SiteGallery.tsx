@@ -6,6 +6,7 @@ import { SectionWrapper } from '../../section-wrapper';
 import { useSiteContext } from '../context';
 import { brandGradient } from '../theme';
 import { InlineEditable } from '../InlineEditable';
+import { GalleryFocusCards, GalleryParallax, GalleryAppleCarousel, GalleryLayoutGrid, GalleryCompare, GalleryDirectionAware, Gallery3dMarquee } from './gallery';
 
 interface SiteGalleryProps {
   config: WebsiteConfig;
@@ -35,6 +36,8 @@ export function SiteGallery({ config, images, businessName }: SiteGalleryProps) 
   // site with no photos shouldn't pretend to have a gallery.
   if (resolved.length === 0) return null;
 
+  const variant = config.gallery?.variant ?? 'grid';
+
   return (
     <SectionWrapper immediate={embedded} id="gallery" className="bg-slate-50 py-20 md:py-28">
       <div className="mx-auto max-w-6xl px-4">
@@ -57,43 +60,84 @@ export function SiteGallery({ config, images, businessName }: SiteGalleryProps) 
           </h2>
         </div>
 
-        <div className="mt-12 grid grid-cols-2 gap-3 md:grid-cols-3 md:gap-4">
-          {resolved.map((src, i) => {
-            const isTall = i % 5 === 0;
-            return (
-              <motion.div
-                key={`${src}-${i}`}
-                initial={embedded ? false : { opacity: 0, y: 14 }}
-                whileInView={embedded ? undefined : { opacity: 1, y: 0 }}
-                animate={embedded ? { opacity: 1, y: 0 } : undefined}
-                viewport={{ once: true, margin: '-40px' }}
-                transition={{ delay: (i % 6) * 0.04, duration: 0.5 }}
-                className={`relative overflow-hidden rounded-2xl bg-slate-100 ${
-                  isTall ? 'row-span-2 aspect-[3/5]' : 'aspect-square'
-                }`}
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={src}
-                  alt={`${businessName}, gallery image ${i + 1}`}
-                  className="h-full w-full object-cover transition-transform duration-500 hover:scale-[1.04]"
-                  loading="lazy"
-                  onError={(e) => {
-                    // Replace broken images with a brand-gradient fallback so
-                    // one 404 doesn't leave a blown-out white tile.
-                    const target = e.currentTarget;
-                    target.style.display = 'none';
-                    const parent = target.parentElement;
-                    if (parent) {
-                      parent.style.background = brandGradient(config.brand, (i * 45) % 360);
-                    }
-                  }}
-                />
-              </motion.div>
-            );
-          })}
+        <div className="mt-12">
+          {variant === 'focus-cards' ? (
+            <GalleryFocusCards config={config} images={images} />
+          ) : variant === 'parallax' ? (
+            <GalleryParallax config={config} images={images} />
+          ) : variant === 'apple-carousel' ? (
+            <GalleryAppleCarousel config={config} images={images} />
+          ) : variant === '3d-marquee' ? (
+            <Gallery3dMarquee config={config} images={images} />
+          ) : variant === 'layout-grid' ? (
+            <GalleryLayoutGrid config={config} images={images} />
+          ) : variant === 'compare' ? (
+            <GalleryCompare config={config} images={images} />
+          ) : variant === 'direction-aware' ? (
+            <GalleryDirectionAware config={config} images={images} />
+          ) : (
+            <GalleryGrid
+              config={config}
+              embedded={embedded}
+              businessName={businessName}
+              resolved={resolved}
+            />
+          )}
         </div>
       </div>
     </SectionWrapper>
+  );
+}
+
+/**
+ * Default masonry grid — original gallery layout, kept as the fallback
+ * for variants without dedicated renderers.
+ */
+function GalleryGrid({
+  config,
+  embedded,
+  businessName,
+  resolved,
+}: {
+  config: WebsiteConfig;
+  embedded: boolean | undefined;
+  businessName: string;
+  resolved: string[];
+}) {
+  return (
+    <div className="grid grid-cols-2 gap-3 md:grid-cols-3 md:gap-4">
+      {resolved.map((src, i) => {
+        const isTall = i % 5 === 0;
+        return (
+          <motion.div
+            key={`${src}-${i}`}
+            initial={embedded ? false : { opacity: 0, y: 14 }}
+            whileInView={embedded ? undefined : { opacity: 1, y: 0 }}
+            animate={embedded ? { opacity: 1, y: 0 } : undefined}
+            viewport={{ once: true, margin: '-40px' }}
+            transition={{ delay: (i % 6) * 0.04, duration: 0.5 }}
+            className={`relative overflow-hidden rounded-2xl bg-slate-100 ${
+              isTall ? 'row-span-2 aspect-[3/5]' : 'aspect-square'
+            }`}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={src}
+              alt={`${businessName}, gallery image ${i + 1}`}
+              className="h-full w-full object-cover transition-transform duration-500 hover:scale-[1.04]"
+              loading="lazy"
+              onError={(e) => {
+                const target = e.currentTarget;
+                target.style.display = 'none';
+                const parent = target.parentElement;
+                if (parent) {
+                  parent.style.background = brandGradient(config.brand, (i * 45) % 360);
+                }
+              }}
+            />
+          </motion.div>
+        );
+      })}
+    </div>
   );
 }

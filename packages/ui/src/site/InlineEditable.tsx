@@ -28,6 +28,7 @@
  */
 
 import {
+  createElement,
   useEffect,
   useRef,
   useState,
@@ -92,8 +93,11 @@ export function InlineEditable({
   }, [value, editing]);
 
   // Non-edit mode: plain element, no extras. React reconciles normally.
+  // We use createElement directly because JSX's type inference on a
+  // local-variable component trips React 19's strict prop inference
+  // (collapses to `never`). createElement bypasses that safely.
   if (!editMode) {
-    return <Tag className={className} style={style}>{value}</Tag>;
+    return createElement(Tag, { className, style }, value);
   }
 
   const commit = (next: string) => {
@@ -126,26 +130,27 @@ export function InlineEditable({
 
   const isEmpty = !value || value.trim().length === 0;
 
-  return (
-    <Tag
-      ref={ref as any}
-      className={`${className ?? ''} ${editingClass} ${
+  // In edit mode: same createElement approach to bypass JSX's strict
+  // type inference on dynamic tags.
+  return createElement(
+    Tag,
+    {
+      ref,
+      className: `${className ?? ''} ${editingClass} ${
         isEmpty ? 'before:text-slate-400 before:content-[attr(data-placeholder)]' : ''
-      }`}
-      style={style}
-      contentEditable
-      suppressContentEditableWarning
-      data-inline-path={path}
-      data-placeholder={placeholder}
-      role="textbox"
-      aria-label={`Edit ${path}`}
-      onFocus={() => setEditing(true)}
-      onBlur={(e: ReactFocusEvent<HTMLElement>) =>
-        commit(e.currentTarget.textContent ?? '')
-      }
-      onKeyDown={onKeyDown}
-    >
-      {value}
-    </Tag>
+      }`,
+      style,
+      contentEditable: true,
+      suppressContentEditableWarning: true,
+      'data-inline-path': path,
+      'data-placeholder': placeholder,
+      role: 'textbox',
+      'aria-label': `Edit ${path}`,
+      onFocus: () => setEditing(true),
+      onBlur: (e: ReactFocusEvent<HTMLElement>) =>
+        commit(e.currentTarget.textContent ?? ''),
+      onKeyDown,
+    },
+    value,
   );
 }

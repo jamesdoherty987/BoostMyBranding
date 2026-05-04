@@ -24,6 +24,45 @@ export function SiteLogoStrip({ config, images }: SiteLogoStripProps) {
   const ls = config.logoStrip;
   if (!ls || !ls.logos || ls.logos.length === 0) return null;
 
+  const variant = ls.variant ?? 'grid';
+
+  // Shared logo renderer — used by both the grid and marquee layouts so
+  // they stay visually consistent (same grayscale + hover treatment).
+  const renderLogo = (logo: typeof ls.logos[number], i: number) => {
+    const src =
+      logo.imageUrl ??
+      (typeof logo.imageIndex === 'number' ? images[logo.imageIndex] : undefined);
+    const body = src ? (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={src}
+        alt={logo.name}
+        loading="lazy"
+        className="h-8 w-auto max-w-[140px] object-contain opacity-60 grayscale transition-all hover:opacity-100 hover:grayscale-0 md:h-10"
+      />
+    ) : (
+      <span className="text-sm font-semibold uppercase tracking-wider text-slate-400">
+        {logo.name}
+      </span>
+    );
+    return logo.href ? (
+      <a
+        key={i}
+        href={logo.href}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label={logo.name}
+        className="block shrink-0"
+      >
+        {body}
+      </a>
+    ) : (
+      <div key={i} aria-label={logo.name} className="shrink-0">
+        {body}
+      </div>
+    );
+  };
+
   return (
     <SectionWrapper immediate={embedded} className="bg-white py-12 md:py-16">
       <div className="mx-auto max-w-6xl px-4">
@@ -52,42 +91,48 @@ export function SiteLogoStrip({ config, images }: SiteLogoStripProps) {
           </div>
         ) : null}
 
-        <div className="flex flex-wrap items-center justify-center gap-x-10 gap-y-6 md:gap-x-14">
-          {ls.logos.map((logo, i) => {
-            const src =
-              logo.imageUrl ??
-              (typeof logo.imageIndex === 'number' ? images[logo.imageIndex] : undefined);
-            const body = src ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={src}
-                alt={logo.name}
-                loading="lazy"
-                className="h-8 w-auto max-w-[140px] object-contain opacity-60 grayscale transition-all hover:opacity-100 hover:grayscale-0 md:h-10"
-              />
-            ) : (
-              <span className="text-sm font-semibold uppercase tracking-wider text-slate-400">
-                {logo.name}
-              </span>
-            );
-            return logo.href ? (
-              <a
-                key={i}
-                href={logo.href}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label={logo.name}
-                className="block"
-              >
-                {body}
-              </a>
-            ) : (
-              <div key={i} aria-label={logo.name}>
-                {body}
-              </div>
-            );
-          })}
-        </div>
+        {variant === 'marquee' ? (
+          // Continuous horizontal scroll. We duplicate the logos so the
+          // looping animation has no visible seam. CSS-only (no JS per
+          // frame) so it's cheap to run alongside the hero's motion.
+          <div className="group relative overflow-hidden">
+            {/* Fade masks at the edges so logos drift in/out smoothly */}
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-y-0 left-0 z-10 w-16 bg-gradient-to-r from-white to-transparent"
+            />
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-y-0 right-0 z-10 w-16 bg-gradient-to-l from-white to-transparent"
+            />
+            <div
+              className="flex items-center gap-10 whitespace-nowrap md:gap-14"
+              style={{
+                // 30s loop by default; slower for longer logo lists so
+                // every logo gets roughly the same time on screen.
+                animation: `bmb-logo-marquee ${Math.max(20, ls.logos.length * 4)}s linear infinite`,
+                animationPlayState: embedded ? 'paused' : 'running',
+              }}
+            >
+              {ls.logos.map(renderLogo)}
+              {/* Duplicated track for seamless loop */}
+              {ls.logos.map((logo, i) =>
+                renderLogo(logo, i + ls.logos.length),
+              )}
+            </div>
+            <style>{`
+              @keyframes bmb-logo-marquee {
+                from { transform: translateX(0); }
+                to   { transform: translateX(-50%); }
+              }
+              .group:hover [style*="bmb-logo-marquee"] { animation-play-state: paused; }
+            `}</style>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center justify-center gap-x-10 gap-y-6 md:gap-x-14">
+            {ls.logos.map(renderLogo)}
+          </div>
+        )}
       </div>
     </SectionWrapper>
   );

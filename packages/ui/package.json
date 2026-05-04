@@ -19,10 +19,29 @@
   "dependencies": {
     "@boost/api-client": "workspace:*",
     "@boost/core": "workspace:*",
+    "@radix-ui/react-hover-card": "^1.1.15",
+    "@radix-ui/react-tabs": "^1.1.13",
+    "@react-three/drei": "^10.7.7",
+    "@react-three/fiber": "9.6.1",
+    "@tabler/icons-react": "^3.41.1",
+    "@tsparticles/engine": "^3.9.1",
+    "@tsparticles/react": "^3.0.0",
+    "@tsparticles/slim": "^3.9.1",
+    "@use-gesture/react": "^10.3.1",
     "clsx": "^2.1.1",
+    "dotted-map": "^3.1.0",
     "framer-motion": "^11.11.0",
     "lucide-react": "^0.460.0",
-    "tailwind-merge": "^2.5.4"
+    "mini-svg-data-uri": "^1.4.4",
+    "motion": "^12.38.0",
+    "next-themes": "^0.4.6",
+    "qss": "^3.0.0",
+    "react-dropzone": "^15.0.0",
+    "react-wrap-balancer": "^1.1.1",
+    "simplex-noise": "^4.0.3",
+    "tailwind-merge": "^2.5.4",
+    "three": "^0.184.0",
+    "three-globe": "^2.45.2"
   },
   "peerDependencies": {
     "next": "^15.0.0",
@@ -32,6 +51,7 @@
   "devDependencies": {
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@types/three": "^0.184.0",
     "next": "^15.0.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

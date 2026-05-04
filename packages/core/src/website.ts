@@ -97,7 +97,18 @@ export type HeroVariant =
   | 'beams'
   | 'floating-icons'
   | 'parallax-layers'
-  | 'gradient-mesh';
+  | 'gradient-mesh'
+  | 'aurora'
+  | 'wavy'
+  | 'sparkles'
+  | 'hero-highlight'
+  | 'dither'
+  | 'multicolor'
+  | 'full-bg-image'
+  | 'two-column-image'
+  | 'meteors'
+  | 'vortex'
+  | 'lamp';
 
 /**
  * A single page in a multipage site. `slug` is the URL segment (`about`,
@@ -316,6 +327,26 @@ export interface WebsiteConfig {
      */
     floatingIcons?: string[];
     /**
+     * Optional typographic effect for the headline. Layered on top of
+     * the chosen hero `variant` — any variant can opt in. When set:
+     *   - typewriter : headline types out character-by-character
+     *   - flip-words : last word cycles through several alternatives
+     *     (use `flipWords` to supply the alternatives)
+     *   - generate   : headline words fade in one-by-one on scroll
+     *
+     * Leave undefined for the default static headline (with the last-two-
+     * words gradient we use everywhere today).
+     */
+    headlineEffect?: 'typewriter' | 'flip-words' | 'generate';
+    /**
+     * Alternative words for the `flip-words` effect. Only used when
+     * `headlineEffect === 'flip-words'`. The headline keeps its normal
+     * text for the first part and the last word cycles through this list.
+     * Example: headline "We build great X", flipWords ["kitchens",
+     * "bathrooms", "extensions"] → cycles X through the list.
+     */
+    flipWords?: string[];
+    /**
      * AI-generated hero illustration URL. Populated by fal.ai when no
      * client image is suitable for the hero. Used as a fallback image by
      * any variant that supports a hero image (spotlight, parallax-layers).
@@ -366,6 +397,26 @@ export interface WebsiteConfig {
     eyebrow?: string;
     heading?: string;
     tagline?: string;
+    /**
+     * Layout variant. Defaults to `cards` (the current card grid).
+     * Other options are Aceternity-powered layouts with different feels:
+     *   - bento        : asymmetric grid where featured services span big tiles
+     *   - sticky-scroll: scrolling text column + sticky image panel on the side
+     *   - hover-effect : dark cards with card-spotlight (mouse glow)
+     *   - 3d-cards     : cards tilt on mouse move (Aceternity 3d-card)
+     *   - wobble       : cards wobble on mouse move (Aceternity wobble-card)
+     *   - glare        : premium shiny cards (Aceternity glare-card)
+     *   - expandable   : compact cards that open a modal on click (Aceternity animated-modal)
+     */
+    variant?:
+      | 'cards'
+      | 'bento'
+      | 'sticky-scroll'
+      | 'hover-effect'
+      | '3d-cards'
+      | 'wobble'
+      | 'glare'
+      | 'expandable';
   };
 
   services?: Array<{
@@ -386,6 +437,32 @@ export interface WebsiteConfig {
     heading?: string;
     /** Indices into the provided `images` array. */
     imageIndices?: number[];
+    /**
+     * Layout variant. Defaults to `grid`.
+     *   - grid          : current masonry-style grid (default)
+     *   - focus-cards   : Aceternity focus cards — hover to spotlight one
+     *   - parallax      : Aceternity parallax scroll (3 columns diff speeds)
+     *   - apple-carousel: Apple-style horizontal carousel with tap-to-expand
+     *   - 3d-marquee    : 3D tilted marquee — images scroll with depth
+     *   - layout-grid   : Aceternity click-to-expand layout grid
+     *   - compare       : Aceternity before/after slider (great for trades)
+     *   - direction-aware: Cursor-direction hover reveals (portfolio-style)
+     */
+    variant?:
+      | 'grid'
+      | 'focus-cards'
+      | 'parallax'
+      | 'apple-carousel'
+      | '3d-marquee'
+      | 'layout-grid'
+      | 'compare'
+      | 'direction-aware';
+    /**
+     * Optional per-image titles for variants that support them
+     * (apple-carousel uses them as card labels). Parallel array to
+     * `imageIndices` — index 0 labels the first image, etc.
+     */
+    titles?: string[];
   };
 
   /**
@@ -395,6 +472,22 @@ export interface WebsiteConfig {
   reviewsSection?: {
     eyebrow?: string;
     heading?: string;
+    /**
+     * Layout variant. Defaults to `grid`.
+     *   - grid                  : card grid (honours `featured`)
+     *   - marquee               : auto-scrolling Aceternity InfiniteMovingCards
+     *   - carousel              : single featured quote with prev/next
+     *   - masonry               : Pinterest-style variable-height grid
+     *   - draggable             : stacked cards visitors drag through
+     *   - animated-testimonials : Aceternity-style carousel with photo
+     */
+    variant?:
+      | 'grid'
+      | 'marquee'
+      | 'carousel'
+      | 'masonry'
+      | 'draggable'
+      | 'animated-testimonials';
   };
 
   reviews?: Array<{
@@ -412,6 +505,13 @@ export interface WebsiteConfig {
   faqSection?: {
     eyebrow?: string;
     heading?: string;
+    /**
+     * Layout variant. Defaults to `accordion`.
+     *   - accordion      : classic click-to-expand list
+     *   - grid           : 2-col grid with all answers visible
+     *   - with-background: accordion with an animated dark background
+     */
+    variant?: 'accordion' | 'grid' | 'with-background';
   };
 
   faq?: Array<{
@@ -428,6 +528,13 @@ export interface WebsiteConfig {
   statsSection?: {
     eyebrow?: string;
     heading?: string;
+    /**
+     * Layout variant. Defaults to `ticker`.
+     *   - ticker    : big animated counters in a gradient card (current)
+     *   - gradient  : each stat in its own gradient card
+     *   - changelog : compact horizontal row with dot separators
+     */
+    variant?: 'ticker' | 'gradient' | 'changelog';
   };
 
   contact?: {
@@ -442,6 +549,14 @@ export interface WebsiteConfig {
     whatsapp?: string;
     showBookingForm?: boolean;
     showHours?: boolean;
+    /**
+     * Layout variant. Defaults to `form-side` (the current form + info
+     * side-by-side). Other options prioritise different content.
+     *   - form-side     : form on one side, address/map on the other (default)
+     *   - grid-sections : multiple cards (sales / support / press)
+     *   - shader        : dark dramatic section with animated shader backdrop
+     */
+    variant?: 'form-side' | 'grid-sections' | 'shader';
   };
 
   /**
@@ -565,8 +680,11 @@ export interface WebsiteConfig {
      *   minimal   — small avatar + name + role only (dense grid)
      *   quote     — photo + name + role + short quote/bio card
      *   banner    — wide landscape card with overlay text (fewer per row)
+     *   light-bg  — Aceternity light-background cards with hover lift
+     *   small-avatars — Aceternity overlapping avatars with tooltips
+     *   card-hover — Aceternity dark cards with hover-glow
      */
-    variant?: 'portrait' | 'minimal' | 'quote' | 'banner';
+    variant?: 'portrait' | 'minimal' | 'quote' | 'banner' | 'light-bg' | 'small-avatars' | 'card-hover';
     members: Array<{
       name: string;
       role: string;
@@ -583,6 +701,9 @@ export interface WebsiteConfig {
        * given variant regardless of the block-level `team.variant`.
        * Lets agencies feature one person with a bigger card while the
        * rest stay in a uniform grid.
+       *
+       * Only the card-level variants make sense here (not full-section
+       * replacements like `small-avatars`).
        */
       variant?: 'portrait' | 'minimal' | 'quote' | 'banner';
       /**
@@ -684,6 +805,21 @@ export interface WebsiteConfig {
     /** Optional second button. Usually "Call" or "WhatsApp". */
     secondaryLabel?: string;
     secondaryHref?: string;
+    /**
+     * Layout variant. Defaults to `simple` (the original strip). Other
+     * options add more visual impact for higher-stakes asks:
+     *   - simple         : current gradient strip with buttons
+     *   - with-images    : CTA text with floating avatars from gallery
+     *   - masonry-images : bold headline beside a masonry photo wall
+     *   - centered-bold  : huge centered text on deep gradient
+     *   - moving-border  : centered text with animated glowing-border button
+     */
+    variant?:
+      | 'simple'
+      | 'with-images'
+      | 'masonry-images'
+      | 'centered-bold'
+      | 'moving-border';
   };
 
   /**
@@ -769,6 +905,13 @@ export interface WebsiteConfig {
       icon?: string;
     }>;
     footnote?: string;
+    /**
+     * Layout variant. Defaults to `numbered` (the existing stacked
+     * layout with big numbered circles).
+     *   - numbered : 3-col grid with numbered circles (default)
+     *   - timeline : vertical scrollable timeline (Aceternity)
+     */
+    variant?: 'numbered' | 'timeline';
   };
 
   /**
@@ -834,6 +977,12 @@ export interface WebsiteConfig {
       /** Optional link out. */
       href?: string;
     }>;
+    /**
+     * Layout variant. Defaults to `grid` (the current static strip).
+     *   - grid    : static centered row with hover effect (default)
+     *   - marquee : continuous horizontal scroll of logos (Aceternity)
+     */
+    variant?: 'grid' | 'marquee';
   };
 
   /**
@@ -998,6 +1147,17 @@ export const HERO_VARIANTS: HeroVariant[] = [
   'floating-icons',
   'parallax-layers',
   'gradient-mesh',
+  'aurora',
+  'wavy',
+  'sparkles',
+  'hero-highlight',
+  'dither',
+  'multicolor',
+  'full-bg-image',
+  'two-column-image',
+  'meteors',
+  'vortex',
+  'lamp',
 ];
 
 /**

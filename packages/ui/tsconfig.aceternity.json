@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "strict": false,
+    "noUncheckedIndexedAccess": false,
+    "noImplicitAny": false,
+    "strictNullChecks": false
+  },
+  "include": ["src/aceternity/**/*"],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "src/aceternity/templates/**/*"
+  ]
+}

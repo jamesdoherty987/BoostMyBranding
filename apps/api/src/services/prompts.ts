@@ -196,7 +196,7 @@ Return ONLY valid JSON in this exact shape:
     "ctaPrimary": { "label": "<action verb>", "href": "<#section or url>" },
     "ctaSecondary": { "label": "...", "href": "..." },
     "imageIndex": <index from AVAILABLE IMAGES, or null if none suit the hero>,
-    "variant": "<spotlight|beams|floating-icons|parallax-layers|gradient-mesh>",
+    "variant": "<spotlight|beams|floating-icons|parallax-layers|gradient-mesh|aurora|wavy|sparkles|hero-highlight|dither|multicolor|full-bg-image|two-column-image|meteors|vortex|lamp>",
     "floatingIcons": ["<6-8 Lucide icon names OR emoji strings — only when variant is floating-icons>"],
     "cutouts": [
       {
@@ -638,13 +638,26 @@ CUSTOM SECTIONS — use sparingly. They're the escape hatch for when the prebuil
 HERO VARIANT GUIDE — pick the one that matches the business personality:
 - "spotlight": Centered copy with a mouse-following glow. Premium, confident, minimal. Best for professional services, medical, consultancies, high-end brands.
 - "beams": Animated SVG beams sweeping across in brand colors. Energetic, forward-moving. Best for fitness, coaching, creative studios, education, tech-adjacent trades.
-- "floating-icons": Left copy with parallax icons/emojis drifting behind it. Playful, warm. Best for food (coffee ☕ utensils 🍴), beauty (scissors ✂️ sparkles ✨), retail. When you pick this variant you MUST populate floatingIcons with 6–8 entries — mix of Lucide icon names from the services list and emojis relevant to the business.
+- "floating-icons": Left copy with parallax icons/emojis drifting behind it. Playful, warm. Best for food (coffee icon + utensils + emojis), beauty (scissors + sparkles), retail. When you pick this variant you MUST populate floatingIcons with 6-8 entries — mix of Lucide icon names from the services list and emojis relevant to the business.
 - "parallax-layers": Split layout with hero image parallaxing deeper than copy. Classic, works with photography. Best for service trades, real estate, beauty with good photos.
 - "gradient-mesh": Slow-shifting gradient mesh, no image needed. Bold, minimal, confident. Best for retail, creative, or any client without great photography.
+- "aurora": Aceternity aurora sheets sweep behind centered copy. Modern, premium, dreamy. Best for wellness, creative agencies, yoga studios, lifestyle brands. No photo needed.
+- "wavy": Flowing noise-waves in brand colors. Smooth and modern. Best for salons, wellness, creative services. No photo needed.
+- "sparkles": Drifting particle field on deep black. Celebratory, premium, night-sky energy. Best for event venues, photographers, launches, gala businesses.
+- "hero-highlight": Dot-grid background with a highlighted phrase. Minimal, text-first, professional. Best for consultants, law firms, accountants — anywhere the message dominates and motion stays subtle.
+- "dither": Retro stippled pattern on dark with a brand-color wash. Tech-adjacent, modern, slightly nostalgic. Best for photography, design studios, tech-adjacent trades.
+- "multicolor": Soft color orbs in brand palette. Bold and playful without feeling childish. Best for creative agencies, kids brands, playful retail.
+- "full-bg-image": Full-bleed client photo with a dark overlay and copy overlaid. Immersive, mood-heavy. Best for restaurants, hotels, event venues, anywhere a strong photo sells the experience.
+- "two-column-image": Copy + CTAs on the left, photo on the right. The cleanest "local business" hero — plumbers, cafes, dentists, salons. Works well with standard portrait photos.
+- "meteors": Falling meteor trails on a dark canvas. Event / launch / nightlife energy. Best for gyms, event venues, photographers, anything night-oriented.
+- "vortex": Swirling colored particles behind centered copy. Premium and dynamic. Best for creative agencies, tech-adjacent trades, modern restaurants.
+- "lamp": Dramatic overhead spotlight that fades up as the page loads. Luxury and cinematic. Best for high-end services, boutique hotels, event venues, luxury retail.
 
 IMAGE GUIDANCE:
 - Set hero.imageIndex to a number ONLY if an AVAILABLE IMAGE looks like a strong hero (wide, high-quality, representative). Otherwise null — the system will generate a custom AI illustration.
-- Prefer the "parallax-layers" variant when a hero image IS set.
-- Prefer "gradient-mesh", "beams", or "spotlight" when no hero image is set.
-- Prefer "floating-icons" for warm, personality-driven businesses regardless of image availability.`;
+- Prefer "parallax-layers" when a hero image IS set.
+- Prefer "gradient-mesh", "beams", "spotlight", "aurora", or "wavy" when no hero image is set.
+- Prefer "floating-icons" for warm, personality-driven businesses regardless of image availability.
+- Prefer "sparkles" only for celebratory / event / night-oriented businesses.
+- Prefer "hero-highlight" for text-first B2B / professional services.`;
 }

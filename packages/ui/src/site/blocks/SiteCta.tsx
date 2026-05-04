@@ -6,21 +6,37 @@ import { SectionWrapper } from '../../section-wrapper';
 import { useSiteContext } from '../context';
 import { brandGradient } from '../theme';
 import { InlineEditable } from '../InlineEditable';
+import { CtaWithImages, CtaCenteredBold, CtaMovingBorder } from './cta';
 
 interface SiteCtaProps {
   config: WebsiteConfig;
+  /** Client gallery — used by the with-images variant as floating avatars. */
+  images?: string[];
 }
 
 /**
- * Mid-page call-to-action strip. A focused "ready to book" / "get a
- * quote today" banner in brand gradient, placed between sections to
- * catch visitors before they scroll past. Optional second button for
- * "Call" or "WhatsApp" — typically one tap away from conversion.
+ * Call-to-action section. Dispatches to one of four layouts based on
+ * `cta.variant`. Default stays as the original gradient strip for
+ * backward compatibility with existing configs.
  */
-export function SiteCta({ config }: SiteCtaProps) {
+export function SiteCta({ config, images = [] }: SiteCtaProps) {
   const { embedded, editMode } = useSiteContext();
   const cta = config.cta;
   if (!cta || !cta.heading) return null;
+
+  const variant = cta.variant ?? 'simple';
+
+  if (variant === 'with-images') {
+    return <CtaWithImages config={config} images={images} />;
+  }
+  if (variant === 'centered-bold') {
+    return <CtaCenteredBold config={config} />;
+  }
+  if (variant === 'moving-border') {
+    return <CtaMovingBorder config={config} />;
+  }
+  // `simple` and `masonry-images` (not yet wired) both use the original
+  // strip — masonry-images is a placeholder that falls back cleanly.
 
   return (
     <SectionWrapper immediate={embedded} className="bg-white py-12 md:py-16">

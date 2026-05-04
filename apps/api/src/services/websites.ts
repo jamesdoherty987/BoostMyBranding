@@ -259,7 +259,18 @@ RULES:
 - If asked to change one team member's card style ("make Sarah's card the banner one"), set that member's "variant" ("portrait" | "minimal" | "quote" | "banner"). Leave other members untouched so the rest stay uniform.
 - If asked to change the team block's overall card style ("use minimal cards for the whole team"), set team.variant. Individual member overrides still win.
 - If asked to change the hero style, update brand.heroStyle.
-- If asked to change the hero look/variant, update hero.variant to one of: spotlight, beams, floating-icons, parallax-layers, gradient-mesh.
+- If asked to change the hero look/variant, update hero.variant to one of: spotlight, beams, floating-icons, parallax-layers, gradient-mesh, aurora, wavy, sparkles, hero-highlight, dither, multicolor, full-bg-image, two-column-image, meteors, vortex, lamp.
+- If asked for a typewriter / typing / flipping-words / generative text effect on the headline, set hero.headlineEffect to one of: typewriter (types character-by-character), flip-words (last word cycles — also populate hero.flipWords with 2-5 alternatives), generate (words fade in one-by-one). Clear this field to go back to the static gradient headline.
+- If asked to change the testimonials style, update reviewsSection.variant to one of: grid (default), marquee (auto-scroll), carousel (one at a time with avatars), masonry, draggable (card stack), animated-testimonials.
+- If asked to change the services style, update servicesSection.variant to one of: cards (default), bento (featured span big tiles), sticky-scroll (scroll reveal), hover-effect (card spotlight), 3d-cards, wobble (tilting cards), glare (shiny premium cards), expandable (click-to-open modal with full details).
+- If asked to change the gallery style, update gallery.variant to one of: grid (default), focus-cards (hover to spotlight one), parallax (3-column parallax scroll), apple-carousel (tap-to-expand), 3d-marquee (tilted wall of images), layout-grid (click to expand), compare (before/after slider, great for trades), direction-aware (cursor-direction hover reveals).
+- If asked to change the FAQ style, update faqSection.variant to one of: accordion (default), grid (2-col always-visible), with-background.
+- If asked to change the CTA style, update cta.variant to one of: simple (default strip), with-images (floating avatars), masonry-images, centered-bold, moving-border (animated glowing button).
+- If asked to change the process style, update process.variant to one of: numbered (default), timeline (vertical scroll-drawn timeline).
+- If asked to change the stats style, update statsSection.variant to one of: ticker (default), gradient, changelog.
+- If asked to change the contact style, update contact.variant to one of: form-side (default), grid-sections, shader.
+- If asked to change the team layout style for the whole block, use team.variant: portrait, minimal, quote, banner, light-bg, small-avatars, card-hover.
+- If asked for a scrolling / marquee logo strip, set logoStrip.variant to 'marquee' (default is 'grid' — static centered row).
 - If asked for different floating icons, update hero.floatingIcons (Lucide names or emoji strings).
 - If asked to rename a section heading (e.g. "change Services to 'Our Menu'"), update the matching *Section.heading field: servicesSection, statsSection, reviewsSection, faqSection, gallery, about, or contact (use their .heading / .eyebrow fields — not the section title strings that appear inside the layout array).
 - If asked to add or remove a page (e.g. "add a Menu page", "remove the About page"), update the "pages" array. Pages have {slug, title, layout, hero?, blocks?}. Use URL-safe slugs. The first page MUST be the homepage with slug "home". Max 4 pages total.

@@ -19,6 +19,9 @@ import type { WebsiteConfig } from '@boost/core';
 import { brandGradient } from '../../theme';
 import { InlineEditable } from '../../InlineEditable';
 import { useSiteContext } from '../../context';
+import { TypewriterEffect } from '../../../aceternity/ui/typewriter-effect';
+import { FlipWords } from '../../../aceternity/ui/flip-words';
+import { TextGenerateEffect } from '../../../aceternity/ui/text-generate-effect';
 
 interface HeroCopyProps {
   config: WebsiteConfig;
@@ -76,13 +79,42 @@ export function HeroCopy({
       >
         {editMode ? (
           // In edit mode we skip the gradient-split and render as a single
-          // editable span so the user can type naturally. On commit, the
-          // last two words become the gradient chunk again automatically.
+          // editable span so the user can type naturally. Effects are
+          // disabled here too so the text stays editable.
           <InlineEditable
             path="hero.headline"
             value={heroHeadline}
             as="span"
             placeholder="Hero headline…"
+          />
+        ) : config.hero?.headlineEffect === 'typewriter' ? (
+          // Typewriter effect — renders character-by-character. We split
+          // on words and pass them as an array; the last word gets the
+          // accent color via inline class.
+          <TypewriterEffect
+            words={buildTypewriterWords(heroHeadline, config)}
+            className={dark ? 'text-white' : 'text-slate-900'}
+            cursorClassName={dark ? 'bg-white' : 'bg-slate-900'}
+          />
+        ) : config.hero?.headlineEffect === 'flip-words' &&
+          config.hero?.flipWords &&
+          config.hero.flipWords.length > 0 ? (
+          // Flip-words effect — the last word cycles through the
+          // `flipWords` list. The prefix is the original headline minus
+          // its last word, rendered normally.
+          <>
+            {stripLastWord(heroHeadline)}{' '}
+            <FlipWords
+              words={config.hero.flipWords}
+              className={dark ? 'text-white' : 'text-slate-900'}
+            />
+          </>
+        ) : config.hero?.headlineEffect === 'generate' ? (
+          // Generate effect — words fade in with a slight blur one-by-one
+          // when the hero enters view. Works with ANY headline length.
+          <TextGenerateEffect
+            words={heroHeadline}
+            className={`inline ${dark ? 'text-white' : 'text-slate-900'}`}
           />
         ) : (
           splitHeadline(heroHeadline).map((chunk, i) =>
@@ -191,4 +223,36 @@ function splitHeadline(headline: string): Array<{ text: string; accent?: boolean
     { text: accentWords, accent: true },
     ...(tail ? [{ text: tail }] : []),
   ];
+}
+
+/**
+ * Build the input the TypewriterEffect primitive expects — an array of
+ * `{ text, className? }`. The last word gets a brand-accent color class
+ * so the typing-in effect still has the "last two words pop" energy.
+ */
+function buildTypewriterWords(
+  headline: string,
+  config: WebsiteConfig,
+): Array<{ text: string; className?: string }> {
+  const cleaned = headline.trim();
+  if (!cleaned) return [{ text: '' }];
+  const words = cleaned.split(/\s+/);
+  if (words.length === 1) return [{ text: words[0] ?? '' }];
+  const lastWord = words.pop() ?? '';
+  return [
+    ...words.map((w) => ({ text: w })),
+    {
+      text: lastWord,
+      // Use the primary brand color so the typewriter accent matches the
+      // rest of the site's accent language.
+      className: '[color:var(--bmb-site-primary)]',
+    },
+  ];
+}
+
+/** Strip the last word — used by the flip-words effect's static prefix. */
+function stripLastWord(headline: string): string {
+  const words = headline.trim().split(/\s+/);
+  if (words.length <= 1) return '';
+  return words.slice(0, -1).join(' ');
 }

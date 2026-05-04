@@ -28,6 +28,17 @@ import {
   HeroFloatingIcons,
   HeroParallaxLayers,
   HeroGradientMesh,
+  HeroAurora,
+  HeroWavy,
+  HeroSparkles,
+  HeroHighlightDots,
+  HeroDither,
+  HeroMulticolor,
+  HeroFullBgImage,
+  HeroTwoColumnImage,
+  HeroMeteors,
+  HeroVortex,
+  HeroLamp,
 } from './hero';
 import { HeroCutouts } from './hero/HeroCutouts';
 
@@ -92,6 +103,54 @@ export function SiteHero({ config, images, businessName, embedded }: SiteHeroPro
 
     case 'gradient-mesh':
       variantEl = <HeroGradientMesh config={config} embedded={embedded} />;
+      break;
+
+    case 'aurora':
+      variantEl = <HeroAurora config={config} embedded={embedded} />;
+      break;
+
+    case 'wavy':
+      variantEl = <HeroWavy config={config} embedded={embedded} />;
+      break;
+
+    case 'sparkles':
+      variantEl = <HeroSparkles config={config} embedded={embedded} />;
+      break;
+
+    case 'hero-highlight':
+      variantEl = <HeroHighlightDots config={config} embedded={embedded} />;
+      break;
+
+    case 'dither':
+      variantEl = <HeroDither config={config} embedded={embedded} />;
+      break;
+
+    case 'multicolor':
+      variantEl = <HeroMulticolor config={config} embedded={embedded} />;
+      break;
+
+    case 'full-bg-image':
+      variantEl = (
+        <HeroFullBgImage config={config} heroImage={heroImage} embedded={embedded} />
+      );
+      break;
+
+    case 'two-column-image':
+      variantEl = (
+        <HeroTwoColumnImage config={config} heroImage={heroImage} embedded={embedded} />
+      );
+      break;
+
+    case 'meteors':
+      variantEl = <HeroMeteors config={config} embedded={embedded} />;
+      break;
+
+    case 'vortex':
+      variantEl = <HeroVortex config={config} embedded={embedded} />;
+      break;
+
+    case 'lamp':
+      variantEl = <HeroLamp config={config} embedded={embedded} />;
       break;
 
     case 'parallax-layers':

@@ -101,8 +101,8 @@ Dev doesn't use any of the rewrite config. Each app runs on its own port:
 ```bash
 pnpm dev
 # web        → http://localhost:3000
-# portal     → http://localhost:3001
-# dashboard  → http://localhost:3002
+# portal     → http://localhost:3000/portal
+# dashboard  → http://localhost:3000/dashboard
 # api        → http://localhost:4000
 ```
 

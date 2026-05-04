@@ -1,29 +1,22 @@
 import type { NextConfig } from 'next';
 
 /**
- * The `web` project owns the main domain (boostmybranding.com). Other
- * apps are proxied in at path prefixes so the user only ever sees one
- * domain, even though each app is a separate deployment.
+ * Single Next.js app that serves everything:
+ *   /                    → marketing site
+ *   /sites/[slug]        → client-facing sites
+ *   /dashboard/*         → agency dashboard
+ *   /portal/*            → client portal
+ *   /api/*               → proxied to the Express API (Render)
+ *   /signup              → unified signup / login / forgot
  *
- * URLs:
- *   /             → web itself (marketing + /sites/[slug])
- *   /portal/*     → apps/portal
- *   /dashboard/*  → apps/dashboard
- *   /api/*        → apps/api
- *
- * Each proxied app sets its own `basePath` via its next.config so links
- * inside it resolve under the right prefix. In local dev the path prefixes
- * aren't used (each app runs at its own port), but the same URLs work
- * because the apps don't assume a basePath when `*_BASE_PATH` is unset.
+ * The dashboard and portal are regular Next.js route segments now, not
+ * separate deployments. Only the API lives elsewhere because it needs a
+ * long-running Node process (cron, websockets, 30s+ generation jobs).
  *
  * Required env vars for production:
- *   PORTAL_UPSTREAM     – e.g. https://boost-portal.vercel.app
- *   DASHBOARD_UPSTREAM  – e.g. https://boost-dashboard.vercel.app
- *   API_UPSTREAM        – e.g. https://boost-api.onrender.com
+ *   API_UPSTREAM — e.g. https://boost-api.onrender.com
  */
 
-const PORTAL = process.env.PORTAL_UPSTREAM;
-const DASHBOARD = process.env.DASHBOARD_UPSTREAM;
 const API = process.env.API_UPSTREAM;
 
 const nextConfig: NextConfig = {
@@ -39,20 +32,10 @@ const nextConfig: NextConfig = {
     ],
   },
   async rewrites() {
-    const rules: Array<{ source: string; destination: string }> = [];
-    // The upstream apps set `basePath` so the prefix is already in their
-    // internal URLs. We still send the full path including the prefix,
-    // matching how Vercel multi-deploy proxies work.
-    if (PORTAL) {
-      rules.push({ source: '/portal/:path*', destination: `${PORTAL}/portal/:path*` });
-    }
-    if (DASHBOARD) {
-      rules.push({ source: '/dashboard/:path*', destination: `${DASHBOARD}/dashboard/:path*` });
-    }
-    if (API) {
-      rules.push({ source: '/api/:path*', destination: `${API}/api/:path*` });
-    }
-    return rules;
+    // Only API requests get proxied. Dashboard/portal are now built into
+    // this same app as route segments, so no rewrite is needed for them.
+    if (!API) return [];
+    return [{ source: '/api/:path*', destination: `${API}/api/:path*` }];
   },
   async headers() {
     return [

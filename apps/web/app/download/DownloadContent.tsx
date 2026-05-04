@@ -29,7 +29,7 @@ function detectPlatform(): Platform {
   return 'desktop';
 }
 
-const PORTAL_URL = process.env.NEXT_PUBLIC_PORTAL_URL ?? 'http://localhost:3001';
+const PORTAL_URL = process.env.NEXT_PUBLIC_PORTAL_URL ?? 'http://localhost:3000/portal';
 
 export function DownloadContent() {
   const [platform, setPlatform] = useState<Platform>('unknown');

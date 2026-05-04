@@ -17,7 +17,7 @@ import { api } from '@/lib/api';
 import { ApiError } from '@boost/api-client';
 import { ArrowRight, Lock, User, Mail, Loader2 } from 'lucide-react';
 
-const DASHBOARD_URL = process.env.NEXT_PUBLIC_DASHBOARD_URL ?? 'http://localhost:3002';
+const DASHBOARD_URL = process.env.NEXT_PUBLIC_DASHBOARD_URL ?? 'http://localhost:3000/dashboard';
 
 type Mode = 'login' | 'register' | 'forgot';
 

@@ -20,7 +20,7 @@ export default function PricingSuccessPage({
           hour. Meanwhile, you can head to the client portal and start uploading photos.
         </p>
         <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-center">
-          <Link href={process.env.NEXT_PUBLIC_PORTAL_URL ?? 'http://localhost:3001'}>
+          <Link href={process.env.NEXT_PUBLIC_PORTAL_URL ?? 'http://localhost:3000/portal'}>
             <Button size="lg" className="w-full">
               Open client portal
             </Button>

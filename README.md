@@ -20,8 +20,8 @@ pnpm dev
 Then open:
 
 - http://localhost:3000 — marketing site with rocket-launch hero + Stripe checkout
-- http://localhost:3001 — client portal PWA (magic-link sign-in)
-- http://localhost:3002 — agency dashboard (multi-user with live presence)
+- http://localhost:3000/portal — client portal PWA (magic-link sign-in)
+- http://localhost:3000/dashboard — agency dashboard (multi-user with live presence)
 - http://localhost:4000/health — API health check
 
 **Full setup guide:** [docs/SETUP.md](./docs/SETUP.md).
@@ -32,9 +32,11 @@ Then open:
 
 ```
 apps/
-  web/          Marketing site (Next.js 15)            → :3000
-  portal/       Client PWA (Next.js 15)                → :3001
-  dashboard/    Agency dashboard (Next.js 15)          → :3002
+  web/          All frontends (Next.js 15)             → :3000
+                  /            — marketing site
+                  /dashboard/* — agency dashboard
+                  /portal/*    — client portal PWA
+                  /sites/*     — client websites
   api/          Express API + cron + SSE realtime      → :4000
 
 packages/
@@ -59,7 +61,7 @@ assets/         Source logo PNG
 - Animated stats, example client websites (Verde Cafe + Murphy's Plumbing), testimonials, FAQ
 - Multi-step signup wizard → Stripe Checkout → magic-link email
 
-### Client portal PWA (`apps/portal`)
+### Client portal (`apps/web/app/portal`)
 - Magic-link sign-in with HttpOnly secure cookies
 - Image upload (camera + gallery + drag-drop) with per-file progress
 - Tinder-style approval calendar with keyboard shortcuts & undo
@@ -68,7 +70,7 @@ assets/         Source logo PNG
 - Brand settings + billing/invoices
 - PWA manifest, service worker, installable
 
-### Agency dashboard (`apps/dashboard`)
+### Agency dashboard (`apps/web/app/dashboard`)
 - Live presence: see teammates' avatars and what post they're reviewing
 - Soft-lock on review cards so two workers never approve the same post
 - Realtime updates on every action (post approvals, new messages)
@@ -112,9 +114,7 @@ pnpm dev                                     # every app at once
 pnpm build                                   # build everything
 pnpm lint                                    # typecheck every package
 
-pnpm --filter web dev                        # marketing site only
-pnpm --filter portal dev                     # portal PWA only
-pnpm --filter dashboard dev                  # agency dashboard only
+pnpm --filter web dev                        # web (marketing + dashboard + portal)
 pnpm --filter api dev                        # backend only
 
 pnpm --filter @boost/database db:generate    # create migration SQL from schema.ts

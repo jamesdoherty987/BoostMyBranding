@@ -148,6 +148,38 @@ export class BoostApi {
   getMyClient() {
     return this.request<Client>('/api/v1/clients/me');
   }
+  /**
+   * Agency-side: create a new client record. Returns the created row so
+   * the UI can route to its detail page.
+   */
+  createClient(body: {
+    businessName: string;
+    contactName: string;
+    email: string;
+    industry?: string;
+    websiteUrl?: string;
+    subscriptionTier?: 'social_only' | 'website_only' | 'full_package';
+  }) {
+    return this.request<Client>('/api/v1/clients', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+  /**
+   * Agency-side: send the client an email invite with a pre-filled signup
+   * link. Idempotent — safe to re-send. Returns `sent: false` with a
+   * copy-pasteable `link` when email isn't configured (dev / paste-it-
+   * yourself fallback).
+   */
+  inviteClient(id: string, body: { agencyName?: string } = {}) {
+    return this.request<{ sent: boolean; link: string; email: string }>(
+      `/api/v1/clients/${id}/invite`,
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      },
+    );
+  }
   updateMyClient(patch: {
     industry?: string;
     websiteUrl?: string;

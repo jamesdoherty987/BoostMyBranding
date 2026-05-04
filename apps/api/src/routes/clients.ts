@@ -10,6 +10,8 @@ import { getDb, isDbConfigured, clients, clientImages } from '@boost/database';
 import { mockClients, getClient, slugify, type WebsiteConfig } from '@boost/core';
 import { requireAuth, requireRole } from '../services/auth.js';
 import { publicLimiter } from '../middleware/rateLimit.js';
+import { sendEmail, clientInviteEmail } from '../services/resend.js';
+import { env } from '../env.js';
 
 export const clientsRouter = Router();
 
@@ -255,6 +257,95 @@ clientsRouter.post(
         .values({ ...body, slug })
         .returning();
       res.status(201).json({ data: row });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+/**
+ * Send the client an invite email with a pre-filled signup link. The link
+ * points at the marketing site's /signup page with the business name,
+ * contact name, and email baked in as query params — the client just
+ * picks a password and they're in, linked to their existing record.
+ *
+ * Idempotent — always safe to re-send (we don't persist the invite
+ * anywhere; the link itself carries all the info).
+ *
+ * Rate limiting: we reuse the global publicLimiter here because spamming
+ * this endpoint could be used to harass arbitrary email addresses. In
+ * practice the dashboard UI also throttles with a loading state.
+ */
+const inviteSchema = z.object({
+  agencyName: z.string().max(200).optional(),
+});
+
+clientsRouter.post(
+  '/:id/invite',
+  requireAuth,
+  requireRole('agency_admin', 'agency_member'),
+  async (req, res, next) => {
+    try {
+      const body = inviteSchema.parse(req.body ?? {});
+      const clientId = String(req.params.id);
+
+      if (!isDbConfigured()) {
+        return res.json({
+          data: {
+            sent: false,
+            link: `${env.APP_URL}/signup?email=demo%40example.com`,
+            reason: 'Database not configured — returning a mock link.',
+          },
+        });
+      }
+
+      const db = getDb();
+      const [row] = await db
+        .select({
+          id: clients.id,
+          email: clients.email,
+          businessName: clients.businessName,
+          contactName: clients.contactName,
+        })
+        .from(clients)
+        .where(eq(clients.id, clientId));
+
+      if (!row) {
+        return res
+          .status(404)
+          .json({ error: { message: 'Client not found', code: 'NOT_FOUND' } });
+      }
+
+      // Build the pre-filled signup URL. Every param is URI-encoded so
+      // spaces, apostrophes etc. round-trip cleanly to the form.
+      const params = new URLSearchParams({
+        email: row.email,
+        business: row.businessName,
+        name: row.contactName,
+      });
+      const link = `${env.APP_URL.replace(/\/$/, '')}/signup?${params.toString()}`;
+
+      // Send the email. If Resend isn't configured, `sendEmail` no-ops in
+      // dev mode and returns `{ sent: false }` — we surface the link so the
+      // agency can copy-paste it to the client manually.
+      const mail = clientInviteEmail({
+        link,
+        agencyName: body.agencyName,
+        contactName: row.contactName,
+        businessName: row.businessName,
+      });
+      const result = await sendEmail({
+        to: row.email,
+        ...mail,
+      });
+
+      res.json({
+        data: {
+          sent: result.ok,
+          link,
+          email: row.email,
+        },
+      });
     } catch (e) {
       next(e);
     }

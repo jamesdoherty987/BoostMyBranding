@@ -63,7 +63,18 @@ app.use(requestLogger);
 app.use(
   cors({
     origin: (origin, cb) => {
-      const allowed = [env.APP_URL, env.PORTAL_URL, env.DASHBOARD_URL];
+      // Normalize env URLs to origin-only (protocol://host) since the
+      // browser Origin header never includes a path.
+      const allowed = [env.APP_URL, env.PORTAL_URL, env.DASHBOARD_URL].map(
+        (u) => {
+          try {
+            const p = new URL(u);
+            return `${p.protocol}//${p.host}`;
+          } catch {
+            return u;
+          }
+        },
+      );
       if (!origin || allowed.includes(origin)) return cb(null, true);
       cb(null, false);
     },

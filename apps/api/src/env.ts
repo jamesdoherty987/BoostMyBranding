@@ -22,8 +22,8 @@ const schema = z.object({
   API_PORT: z.coerce.number().default(4000),
 
   APP_URL: z.string().url().default('http://localhost:3000'),
-  PORTAL_URL: z.string().url().default('http://localhost:3001'),
-  DASHBOARD_URL: z.string().url().default('http://localhost:3002'),
+  PORTAL_URL: z.string().url().default('http://localhost:3000/portal'),
+  DASHBOARD_URL: z.string().url().default('http://localhost:3000/dashboard'),
 
   AUTH_SECRET: z.string().min(16).default('dev-secret-change-me-0000000000000000'),
 

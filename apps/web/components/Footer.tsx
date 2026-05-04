@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { Logo } from '@boost/ui';
 import { Instagram, Linkedin, Twitter } from 'lucide-react';
 
-const PORTAL_URL = process.env.NEXT_PUBLIC_PORTAL_URL ?? 'http://localhost:3001';
+const PORTAL_URL = process.env.NEXT_PUBLIC_PORTAL_URL ?? 'http://localhost:3000/portal';
 
 export function Footer() {
   return (

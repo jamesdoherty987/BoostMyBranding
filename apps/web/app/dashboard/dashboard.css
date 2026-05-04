@@ -1,0 +1,7 @@
+/* Dashboard page styles — scoped via `.dashboard-root` to avoid leaking
+   the grey background to the marketing site. Applied by the nested
+   layout. */
+.dashboard-root {
+  background: #F5F7FA;
+  min-height: 100vh;
+}

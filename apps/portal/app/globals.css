@@ -1,7 +1,0 @@
-@import '@boost/ui/styles.css';
-
-html, body { height: 100%; }
-body {
-  background: #F5F7FA;
-  overscroll-behavior-y: none;
-}

@@ -1,0 +1,7 @@
+/* Portal page styles — scoped via `.portal-root` so portal's grey
+   background and overscroll settings don't bleed onto marketing pages. */
+.portal-root {
+  background: #F5F7FA;
+  min-height: 100%;
+  overscroll-behavior-y: none;
+}

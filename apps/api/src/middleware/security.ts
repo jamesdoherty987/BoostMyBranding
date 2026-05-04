@@ -20,7 +20,14 @@ import { env } from '../env.js';
 const ALLOWED = new Set(
   [env.APP_URL, env.PORTAL_URL, env.DASHBOARD_URL]
     .filter(Boolean)
-    .map((u) => u.replace(/\/$/, '')),
+    .map((u) => {
+      try {
+        const parsed = new URL(u);
+        return `${parsed.protocol}//${parsed.host}`;
+      } catch {
+        return u.replace(/\/$/, '');
+      }
+    }),
 );
 
 /** Rejects requests with an Origin header that isn't in our allowlist. */

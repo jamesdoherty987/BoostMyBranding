@@ -114,122 +114,6 @@ importers:
         specifier: ^5.6.3
         version: 5.9.3
 
-  apps/dashboard:
-    dependencies:
-      '@boost/api-client':
-        specifier: workspace:*
-        version: link:../../packages/api-client
-      '@boost/core':
-        specifier: workspace:*
-        version: link:../../packages/core
-      '@boost/ui':
-        specifier: workspace:*
-        version: link:../../packages/ui
-      framer-motion:
-        specifier: ^11.11.0
-        version: 11.18.2(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
-      lucide-react:
-        specifier: ^0.460.0
-        version: 0.460.0(react@19.2.5)
-      next:
-        specifier: ^15.0.3
-        version: 15.5.15(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
-      react:
-        specifier: ^19.0.0
-        version: 19.2.5
-      react-dom:
-        specifier: ^19.0.0
-        version: 19.2.5(react@19.2.5)
-      swr:
-        specifier: ^2.2.5
-        version: 2.4.1(react@19.2.5)
-    devDependencies:
-      '@types/node':
-        specifier: ^22.9.0
-        version: 22.19.17
-      '@types/react':
-        specifier: ^19.0.0
-        version: 19.2.14
-      '@types/react-dom':
-        specifier: ^19.0.0
-        version: 19.2.3(@types/react@19.2.14)
-      autoprefixer:
-        specifier: ^10.4.20
-        version: 10.5.0(postcss@8.5.13)
-      eslint:
-        specifier: ^9.15.0
-        version: 9.39.4(jiti@1.21.7)
-      eslint-config-next:
-        specifier: ^15.0.3
-        version: 15.5.15(eslint@9.39.4(jiti@1.21.7))(typescript@5.9.3)
-      postcss:
-        specifier: ^8.5.10
-        version: 8.5.13
-      tailwindcss:
-        specifier: ^3.4.14
-        version: 3.4.19(tsx@4.21.0)
-      typescript:
-        specifier: ^5.6.3
-        version: 5.9.3
-
-  apps/portal:
-    dependencies:
-      '@boost/api-client':
-        specifier: workspace:*
-        version: link:../../packages/api-client
-      '@boost/core':
-        specifier: workspace:*
-        version: link:../../packages/core
-      '@boost/ui':
-        specifier: workspace:*
-        version: link:../../packages/ui
-      framer-motion:
-        specifier: ^11.11.0
-        version: 11.18.2(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
-      lucide-react:
-        specifier: ^0.460.0
-        version: 0.460.0(react@19.2.5)
-      next:
-        specifier: ^15.0.3
-        version: 15.5.15(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
-      react:
-        specifier: ^19.0.0
-        version: 19.2.5
-      react-dom:
-        specifier: ^19.0.0
-        version: 19.2.5(react@19.2.5)
-      swr:
-        specifier: ^2.2.5
-        version: 2.4.1(react@19.2.5)
-    devDependencies:
-      '@types/node':
-        specifier: ^22.9.0
-        version: 22.19.17
-      '@types/react':
-        specifier: ^19.0.0
-        version: 19.2.14
-      '@types/react-dom':
-        specifier: ^19.0.0
-        version: 19.2.3(@types/react@19.2.14)
-      autoprefixer:
-        specifier: ^10.4.20
-        version: 10.5.0(postcss@8.5.13)
-      eslint:
-        specifier: ^9.15.0
-        version: 9.39.4(jiti@1.21.7)
-      eslint-config-next:
-        specifier: ^15.0.3
-        version: 15.5.15(eslint@9.39.4(jiti@1.21.7))(typescript@5.9.3)
-      postcss:
-        specifier: ^8.5.10
-        version: 8.5.13
-      tailwindcss:
-        specifier: ^3.4.14
-        version: 3.4.19(tsx@4.21.0)
-      typescript:
-        specifier: ^5.6.3
-        version: 5.9.3
-
   apps/web:
     dependencies:
       '@boost/api-client':
@@ -274,6 +158,9 @@ importers:
       react-dom:
         specifier: ^19.0.0
         version: 19.2.5(react@19.2.5)
+      swr:
+        specifier: ^2.2.5
+        version: 2.4.1(react@19.2.5)
       tailwind-merge:
         specifier: ^2.5.4
         version: 2.6.1

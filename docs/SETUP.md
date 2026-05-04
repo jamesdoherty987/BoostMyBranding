@@ -75,8 +75,8 @@ pnpm dev
 That starts every app in parallel via Turborepo. Open:
 
 - http://localhost:3000 — marketing site
-- http://localhost:3001 — client portal
-- http://localhost:3002 — agency dashboard
+- http://localhost:3000/portal — client portal
+- http://localhost:3000/dashboard — agency dashboard
 - http://localhost:4000/health — API health probe
 
 To run just one app: `pnpm --filter web dev`.

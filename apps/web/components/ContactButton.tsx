@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback } from 'react';
+import { usePathname } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Mail, X, Copy, Check, ExternalLink } from 'lucide-react';
 
@@ -9,12 +10,22 @@ import { COMPANY } from '@boost/core';
 const EMAIL = COMPANY.email;
 
 /**
- * Floating "Get in touch" button with a compact popup.
- * Two actions: copy the email in one click, or open the mail client.
+ * Floating "Get in touch" button with a compact popup. Shown on the
+ * marketing surface only — hidden on /dashboard/*, /portal/*, and the
+ * rendered client sites at /sites/* where it would clash with each
+ * surface's own chrome and CTA patterns.
  */
 export function ContactButton() {
+  const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  // Scoped to marketing only. Keep the check above every other hook so
+  // Next's hook rules stay happy.
+  const hide =
+    pathname?.startsWith('/dashboard') ||
+    pathname?.startsWith('/portal') ||
+    pathname?.startsWith('/sites/');
 
   const copyEmail = useCallback(async () => {
     try {
@@ -35,6 +46,8 @@ export function ContactButton() {
       setTimeout(() => setCopied(false), 2000);
     }
   }, []);
+
+  if (hide) return null;
 
   return (
     <>

@@ -14,7 +14,7 @@ const links = [
   { href: '/#pricing', label: 'Pricing' },
 ];
 
-const PORTAL_URL = process.env.NEXT_PUBLIC_PORTAL_URL ?? 'http://localhost:3001';
+const PORTAL_URL = process.env.NEXT_PUBLIC_PORTAL_URL ?? 'http://localhost:3000/portal';
 
 /**
  * Sticky navbar that flips between "dark hero" mode (transparent, white

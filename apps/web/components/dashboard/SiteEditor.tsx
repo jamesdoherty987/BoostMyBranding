@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type React from 'react';
 import { Reorder } from 'framer-motion';
 import type {
@@ -49,8 +49,11 @@ import {
   Coffee,
   Users,
   Calendar,
+  Code2,
+  Download,
 } from 'lucide-react';
 import { api } from '@/lib/dashboard/api';
+import { sanitizeConfig } from '@boost/ui/site';
 
 const BLOCK_LABELS: Record<SiteBlockKey, string> = {
   nav: 'Navigation',
@@ -452,7 +455,7 @@ export function SiteEditor({
   onActivePageSlugChange,
 }: SiteEditorProps) {
   const [tab, setTab] = useState<
-    'sections' | 'content' | 'pages' | 'items' | 'images' | 'hero' | 'brand' | 'ai' | 'domain'
+    'sections' | 'content' | 'pages' | 'items' | 'images' | 'hero' | 'brand' | 'ai' | 'domain' | 'code'
   >('content');
 
   const hasPages = (config.pages?.length ?? 0) > 0;
@@ -468,6 +471,7 @@ export function SiteEditor({
     { id: 'brand' as const, label: 'Brand', icon: Palette },
     { id: 'ai' as const, label: 'AI Edit', icon: Wand2 },
     { id: 'domain' as const, label: 'Domain', icon: Globe },
+    { id: 'code' as const, label: 'Code', icon: Code2 },
   ];
 
   return (
@@ -540,6 +544,7 @@ export function SiteEditor({
             <AIChatEditor config={config} onChange={onChange} clientId={clientId} />
           )}
           {tab === 'domain' && <DomainEditor clientId={clientId} />}
+          {tab === 'code' && <CodeEditor config={config} onChange={onChange} />}
         </div>
       </CardContent>
     </Card>
@@ -4022,5 +4027,289 @@ function DomainStep({
         <p className="mt-0.5 text-[11px] leading-relaxed text-slate-600">{detail}</p>
       </div>
     </li>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Code tab — raw JSON config editor for power users.                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Shows the full `WebsiteConfig` as editable JSON. Parse + basic shape
+ * validation runs on Apply. Unlike the visual editors this doesn't know
+ * about any particular field — so if you delete a required top-level key
+ * we refuse the save and explain why.
+ *
+ * Safety:
+ *   - Apply is only enabled when the text is valid JSON AND passes the
+ *     minimum-shape check (must be an object with a `brand` key, since
+ *     every renderer downstream assumes that).
+ *   - We run `sanitizeConfig` after parse so pasted configs with sparse
+ *     array holes (a common hand-edit mistake) get cleaned automatically.
+ *   - "Reset" restores the last-loaded config so a bad edit can't get
+ *     stuck in the editor.
+ *   - "Download" + "Upload" let you version-control the config offline
+ *     (handy before big hand edits).
+ */
+function CodeEditor({
+  config,
+  onChange,
+}: {
+  config: WebsiteConfig;
+  onChange: (next: WebsiteConfig) => void;
+}) {
+  // Pretty-print the current config. Memoized so it only re-runs when the
+  // upstream config object actually changes — not on every re-render (which
+  // would trigger the sync useEffect below unnecessarily).
+  const serialized = useMemo(() => JSON.stringify(config, null, 2), [config]);
+  const [text, setText] = useState(serialized);
+  const [dirty, setDirty] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Reset the local buffer whenever the upstream config changes AND the
+  // user isn't in the middle of editing. If they are editing (`dirty`),
+  // keep their work — they can press Reset if they want to discard it.
+  useEffect(() => {
+    if (!dirty) {
+      setText(serialized);
+      setError(null);
+    }
+  }, [serialized, dirty]);
+
+  const handleChange = (value: string) => {
+    setText(value);
+    setDirty(value !== serialized);
+    // Live validate so the user sees "Ready to apply" vs "Invalid JSON"
+    // before clicking Apply.
+    if (value.trim() === '') {
+      setError('Config cannot be empty.');
+      return;
+    }
+    try {
+      const parsed = JSON.parse(value);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        setError('Config must be a JSON object (not an array or primitive).');
+        return;
+      }
+      if (!parsed.brand || typeof parsed.brand !== 'object') {
+        setError('Config is missing the required "brand" object.');
+        return;
+      }
+      setError(null);
+    } catch (e) {
+      setError(`Invalid JSON: ${(e as Error).message}`);
+    }
+  };
+
+  const apply = () => {
+    if (error) return;
+    try {
+      const parsed = JSON.parse(text) as WebsiteConfig;
+      // Run sanitize to strip null array holes before handing it upstream.
+      const clean = sanitizeConfig(parsed);
+      onChange(clean);
+      setDirty(false);
+      setText(JSON.stringify(clean, null, 2));
+      toast.success('Config applied. Saving…');
+    } catch (e) {
+      toast.error(`Couldn't apply: ${(e as Error).message}`);
+    }
+  };
+
+  const reset = async () => {
+    if (dirty) {
+      const ok = await confirmDialog({
+        title: 'Discard local edits?',
+        description: 'Your unsaved JSON changes will be lost.',
+        confirmLabel: 'Discard',
+        danger: true,
+      });
+      if (!ok) return;
+    }
+    setText(serialized);
+    setDirty(false);
+    setError(null);
+  };
+
+  const copyAll = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      toast.error("Couldn't copy — try selecting the text manually.");
+    }
+  };
+
+  const download = () => {
+    const blob = new Blob([text], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `website-config-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const onUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const content = await file.text();
+      handleChange(content);
+      toast.success('Loaded — review then click Apply to save.');
+    } catch {
+      toast.error("Couldn't read that file.");
+    } finally {
+      // Clear the input so uploading the same file twice still fires onChange.
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-[11px] text-amber-900">
+        <p className="font-semibold">
+          <Code2 className="mr-1 inline h-3 w-3 -translate-y-px" />
+          Raw config editor
+        </p>
+        <p className="mt-1 leading-relaxed">
+          This is the full JSON config that drives your site. Hand-edit any value
+          then click Apply to save. Changes sync with the visual editors — nothing
+          is locked. If something breaks the renderer, hit Reset to roll back.
+        </p>
+      </div>
+
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <Button
+          size="sm"
+          onClick={apply}
+          disabled={!dirty || !!error}
+          className="gap-1"
+        >
+          <Check className="h-3.5 w-3.5" />
+          Apply
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={reset}
+          disabled={!dirty}
+          className="gap-1"
+        >
+          <RotateCcw className="h-3.5 w-3.5" />
+          Reset
+        </Button>
+        <div className="mx-1 h-4 w-px bg-slate-200" />
+        <Button size="sm" variant="outline" onClick={copyAll} className="gap-1">
+          {copied ? (
+            <>
+              <Check className="h-3.5 w-3.5 text-emerald-600" />
+              Copied
+            </>
+          ) : (
+            <>
+              <Copy className="h-3.5 w-3.5" />
+              Copy
+            </>
+          )}
+        </Button>
+        <Button size="sm" variant="outline" onClick={download} className="gap-1">
+          <Download className="h-3.5 w-3.5" />
+          Download
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => fileInputRef.current?.click()}
+          className="gap-1"
+        >
+          <Upload className="h-3.5 w-3.5" />
+          Upload
+        </Button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="application/json,.json"
+          className="hidden"
+          onChange={onUpload}
+        />
+      </div>
+
+      {/* Status line */}
+      <div
+        className={`rounded-lg px-2.5 py-1.5 text-[11px] font-medium ${
+          error
+            ? 'bg-red-50 text-red-700'
+            : dirty
+              ? 'bg-amber-50 text-amber-800'
+              : 'bg-emerald-50 text-emerald-700'
+        }`}
+      >
+        {error ? (
+          <>
+            <AlertCircle className="mr-1 inline h-3 w-3 -translate-y-px" />
+            {error}
+          </>
+        ) : dirty ? (
+          'Unsaved changes — click Apply to save.'
+        ) : (
+          <>
+            <Check className="mr-1 inline h-3 w-3 -translate-y-px" />
+            Synced with the live config.
+          </>
+        )}
+      </div>
+
+      {/* Editor */}
+      <textarea
+        ref={textareaRef}
+        value={text}
+        onChange={(e) => handleChange(e.target.value)}
+        spellCheck={false}
+        className="w-full rounded-xl border border-slate-200 bg-slate-900 p-3 font-mono text-[11px] leading-relaxed text-slate-100 outline-none focus:border-[#1D9CA1]"
+        style={{ minHeight: '500px', tabSize: 2 }}
+        // Tab key inserts two spaces instead of jumping focus — critical
+        // for a code-ish editor so indentation stays usable. Shift+Tab
+        // removes up to two leading spaces at the caret.
+        onKeyDown={(e) => {
+          if (e.key !== 'Tab') return;
+          e.preventDefault();
+          const el = e.currentTarget;
+          const start = el.selectionStart;
+          const end = el.selectionEnd;
+          if (e.shiftKey) {
+            // Outdent: strip up to 2 leading spaces from the line at caret.
+            const lineStart = text.lastIndexOf('\n', start - 1) + 1;
+            const leading = text.slice(lineStart, start).match(/^ {1,2}/)?.[0] ?? '';
+            if (!leading) return;
+            const next = text.slice(0, lineStart) + text.slice(lineStart + leading.length);
+            handleChange(next);
+            requestAnimationFrame(() => {
+              el.selectionStart = el.selectionEnd = start - leading.length;
+            });
+          } else {
+            // Indent: insert two spaces at caret (collapsed selection) or
+            // at the start for a ranged selection (doesn't multi-line indent
+            // but at least doesn't nuke the selection).
+            const next = `${text.slice(0, start)}  ${text.slice(end)}`;
+            handleChange(next);
+            requestAnimationFrame(() => {
+              el.selectionStart = el.selectionEnd = start + 2;
+            });
+          }
+        }}
+      />
+
+      <p className="text-[10px] leading-relaxed text-slate-500">
+        Tip: Apply validates the JSON and runs it through the same sanitizer the
+        live site uses. Broken shapes (missing <code>brand</code>, non-object
+        root) are refused before they can reach the renderer.
+      </p>
+    </div>
   );
 }

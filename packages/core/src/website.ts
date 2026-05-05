@@ -308,6 +308,19 @@ export interface WebsiteConfig {
     darkColor?: string;
     /** Whether the hero is dark-on-light or light-on-dark. */
     heroStyle?: 'light' | 'dark';
+    /**
+     * Optional logo URL. When set, the nav renders this instead of the
+     * default business-initial circle. Keep it compact (square or close
+     * to square, 512px max) since the nav shows it at ~32px high. SVG
+     * preferred for retina clarity; transparent-PNG works too.
+     */
+    logoUrl?: string;
+    /**
+     * Index into the provided `images` array, as an alternative to
+     * logoUrl. Useful when the agency uploaded the logo via the normal
+     * media library flow and we just need to reference it by position.
+     */
+    logoIndex?: number | null;
   };
 
   hero: {

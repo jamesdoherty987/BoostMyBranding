@@ -28,7 +28,7 @@ export function SiteMenu({ config }: SiteMenuProps) {
   const currency = menu.currency ?? '€';
 
   return (
-    <SectionWrapper immediate={embedded} id="menu" className="bg-white py-20 md:py-28">
+    <SectionWrapper immediate={embedded} id="menu" className="bg-white py-14 md:py-20 lg:py-28">
       <div className="mx-auto max-w-4xl px-4">
         <div className="mx-auto max-w-2xl text-center">
           <InlineEditable

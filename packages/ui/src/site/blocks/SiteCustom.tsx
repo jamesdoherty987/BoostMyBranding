@@ -128,7 +128,7 @@ function CustomSectionRenderer({
   return (
     <SectionWrapper
       immediate={embedded}
-      className={`py-20 md:py-28 ${bgClass}`}
+      className={`py-14 md:py-20 lg:py-28 ${bgClass}`}
       style={bgStyle}
     >
       <div className="mx-auto max-w-6xl px-4">

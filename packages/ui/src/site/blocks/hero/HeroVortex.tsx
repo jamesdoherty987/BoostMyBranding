@@ -28,7 +28,7 @@ export function HeroVortex({ config, embedded }: HeroVortexProps) {
         particleCount={embedded ? 250 : 600}
         baseHue={200}
         backgroundColor="#020617"
-        className="flex min-h-[640px] w-full flex-col items-center justify-center px-4 py-24 md:py-32"
+        className="flex min-h-[640px] w-full flex-col items-center justify-center px-4 py-14 md:py-24 lg:py-32"
       >
         <HeroCopy config={config} dark align="center" motionDisabled={embedded} />
       </Vortex>

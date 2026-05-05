@@ -25,7 +25,7 @@ export function SiteFAQ({ config }: SiteFAQProps) {
   const variant = config.faqSection?.variant ?? 'accordion';
 
   return (
-    <SectionWrapper immediate={embedded} id="faq" className="bg-slate-50 py-20 md:py-28">
+    <SectionWrapper immediate={embedded} id="faq" className="bg-slate-50 py-14 md:py-20 lg:py-28">
       <div className={`mx-auto px-4 ${variant === 'grid' ? 'max-w-6xl' : 'max-w-3xl'}`}>
         <div className="text-center">
           <InlineEditable

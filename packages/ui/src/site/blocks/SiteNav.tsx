@@ -10,6 +10,8 @@ import { useSiteContext } from '../context';
 interface SiteNavProps {
   config: WebsiteConfig;
   businessName: string;
+  /** Client gallery — used to resolve brand.logoIndex if set. */
+  images?: string[];
   embedded?: boolean;
   currentPageSlug?: string;
 }
@@ -25,6 +27,7 @@ interface SiteNavProps {
 export function SiteNav({
   config,
   businessName,
+  images = [],
   embedded,
   currentPageSlug,
 }: SiteNavProps) {
@@ -107,24 +110,47 @@ export function SiteNav({
             : ''
         }`}
       >
-        {/* Logo */}
+        {/* Logo — render the client's uploaded logo if set, otherwise
+            fall back to a colored circle with their business initial.
+            The logo is constrained to ~32px height so it sits comfortably
+            in the nav chrome even when the source image is large. */}
         <a
           href={homeHref}
           onClick={preventNav}
           className="flex items-center gap-2"
           aria-label={`${businessName} home`}
         >
-          <span
-            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-sm font-bold"
-            style={{
-              background: 'var(--bmb-site-primary)',
-              color: 'var(--bmb-site-on-primary)',
-            }}
-            aria-hidden
-          >
-            {businessName.slice(0, 1).toUpperCase()}
-          </span>
-          <span className="text-sm font-semibold text-slate-900">{businessName}</span>
+          {config.brand.logoUrl ||
+          (typeof config.brand.logoIndex === 'number' &&
+            images[config.brand.logoIndex]) ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={
+                config.brand.logoUrl ??
+                (typeof config.brand.logoIndex === 'number'
+                  ? images[config.brand.logoIndex]
+                  : undefined)
+              }
+              alt={`${businessName} logo`}
+              className="h-8 w-auto max-w-[140px] object-contain"
+            />
+          ) : (
+            <>
+              <span
+                className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-sm font-bold"
+                style={{
+                  background: 'var(--bmb-site-primary)',
+                  color: 'var(--bmb-site-on-primary)',
+                }}
+                aria-hidden
+              >
+                {businessName.slice(0, 1).toUpperCase()}
+              </span>
+              <span className="text-sm font-semibold text-slate-900">
+                {businessName}
+              </span>
+            </>
+          )}
         </a>
 
         {/* Desktop nav */}

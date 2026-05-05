@@ -187,7 +187,8 @@ Return ONLY valid JSON in this exact shape:
     "accentColor": "<hex, complementary>",
     "popColor": "<hex, optional highlight>",
     "darkColor": "<hex, near-black for footer>",
-    "heroStyle": "<light|dark>"
+    "heroStyle": "<light|dark>",
+    "logoIndex": <index from AVAILABLE IMAGES if one is a logo (square, transparent, contains business name), or null>
   },
   "hero": {
     "eyebrow": "<optional 2-4 word kicker, e.g. 'Family-run since 1998'>",
@@ -662,5 +663,15 @@ IMAGE GUIDANCE:
 - Prefer "gradient-mesh", "beams", "spotlight", "aurora", or "wavy" when no hero image is set.
 - Prefer "floating-icons" for warm, personality-driven businesses regardless of image availability.
 - Prefer "sparkles" only for celebratory / event / night-oriented businesses.
-- Prefer "hero-highlight" for text-first B2B / professional services.`;
+- Prefer "hero-highlight" for text-first B2B / professional services.
+
+LOGO PLACEMENT (critical — don't send logos as hero images):
+- Logos are small, square or close-to-square, often on white or transparent backgrounds, and usually contain the business name. Signs of a logo: "logo", "brand mark", "symbol", "icon" in the label, aspect ratio close to 1:1, simple graphic.
+- Logos go in brand.logoIndex, NOT hero.imageIndex. The nav renders brand.logoIndex at ~32px high — a wide landscape photo there looks broken.
+- Photos of the storefront, team, food, work-in-progress, or finished projects are hero candidates (hero.imageIndex). They're usually wide landscape and detail-rich.
+- If multiple images qualify as logos, pick the cleanest / most square one.
+- If no clear logo exists, leave brand.logoIndex null — the nav falls back to a colored circle with the business initial, which looks fine.
+- Team member headshots go on members[].photoIndex, never on hero.imageIndex or brand.logoIndex.
+- Product shots go on products.items[].imageIndex, never on hero.
+- Gallery / portfolio images go in gallery.imageIndices[] or portfolio.projects[].imageIndices[].`;
 }

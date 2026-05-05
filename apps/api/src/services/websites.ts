@@ -271,6 +271,8 @@ RULES:
 - If asked to change the contact style, update contact.variant to one of: form-side (default), grid-sections, shader.
 - If asked to change the team layout style for the whole block, use team.variant: portrait, minimal, quote, banner, light-bg, small-avatars, card-hover.
 - If asked for a scrolling / marquee logo strip, set logoStrip.variant to 'marquee' (default is 'grid' — static centered row).
+- If asked to "set the logo" / "use this as the logo" / "upload a logo", set brand.logoIndex to the index of the matching image in the client's gallery, or brand.logoUrl if a direct URL is available. Don't put logos in hero.imageIndex — the nav renders logos small (~32px high) and wide hero photos there look broken.
+- If asked to add/remove a page ("add a Menu page", "create an About page"), update the "pages" array. Each page needs {slug, title, layout, hero, blocks} at minimum. Use URL-safe slugs, Title Case titles. The first page MUST be the homepage with slug "home". When converting a single-page site to multipage, create the "home" entry from the current root layout as well. Generate appropriate content for the new page's hero + blocks — don't leave placeholders.
 - If asked for different floating icons, update hero.floatingIcons (Lucide names or emoji strings).
 - If asked to rename a section heading (e.g. "change Services to 'Our Menu'"), update the matching *Section.heading field: servicesSection, statsSection, reviewsSection, faqSection, gallery, about, or contact (use their .heading / .eyebrow fields — not the section title strings that appear inside the layout array).
 - If asked to add or remove a page (e.g. "add a Menu page", "remove the About page"), update the "pages" array. Pages have {slug, title, layout, hero?, blocks?}. Use URL-safe slugs. The first page MUST be the homepage with slug "home". Max 4 pages total.
@@ -364,26 +366,56 @@ function setPath(target: Record<string, any>, path: string[], value: unknown) {
   let cursor: any = target;
   for (let i = 0; i < path.length - 1; i++) {
     const key = path[i]!;
-    // Numeric key → treat the current cursor level as an array.
+    const nextKey = path[i + 1];
+    const nextIsNumeric = !!nextKey && /^\d+$/.test(nextKey);
+
+    // Create the node if missing.
     if (cursor[key] == null) {
-      const nextKey = path[i + 1]!;
-      cursor[key] = /^\d+$/.test(nextKey) ? [] : {};
+      cursor[key] = nextIsNumeric ? [] : {};
     }
+
+    // If the next key is numeric but the parent is a plain object, coerce
+    // it into an array. This fixes configs already corrupted by the prior
+    // version of this function (which would leave `services` as
+    // `{"0": {...}}` after the first numeric write).
+    if (
+      nextIsNumeric &&
+      !Array.isArray(cursor[key]) &&
+      typeof cursor[key] === 'object'
+    ) {
+      const obj = cursor[key] as Record<string, unknown>;
+      const numericKeys = Object.keys(obj).filter((k) => /^\d+$/.test(k));
+      if (numericKeys.length > 0) {
+        const maxIdx = Math.max(...numericKeys.map(Number));
+        const arr: unknown[] = Array.from({ length: maxIdx + 1 }, () => ({}));
+        for (const k of numericKeys) arr[Number(k)] = obj[k];
+        cursor[key] = arr;
+      } else {
+        cursor[key] = [];
+      }
+    }
+
     // Ensure the child at this key isn't a sparse hole when we're about
     // to descend into it by index. Fills `members[0]` and `members[1]`
     // with `{}` when writing to `members[2]`.
-    if (Array.isArray(cursor[key])) {
+    if (Array.isArray(cursor[key]) && nextIsNumeric) {
       const arr = cursor[key] as any[];
-      const nextKey = path[i + 1];
-      if (nextKey && /^\d+$/.test(nextKey)) {
-        const idx = Number(nextKey);
-        while (arr.length < idx) arr.push({});
-        if (arr[idx] == null) arr[idx] = {};
-      }
+      const idx = Number(nextKey);
+      while (arr.length < idx) arr.push({});
+      if (arr[idx] == null) arr[idx] = {};
     }
+
     cursor = cursor[key];
   }
-  cursor[path[path.length - 1]!] = value;
+
+  // Final assignment — use numeric index when the parent is an array so
+  // we don't stuff string keys into an Array.
+  const lastKey = path[path.length - 1]!;
+  if (/^\d+$/.test(lastKey) && Array.isArray(cursor)) {
+    cursor[Number(lastKey)] = value;
+  } else {
+    cursor[lastKey] = value;
+  }
 }
 
 /**

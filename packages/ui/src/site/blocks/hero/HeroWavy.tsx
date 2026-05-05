@@ -40,7 +40,7 @@ export function HeroWavy({ config, embedded }: HeroWavyProps) {
         waveOpacity={0.5}
         blur={10}
         speed="slow"
-        className="mx-auto flex min-h-[640px] w-full max-w-5xl flex-col items-center justify-center px-4 py-24 md:py-32"
+        className="mx-auto flex min-h-[640px] w-full max-w-5xl flex-col items-center justify-center px-4 py-14 md:py-24 lg:py-32"
       >
         <HeroCopy
           config={config}

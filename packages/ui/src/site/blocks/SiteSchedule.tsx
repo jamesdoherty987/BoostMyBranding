@@ -52,7 +52,7 @@ export function SiteSchedule({ config }: SiteScheduleProps) {
   }
 
   return (
-    <SectionWrapper immediate={embedded} id="schedule" className="bg-slate-50 py-20 md:py-28">
+    <SectionWrapper immediate={embedded} id="schedule" className="bg-slate-50 py-14 md:py-20 lg:py-28">
       <div className="mx-auto max-w-6xl px-4">
         <div className="mx-auto max-w-2xl text-center">
           <InlineEditable

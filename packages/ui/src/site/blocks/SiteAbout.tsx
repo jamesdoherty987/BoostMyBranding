@@ -68,7 +68,7 @@ export function SiteAbout({ config, images, businessName }: SiteAboutProps) {
   const paragraphs = body.split('\n\n');
 
   return (
-    <SectionWrapper immediate={embedded} id="about" className="bg-white py-20 md:py-28">
+    <SectionWrapper immediate={embedded} id="about" className="bg-white py-14 md:py-20 lg:py-28">
       <div className="mx-auto grid max-w-6xl grid-cols-1 items-center gap-10 px-4 lg:grid-cols-2 lg:gap-16">
         {embedded ? imageContainer : <Parallax offset={40}>{imageContainer}</Parallax>}
 

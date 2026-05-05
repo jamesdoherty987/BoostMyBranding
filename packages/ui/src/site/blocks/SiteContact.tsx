@@ -95,7 +95,7 @@ export function SiteContact({ config, clientId: clientIdProp, apiUrl: apiUrlProp
   };
 
   return (
-    <SectionWrapper immediate={embedded} id="contact" className="bg-white py-20 md:py-28">
+    <SectionWrapper immediate={embedded} id="contact" className="bg-white py-14 md:py-20 lg:py-28">
       <div className="mx-auto max-w-6xl px-4">
         <div
           className="overflow-hidden rounded-[2rem] shadow-xl"

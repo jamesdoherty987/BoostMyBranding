@@ -11,11 +11,47 @@
 
 import type { WebsiteConfig } from '@boost/core';
 
-/** Drop null/undefined entries from an array-valued field. */
-function clean<T>(arr: T[] | undefined | null): T[] | undefined {
+/**
+ * Drop null/undefined entries from an array-valued field. Also defensive
+ * against malformed configs where a field expected to be an array has
+ * been written as a plain object or primitive. When the object has
+ * numeric keys (e.g. `{"0": {...}, "1": {...}}`) we auto-repair by
+ * converting back into a dense array — this happens when an older
+ * version of `setPath` corrupted the config and we want editing to
+ * recover gracefully instead of hiding the section forever.
+ */
+function clean<T>(arr: T[] | undefined | null | Record<string, T>): T[] | undefined {
   if (!arr) return undefined;
-  const out = arr.filter((x): x is T & {} => x != null);
-  return out;
+  if (Array.isArray(arr)) {
+    return arr.filter((x): x is T & {} => x != null);
+  }
+  if (typeof arr === 'object') {
+    // Auto-repair: object with numeric keys becomes an array. This
+    // un-corrupts configs previously written by the buggy setPath.
+    const obj = arr as Record<string, T>;
+    const numericKeys = Object.keys(obj).filter((k) => /^\d+$/.test(k));
+    if (numericKeys.length > 0) {
+      if (typeof console !== 'undefined' && process.env.NODE_ENV !== 'production') {
+        console.warn(
+          '[sanitizeConfig] auto-repairing object-as-array with keys',
+          numericKeys,
+        );
+      }
+      const maxIdx = Math.max(...numericKeys.map(Number));
+      const out: T[] = [];
+      for (let i = 0; i <= maxIdx; i++) {
+        const v = obj[String(i)];
+        if (v != null) out.push(v);
+      }
+      return out;
+    }
+    // Object with no numeric keys — genuinely malformed, skip.
+    if (typeof console !== 'undefined' && process.env.NODE_ENV !== 'production') {
+      console.warn('[sanitizeConfig] expected array, got object', arr);
+    }
+    return undefined;
+  }
+  return undefined;
 }
 
 /**

@@ -48,7 +48,7 @@ export function SiteTeam({ config, images }: SiteTeamProps) {
   // variant not in this switch.
   if (blockVariant === 'small-avatars' || blockVariant === 'card-hover') {
     return (
-      <SectionWrapper immediate={embedded} id="team" className="bg-white py-20 md:py-28">
+      <SectionWrapper immediate={embedded} id="team" className="bg-white py-14 md:py-20 lg:py-28">
         <div className="mx-auto max-w-6xl px-4">
           <div className="mx-auto max-w-2xl text-center">
             <InlineEditable
@@ -94,7 +94,7 @@ export function SiteTeam({ config, images }: SiteTeamProps) {
           : 'mt-12 grid grid-cols-1 gap-6 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4';
 
   return (
-    <SectionWrapper immediate={embedded} id="team" className="bg-white py-20 md:py-28">
+    <SectionWrapper immediate={embedded} id="team" className="bg-white py-14 md:py-20 lg:py-28">
       <div className="mx-auto max-w-6xl px-4">
         <div className="mx-auto max-w-2xl text-center">
           <InlineEditable

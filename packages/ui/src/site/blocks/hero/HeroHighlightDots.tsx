@@ -25,7 +25,7 @@ export function HeroHighlightDots({ config, embedded }: HeroHighlightDotsProps) 
     >
       <HeroHighlight
         containerClassName="flex min-h-[640px] items-center"
-        className="mx-auto flex w-full max-w-5xl flex-col items-center justify-center px-4 py-24 md:py-32"
+        className="mx-auto flex w-full max-w-5xl flex-col items-center justify-center px-4 py-14 md:py-24 lg:py-32"
       >
         <HeroCopy
           config={config}

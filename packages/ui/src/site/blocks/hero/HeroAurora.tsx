@@ -27,7 +27,7 @@ export function HeroAurora({ config, embedded }: HeroAuroraProps) {
       style={{ minHeight: embedded ? '640px' : undefined }}
     >
       <AuroraBackground className="absolute inset-0 h-full w-full">
-        <div className="relative z-10 mx-auto flex min-h-[640px] w-full max-w-5xl flex-col items-center justify-center px-4 py-24 md:py-32">
+        <div className="relative z-10 mx-auto flex min-h-[640px] w-full max-w-5xl flex-col items-center justify-center px-4 py-14 md:py-24 lg:py-32">
           <HeroCopy
             config={config}
             dark

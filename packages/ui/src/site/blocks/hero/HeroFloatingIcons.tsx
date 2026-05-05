@@ -100,7 +100,7 @@ export function HeroFloatingIcons({ config, embedded }: HeroFloatingIconsProps) 
         }}
       />
 
-      <div className="mx-auto flex min-h-[640px] max-w-6xl flex-col justify-center px-4 py-24 md:py-32 lg:py-40">
+      <div className="mx-auto flex min-h-[520px] max-w-6xl md:min-h-[640px] flex-col justify-center px-4 py-14 md:py-24 lg:py-32">
         <HeroCopy
           config={config}
           dark={dark}

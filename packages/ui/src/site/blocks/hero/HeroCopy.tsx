@@ -73,7 +73,7 @@ export function HeroCopy({
       ) : null}
 
       <h1
-        className={`text-balance text-4xl font-bold leading-[1.05] tracking-tight sm:text-5xl md:text-6xl lg:text-7xl ${
+        className={`text-balance text-3xl font-bold leading-[1.1] tracking-tight sm:text-4xl sm:leading-[1.05] md:text-5xl lg:text-6xl xl:text-7xl ${
           dark ? 'text-white' : 'text-slate-900'
         }`}
       >

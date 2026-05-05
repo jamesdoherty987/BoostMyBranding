@@ -31,7 +31,7 @@ export function SiteReviews({ config, images }: SiteReviewsProps) {
   const variant = config.reviewsSection?.variant ?? 'grid';
 
   return (
-    <SectionWrapper immediate={embedded} id="reviews" className="bg-white py-20 md:py-28">
+    <SectionWrapper immediate={embedded} id="reviews" className="bg-white py-14 md:py-20 lg:py-28">
       <div className="mx-auto max-w-6xl px-4">
         <div className="mx-auto max-w-2xl text-center">
           <InlineEditable

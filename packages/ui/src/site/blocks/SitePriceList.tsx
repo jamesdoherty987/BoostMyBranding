@@ -25,7 +25,7 @@ export function SitePriceList({ config }: SitePriceListProps) {
   const currency = pl.currency ?? '€';
 
   return (
-    <SectionWrapper immediate={embedded} id="prices" className="bg-slate-50 py-20 md:py-28">
+    <SectionWrapper immediate={embedded} id="prices" className="bg-slate-50 py-14 md:py-20 lg:py-28">
       <div className="mx-auto max-w-3xl px-4">
         <div className="text-center">
           <InlineEditable

@@ -40,6 +40,7 @@ import {
 } from 'lucide-react';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { SiteEditor } from '@/components/dashboard/SiteEditor';
+import { PreviewFrame } from '@/components/dashboard/PreviewFrame';
 import { api } from '@/lib/dashboard/api';
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
@@ -368,32 +369,73 @@ export default function WebsitesPage() {
     async (path: string, value: unknown) => {
       if (!config || !newSite.clientId) return;
 
-      // Optimistic local patch so the preview updates instantly. The loop
-      // mirrors the server-side `setPath` — when we write into an array by
-      // index, we fill earlier holes with `{}` so downstream renders don't
-      // hit `member is null` (sparse holes serialize as null via JSON).
+      // Optimistic local patch so the preview updates instantly. Mirrors
+      // the server-side `setPath` — when we write into an array by index,
+      // we fill earlier holes with `{}` so downstream renders don't hit
+      // `member is null` (sparse holes serialize as null via JSON).
+      //
+      // Critical: when a numeric segment follows, the parent MUST be an
+      // array. If a previous write accidentally created the parent as
+      // `{"0": ...}` (which happens when the old code set a fresh {}
+      // placeholder and then indexed into it), we coerce it back to an
+      // array here. Otherwise the renderer gets `services = {0: {...}}`
+      // and `sanitizeConfig` correctly warns "expected array, got object".
       const segments = path.split('.').filter((s) => s.length > 0);
       const prev = structuredClone(config) as any;
       const next = structuredClone(config) as any;
       let cursor = next;
       for (let i = 0; i < segments.length - 1; i++) {
         const k = segments[i]!;
+        const nextKey = segments[i + 1];
+        const nextIsNumeric = !!nextKey && /^\d+$/.test(nextKey);
+
+        // Create the node if missing.
         if (cursor[k] == null) {
-          const nk = segments[i + 1]!;
-          cursor[k] = /^\d+$/.test(nk) ? [] : {};
+          cursor[k] = nextIsNumeric ? [] : {};
         }
-        if (Array.isArray(cursor[k])) {
-          const arr = cursor[k] as any[];
-          const nk = segments[i + 1];
-          if (nk && /^\d+$/.test(nk)) {
-            const idx = Number(nk);
-            while (arr.length < idx) arr.push({});
-            if (arr[idx] == null) arr[idx] = {};
+
+        // Coerce object-that-should-be-array into an array. This fixes
+        // configs already corrupted by the previous bug — without it,
+        // every edit compounds and the block eventually disappears.
+        if (nextIsNumeric && !Array.isArray(cursor[k]) && typeof cursor[k] === 'object') {
+          const obj = cursor[k] as Record<string, unknown>;
+          const numericKeys = Object.keys(obj)
+            .filter((key) => /^\d+$/.test(key))
+            .map((key) => Number(key));
+          if (numericKeys.length > 0) {
+            const maxIdx = Math.max(...numericKeys);
+            const arr: unknown[] = Array.from({ length: maxIdx + 1 }, () => ({}));
+            for (const key of Object.keys(obj)) {
+              if (/^\d+$/.test(key)) {
+                arr[Number(key)] = obj[key];
+              }
+            }
+            cursor[k] = arr;
+          } else {
+            // No numeric keys yet — safe to convert to empty array.
+            cursor[k] = [];
           }
         }
+
+        // Fill sparse array holes before the target index.
+        if (Array.isArray(cursor[k]) && nextIsNumeric) {
+          const arr = cursor[k] as unknown[];
+          const idx = Number(nextKey);
+          while (arr.length < idx) arr.push({});
+          if (arr[idx] == null) arr[idx] = {};
+        }
+
         cursor = cursor[k];
       }
-      cursor[segments[segments.length - 1]!] = value;
+
+      // Final assignment — use numeric index when the segment looks like
+      // a number so we don't stuff string keys into an array.
+      const lastKey = segments[segments.length - 1]!;
+      if (/^\d+$/.test(lastKey) && Array.isArray(cursor)) {
+        cursor[Number(lastKey)] = value;
+      } else {
+        cursor[lastKey] = value;
+      }
       setConfig(next);
 
       try {
@@ -1153,54 +1195,31 @@ export default function WebsitesPage() {
                         Click any headline, subheading, or service card in the preview below to edit. Press Enter to save, Esc to cancel.
                       </div>
                     ) : null}
-                    <div
-                      className={`max-h-[85vh] overflow-y-auto bg-slate-100 transition-all ${
-                        device === 'desktop' ? 'p-0' : 'flex justify-center p-4 md:p-6'
-                      }`}
-                    >
-                      {/* When the user picks a narrower device, we wrap the
-                          renderer in a fixed-width frame with a subtle device
-                          chrome. Width matches common real devices:
-                            - mobile  : 390px (iPhone 14/15)
-                            - tablet  : 768px (iPad portrait)
-                          The renderer still uses its responsive classes, so
-                          anything that checks viewport (not container) won't
-                          flip — but container-based layouts will. It's a very
-                          good approximation for ~90% of our blocks. */}
-                      <div
-                        className={
-                          device === 'desktop'
-                            ? 'w-full'
-                            : device === 'tablet'
-                              ? 'w-full max-w-[768px] rounded-2xl border border-slate-300 bg-white shadow-lg overflow-hidden'
-                              : 'w-full max-w-[390px] rounded-[2rem] border-[10px] border-slate-900 bg-white shadow-2xl overflow-hidden'
-                        }
-                      >
-                        <SiteRenderer
-                          config={config}
-                          businessName={selectedClient?.businessName ?? 'Your Business'}
-                          images={clientImages}
-                          clientId={newSite.clientId}
-                          embedded
-                          editMode={editMode}
-                          onFieldChange={handleFieldChange}
-                          onImageClick={(ctx) => setImagePicker(ctx)}
-                          onAIEdit={async (instruction) => {
-                            if (!config || !newSite.clientId) {
-                              throw new Error('No site loaded yet');
-                            }
-                            const result = await api.editWebsiteWithAI({
-                              clientId: newSite.clientId,
-                              currentConfig: config as unknown as Record<string, unknown>,
-                              instruction,
-                            });
-                            setConfig(sanitizeConfig(result.config));
-                            return result.summary ?? 'Done — site updated.';
-                          }}
-                          pageSlug={previewPageSlug}
-                        />
-                      </div>
-                    </div>
+                    <PreviewFrame device={device}>
+                      <SiteRenderer
+                        config={config}
+                        businessName={selectedClient?.businessName ?? 'Your Business'}
+                        images={clientImages}
+                        clientId={newSite.clientId}
+                        embedded
+                        editMode={editMode}
+                        onFieldChange={handleFieldChange}
+                        onImageClick={(ctx) => setImagePicker(ctx)}
+                        onAIEdit={async (instruction) => {
+                          if (!config || !newSite.clientId) {
+                            throw new Error('No site loaded yet');
+                          }
+                          const result = await api.editWebsiteWithAI({
+                            clientId: newSite.clientId,
+                            currentConfig: config as unknown as Record<string, unknown>,
+                            instruction,
+                          });
+                          setConfig(sanitizeConfig(result.config));
+                          return result.summary ?? 'Done — site updated.';
+                        }}
+                        pageSlug={previewPageSlug}
+                      />
+                    </PreviewFrame>
                   </CardContent>
                 </Card>
 

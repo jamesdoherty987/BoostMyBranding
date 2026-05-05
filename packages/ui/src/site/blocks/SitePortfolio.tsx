@@ -68,7 +68,7 @@ export function SitePortfolio({ config, images }: SitePortfolioProps) {
     <SectionWrapper
       immediate={embedded}
       id="portfolio"
-      className="bg-white py-20 md:py-28"
+      className="bg-white py-14 md:py-20 lg:py-28"
     >
       <div className="mx-auto max-w-6xl px-4">
         <div className="mx-auto max-w-2xl text-center">

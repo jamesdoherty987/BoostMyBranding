@@ -1538,9 +1538,34 @@ function PagesManager({
         subheadline: 'Edit this sub-page to fit the business.',
       },
     };
-    onChange({ ...config, pages: [...pages, newPage] });
+
+    // Converting a single-page site to multipage? We need to synthesize
+    // a Home page entry first, otherwise the preview can't switch between
+    // Home and the new page (PagePicker only shows with >1 entries and
+    // resolvePage wants a `home` entry to exist).
+    const existingPages = pages.length === 0
+      ? [
+          {
+            slug: 'home',
+            title: 'Home',
+            // Use the root layout as the homepage's layout so the site
+            // still looks identical after the conversion.
+            layout:
+              config.layout && config.layout.length > 0
+                ? config.layout
+                : DEFAULT_LAYOUT[config.template ?? 'service'],
+          } satisfies PageConfig,
+        ]
+      : pages;
+
+    onChange({ ...config, pages: [...existingPages, newPage] });
     onActivePageSlugChange(slug);
-    toast.success('Page added', 'Give it a title and edit its content.');
+    toast.success(
+      'Page added',
+      pages.length === 0
+        ? 'Site converted to multipage. Edit the new page or switch to Home from the preview tabs.'
+        : 'Give it a title and edit its content.',
+    );
   };
 
   const removePage = async (slug: string) => {
@@ -1633,34 +1658,37 @@ function PagesManager({
                   : 'border-slate-200 bg-white'
               }`}
             >
-              <button
-                type="button"
-                onClick={() => onActivePageSlugChange(p.slug)}
-                className="flex w-full items-center gap-2 px-3 py-2.5 text-left"
-              >
-                <FileText className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium text-slate-900">
-                    {p.title}
+              {/* Row layout with siblings instead of nested buttons to
+                  avoid the React hydration error. The main button
+                  stretches across; the delete lives as its own button
+                  in the same row with its own z-order. */}
+              <div className="flex items-stretch">
+                <button
+                  type="button"
+                  onClick={() => onActivePageSlugChange(p.slug)}
+                  className="flex flex-1 items-center gap-2 px-3 py-2.5 text-left min-w-0"
+                >
+                  <FileText className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium text-slate-900">
+                      {p.title}
+                    </div>
+                    <div className="truncate text-[10px] text-slate-500">
+                      /{isHome ? '' : p.slug}
+                    </div>
                   </div>
-                  <div className="truncate text-[10px] text-slate-500">
-                    /{isHome ? '' : p.slug}
-                  </div>
-                </div>
+                </button>
                 {!isHome ? (
                   <button
                     type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      removePage(p.slug);
-                    }}
-                    className="rounded-lg p-1 text-slate-400 hover:bg-red-50 hover:text-red-500"
+                    onClick={() => removePage(p.slug)}
+                    className="flex items-center justify-center px-3 text-slate-400 hover:bg-red-50 hover:text-red-500"
                     aria-label={`Delete ${p.title}`}
                   >
                     <X className="h-3.5 w-3.5" />
                   </button>
                 ) : null}
-              </button>
+              </div>
               {isActive ? (
                 <div className="space-y-2 border-t border-slate-200 p-3">
                   <label className="block">
@@ -1808,6 +1836,22 @@ function BrandEditor({
             </button>
           ))}
         </div>
+      </div>
+
+      <div>
+        <p className="text-xs font-medium text-slate-600">Logo URL</p>
+        <Input
+          className="mt-1"
+          value={brand.logoUrl ?? ''}
+          onChange={(e) => updateBrand({ logoUrl: e.target.value || undefined })}
+          placeholder="https://.../logo.svg"
+        />
+        <p className="mt-1 text-[10px] text-slate-400">
+          Paste a direct image URL (SVG preferred). Leave blank to show the
+          business initial in a colored circle as the nav logo. Tip: you can
+          also upload a logo via the Images tab, then reference its index in
+          Code view via <code>brand.logoIndex</code>.
+        </p>
       </div>
 
       <div>

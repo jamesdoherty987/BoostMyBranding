@@ -28,6 +28,8 @@ import type { WebsiteConfig } from '@boost/core';
 import { hexToRgbTuple } from '@boost/core';
 import { AuroraBg } from '../../../aurora-bg';
 import { HeroCopy } from './HeroCopy';
+import { InlineImage } from '../../InlineImage';
+import { useSiteContext } from '../../context';
 
 interface HeroParallaxLayersProps {
   config: WebsiteConfig;
@@ -110,7 +112,7 @@ export function HeroParallaxLayers({
     >
       <AuroraBg />
 
-      <div className="mx-auto grid max-w-6xl grid-cols-1 items-center gap-10 px-4 py-20 md:py-28 lg:grid-cols-2 lg:gap-14 lg:py-32">
+      <div className="mx-auto grid max-w-6xl grid-cols-1 items-center gap-10 px-4 py-14 md:py-20 lg:py-28 lg:grid-cols-2 lg:gap-14 lg:py-32">
         <HeroCopy
           config={config}
           dark={dark}
@@ -143,17 +145,18 @@ export function HeroParallaxLayers({
                 className="absolute inset-0"
                 style={{ boxShadow: `0 40px 80px -20px rgba(${primaryRgb}, 0.35)` }}
               />
-              {heroImage ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={heroImage}
-                  alt={`${businessName}, ${config.brand.tagline}`}
-                  className="h-full w-full object-cover"
-                  loading="eager"
-                />
-              ) : (
-                <BrandHeroTile brand={config.brand} businessName={businessName} />
-              )}
+              {/*
+                In edit mode we always render the InlineImage wrapper so
+                there's a clickable target for uploading a hero image —
+                including when no hero image is set yet. Public render
+                only shows the image when one exists, falling back to the
+                brand tile as a decorative placeholder.
+              */}
+              <HeroImageOrPlaceholder
+                heroImage={heroImage}
+                config={config}
+                businessName={businessName}
+              />
               <div
                 aria-hidden
                 className="absolute inset-0"
@@ -235,4 +238,50 @@ function BrandHeroTile({
       </span>
     </div>
   );
+}
+
+/**
+ * Render the hero image with an edit-mode click target. In edit mode
+ * this always renders InlineImage so the user can click to upload
+ * even when no image is set yet (InlineImage shows a gray placeholder
+ * with a camera icon in that case). Public render shows the real image
+ * or falls back to the branded initial tile.
+ */
+function HeroImageOrPlaceholder({
+  heroImage,
+  config,
+  businessName,
+}: {
+  heroImage?: string;
+  config: WebsiteConfig;
+  businessName: string;
+}) {
+  const { editMode } = useSiteContext();
+
+  if (editMode) {
+    return (
+      <InlineImage
+        src={heroImage}
+        alt={`${businessName}, ${config.brand.tagline}`}
+        className="h-full w-full object-cover"
+        path="hero"
+        fieldName="imageIndex"
+        placeholder={<BrandHeroTile brand={config.brand} businessName={businessName} />}
+      />
+    );
+  }
+
+  if (heroImage) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return (
+      <img
+        src={heroImage}
+        alt={`${businessName}, ${config.brand.tagline}`}
+        className="h-full w-full object-cover"
+        loading="eager"
+      />
+    );
+  }
+
+  return <BrandHeroTile brand={config.brand} businessName={businessName} />;
 }

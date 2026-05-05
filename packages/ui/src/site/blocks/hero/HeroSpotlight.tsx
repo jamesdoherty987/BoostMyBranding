@@ -94,7 +94,7 @@ export function HeroSpotlight({ config, heroImage, embedded }: HeroSpotlightProp
         }}
       />
 
-      <div className="mx-auto flex min-h-[640px] max-w-5xl flex-col items-center justify-center px-4 py-24 md:py-32 lg:py-40">
+      <div className="mx-auto flex min-h-[520px] max-w-5xl md:min-h-[640px] flex-col items-center justify-center px-4 py-14 md:py-24 lg:py-32">
         <HeroCopy
           config={config}
           dark={dark}

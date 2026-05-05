@@ -131,6 +131,7 @@ export function SiteRenderer({
         key="nav"
         config={pageConfig}
         businessName={businessName}
+        images={images}
         embedded={embedded}
         currentPageSlug={page.slug}
       />

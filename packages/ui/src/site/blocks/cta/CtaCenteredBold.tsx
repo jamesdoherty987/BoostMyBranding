@@ -25,7 +25,7 @@ export function CtaCenteredBold({ config }: CtaCenteredBoldProps) {
   return (
     <SectionWrapper immediate={embedded} className="bg-white py-0">
       <div
-        className="relative overflow-hidden px-4 py-24 text-center md:py-36"
+        className="relative overflow-hidden px-4 py-16 text-center md:py-24 lg:py-36"
         style={{
           background: `linear-gradient(135deg, var(--bmb-site-dark) 0%, var(--bmb-site-primary) 100%)`,
         }}

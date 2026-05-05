@@ -23,6 +23,7 @@ import { animateImage, generateImage } from './fal.js';
 import { videoScriptPrompt } from './prompts.js';
 import { withRetry } from './retry.js';
 import { broadcast } from './realtime.js';
+import { buildBrandContext, brandContextToFactsBlock, brandContextToImageStyle } from './brandContext.js';
 
 export interface GenerateVideoArgs {
   templateId: string;
@@ -136,23 +137,31 @@ export interface PersonalizedVideoArgs {
     | 'menu_reveal'
     | 'before_after'
     | 'location_tour';
-  clipCount?: number; // 3-6, default 5
+  clipCount?: number;
   headline?: string;
   cta?: string;
-  /**
-   * Additional free-form direction from the agency — "lean on the new
-   * opening in Cork", "mention winter hours", etc. Added to the Claude
-   * script prompt verbatim.
-   */
   direction?: string;
-  /** Optional curated subset of media ids to use. Defaults to top-N by quality score. */
   selectedMediaIds?: string[];
-  /**
-   * When true, any clip Claude marks `wantsMotion=true` gets an actual
-   * image-to-video pass via Fal. Off by default because each motion clip
-   * adds ~30s of compute and counts against the fal.ai quota.
-   */
   enableMotion?: boolean;
+
+  /* ── Advanced options ─────────────────────────────────────────── */
+  aspectRatio?: '9:16' | '1:1' | '16:9';
+  pacing?: 'slow' | 'balanced' | 'fast';
+  musicMood?: string;
+  captionStyle?: 'minimal' | 'bold' | 'magazine' | 'handwritten' | 'subtitle';
+  openingFrame?: 'hook_headline' | 'wide_shot' | 'close_up' | 'logo_reveal';
+  closingFrame?: 'cta_card' | 'logo_only' | 'contact_info' | 'fade_to_black';
+  /**
+   * When true, allow AI synthesis to fill clip slots that have no
+   * matching client media. Defaults to false — we prefer to render a
+   * shorter, honest video than to pad with AI stock images.
+   */
+  allowSynthesis?: boolean;
+  /**
+   * When true, refuse to build the video if fewer than N real clips can
+   * be assembled. Prevents the pipeline from shipping a 1-clip video.
+   */
+  minimumClips?: number;
 }
 
 export interface PersonalizedVideoResult {
@@ -167,6 +176,7 @@ export interface PersonalizedVideoResult {
     sourceUrl: string;
     durationSeconds: number;
   }>;
+  skippedClips: Array<{ order: number; reason: string }>;
   fromMock: boolean;
 }
 
@@ -190,6 +200,7 @@ export async function generatePersonalizedVideo(
         sourceUrl: `https://picsum.photos/seed/p-${args.clientId}-${i}/1080/1920`,
         durationSeconds: 2.8,
       })),
+      skippedClips: [],
       fromMock: true,
     };
   }
@@ -227,25 +238,40 @@ export async function generatePersonalizedVideo(
       : '';
 
   // ---- 2. Claude scripts the reel ----
+  const brandCtx = await buildBrandContext(args.clientId);
+  const knownFacts = brandCtx
+    ? brandContextToFactsBlock(brandCtx)
+    : buildKnownFactsBlockForClient(client);
   const scriptPrompt = videoScriptPrompt({
     businessName: client.businessName,
     industry: client.industry ?? 'Local Business',
-    brandVoice: client.brandVoice ?? 'Warm, specific, grounded. No marketing speak.',
+    brandVoice: client.brandVoice ?? 'Plain and factual, no embellishment.',
     mediaDescriptions,
+    knownFacts,
     videoIntent: args.intent ?? 'brand_story',
     clipCount,
     headline: args.headline,
     cta: args.cta,
     platform: 'instagram_reel',
+    pacing: args.pacing,
+    musicMood: args.musicMood,
+    captionStyle: args.captionStyle,
+    aspectRatio: args.aspectRatio,
+    openingFrame: args.openingFrame,
+    closingFrame: args.closingFrame,
   });
 
   interface ScriptResponse {
-    hookHeadline: string;
-    outroHeadline: string;
+    cannotBuild?: boolean;
+    reason?: string;
+    hookHeadline?: string;
+    outroHeadline?: string;
     suggestedCta?: string;
-    clips: Array<{
+    clips?: Array<{
       order: number;
-      mediaIndex: number | null;
+      skip?: boolean;
+      skipReason?: string;
+      mediaIndex?: number | null;
       synthesisPrompt?: string;
       wantsMotion?: boolean;
       motionPrompt?: string;
@@ -254,7 +280,7 @@ export async function generatePersonalizedVideo(
       durationSeconds?: number;
       focalX?: number;
       focalY?: number;
-      rationale?: string;
+      groundingSource?: string;
     }>;
   }
 
@@ -262,6 +288,13 @@ export async function generatePersonalizedVideo(
     () => generateJSON<ScriptResponse>(scriptPrompt, { model: 'sonnet', maxTokens: 2048 }),
     { label: `video_script:${args.clientId}`, attempts: 2 },
   );
+
+  // Refuse if Claude said the inputs can't support an honest video.
+  if (script.cannotBuild) {
+    throw new Error(
+      script.reason ?? 'Not enough client-provided facts or media to build this video honestly.',
+    );
+  }
 
   broadcast({
     type: 'video:scripted',
@@ -280,9 +313,15 @@ export async function generatePersonalizedVideo(
     focalX: number;
     focalY: number;
   }> = [];
+  const skippedClips: Array<{ order: number; reason: string }> = [];
 
   const ordered = (script.clips ?? []).slice(0, clipCount).sort((a, b) => a.order - b.order);
   for (const clip of ordered) {
+    if (clip.skip) {
+      skippedClips.push({ order: clip.order, reason: clip.skipReason ?? 'no reason' });
+      continue;
+    }
+
     const eyebrow = clip.eyebrow && clip.eyebrow.trim().length > 0 ? clip.eyebrow : undefined;
     const caption = clip.caption?.trim();
     const durationSeconds = clamp(clip.durationSeconds ?? 2.8, 2, 5);
@@ -298,10 +337,16 @@ export async function generatePersonalizedVideo(
       url = picked.enhancedUrl ?? picked.fileUrl;
       kind = (picked.mimeType ?? '').startsWith('video/') ? 'video' : 'image';
       sourceKind = 'upload';
-    } else if (clip.synthesisPrompt) {
-      // Gap-fill via Flux image generation. We target 9:16 to match the reel.
+    } else if (args.allowSynthesis && clip.synthesisPrompt) {
+      // Synthesis is opt-in only now. The user explicitly enabled it,
+      // so we fill the gap with Flux — but the caption must still be
+      // factually grounded, so we trust Claude's skip guards above.
       try {
-        url = await withRetry(() => generateImage(clip.synthesisPrompt!, '9:16'), {
+        const brandStyle = brandCtx ? brandContextToImageStyle(brandCtx) : '';
+        const styledPrompt = brandStyle
+          ? `${clip.synthesisPrompt}. ${brandStyle}`
+          : clip.synthesisPrompt;
+        url = await withRetry(() => generateImage(styledPrompt, args.aspectRatio ?? '9:16'), {
           label: `video_still_gen:${args.clientId}:${clip.order}`,
           attempts: 2,
         });
@@ -315,7 +360,16 @@ export async function generatePersonalizedVideo(
       }
     }
 
-    if (!url) continue; // skip unrenderable clips rather than crashing the whole reel
+    if (!url) {
+      // No real media and synthesis not allowed / failed → skip rather than invent.
+      skippedClips.push({
+        order: clip.order,
+        reason: args.allowSynthesis
+          ? 'Could not generate a replacement image'
+          : 'No matching client media and synthesis disabled',
+      });
+      continue;
+    }
 
     // Optional motion pass — only for stills the director asked to animate.
     if (
@@ -357,9 +411,10 @@ export async function generatePersonalizedVideo(
     });
   }
 
-  if (clipResolutions.length === 0) {
+  const minimumClips = Math.max(1, args.minimumClips ?? 3);
+  if (clipResolutions.length < minimumClips) {
     throw new Error(
-      'Could not assemble any clips — upload some photos for this client or enable synthesis.',
+      `Only ${clipResolutions.length} of ${clipCount} clips could be assembled honestly (${skippedClips.length} skipped). Upload more client media or lower the minimum clips threshold.`,
     );
   }
 
@@ -429,10 +484,40 @@ export async function generatePersonalizedVideo(
       sourceUrl: c.url,
       durationSeconds: c.durationSeconds,
     })),
+    skippedClips,
     fromMock: false,
   };
 }
 
 function clamp(n: number, lo: number, hi: number) {
   return Math.max(lo, Math.min(hi, n));
+}
+
+/**
+ * Local known-facts builder — same shape as the one in automation.ts.
+ * Duplicated rather than imported to avoid a circular dependency (the
+ * two services sit at the same layer and importing either way creates
+ * one).
+ */
+function buildKnownFactsBlockForClient(client: typeof clients.$inferSelect): string {
+  const lines: string[] = [];
+  if (client.businessName) lines.push(`Business name: ${client.businessName}`);
+  if (client.industry) lines.push(`Industry: ${client.industry}`);
+  if (client.websiteUrl) lines.push(`Website: ${client.websiteUrl}`);
+
+  const config = (client.websiteConfig ?? {}) as any;
+  const contact = config?.contact;
+  if (contact?.address) lines.push(`Address: ${contact.address}`);
+  if (contact?.phone) lines.push(`Phone: ${contact.phone}`);
+  if (contact?.email) lines.push(`Email: ${contact.email}`);
+  if (contact?.hours) lines.push(`Hours: ${contact.hours}`);
+
+  const services = Array.isArray(config?.services) ? config.services : [];
+  if (services.length > 0) {
+    lines.push(
+      `Services: ${services.map((s: any) => s?.title).filter(Boolean).join(', ')}`,
+    );
+  }
+
+  return lines.join('\n');
 }

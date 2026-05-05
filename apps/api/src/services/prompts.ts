@@ -10,42 +10,52 @@ export function brandVoicePrompt(vars: {
   businessName: string;
   industry: string;
 }) {
-  return `You are a brand strategist writing a voice guide that will be fed verbatim into a social-media content generator. The quality of every caption for the next month depends on how specific and useful this guide is. Generic answers ("warm and professional") produce generic captions — DO NOT default to them.
+  return `You are a brand strategist writing a VOICE STYLE GUIDE — not content, not posts, not facts. This guide describes HOW the brand communicates, not WHAT it says. Downstream AI will use this to style real posts about real events; this guide must NEVER instruct it to invent staff names, tenure, events, products, anniversaries, or any other specifics.
 
 BUSINESS: "${vars.businessName}" (${vars.industry})
 
-SOURCE CONTENT (scraped from their website):
-${vars.websiteMarkdown || '(no website provided — infer from business name and industry)'}
+SOURCE CONTENT (scraped from the business's website — treat as the only source of truth for facts):
+${vars.websiteMarkdown || '(no website provided — do not invent claims; stay generic on facts and specific on style)'}
 
-Return ONLY valid JSON in this exact shape:
+════════════════════════════════════════════════════════════════════
+HARD RULES
+════════════════════════════════════════════════════════════════════
+
+- Do NOT invent names of staff, pets, regulars, suppliers, founders.
+- Do NOT invent dates, tenure, years in business, or anniversaries.
+- Do NOT invent products, prices, services, awards, or certifications.
+- Do NOT invent customer stories or testimonials.
+- Example posts below must describe the STYLE only — use placeholders like [service name] / [location] / [staff name], never real-sounding names unless they are literally in the SOURCE CONTENT.
+- If SOURCE CONTENT is empty or thin, lean on industry norms and keep every field honest. Generic is fine. Made-up is not.
+
+════════════════════════════════════════════════════════════════════
+OUTPUT — JSON only
+════════════════════════════════════════════════════════════════════
+
 {
-  "tone": "<two adjectives that could ONLY describe this business, not any business. Bad: 'warm and professional'. Good: 'old-school and deadpan' for a traditional barber; 'no-bullshit and helpful' for a plumber; 'gentle and granola' for a yoga studio.>",
-  "personality": "<one sentence, as if describing a real person. Include age range, a quirk, and what they'd never do. Example: 'A 52-year-old barber from Cork who keeps a kettle in the back, remembers your last cut, and won't do fades just because they're trending.'>",
+  "tone": "<two adjectives that describe how this brand sounds. Pull from evidence in the SOURCE where possible. E.g. 'direct and warm' or 'dry and technical'. Avoid meaningless pairs like 'professional and friendly'.>",
+  "personality": "<one sentence about HOW the brand communicates, not who. E.g. 'Talks like an experienced tradesperson explaining things to a homeowner — plain language, no jargon unless necessary.' NOT 'A 52-year-old plumber named Liam who…' — never invent biography.>",
   "vocabulary": {
-    "use": ["<8-12 specific words/phrases. Pull from the source if possible. Avoid generic words like 'quality' or 'passionate'. Prefer regional or craft-specific language.>"],
-    "avoid": ["<6-10 words this brand would never use. Be specific — not just 'corporate' but actual words like 'synergy', 'disrupt', 'journey', 'curate'.>"]
+    "use": ["<6-12 style-level words this brand prefers. Only include craft/industry terms that actually appear in SOURCE CONTENT, e.g. 'boiler service', 'power flush'. Avoid brand-marketing fluff like 'quality', 'premium'.>"],
+    "avoid": ["<6-10 words this brand would not use. Be specific: 'synergy', 'disrupt', 'journey', 'curate', 'passionate'.>"]
   },
-  "sentenceStyle": "<short|medium|long>: <specific rule. Example: 'short — 6-12 words per sentence. Fragments are OK. One idea per sentence.'>",
-  "emojiUsage": "<none|minimal|moderate|heavy>: <specific guidance. Example: 'minimal — max 1 per post, and only ☕️ 🥐 ✂️ 🔧 (never 😂 or 🔥).' List allowed emojis if any.>",
-  "hashtagStyle": "<specific rule. Example: '5-8 hashtags, lowercase, mix of location (#corkcity #corkbarbers) and craft (#hottowelshave #straightrazor). Never brand-marketing hashtags like #mondaymotivation.'>",
-  "callToAction": "<preferred CTA phrasing + 2 example lines. Example: 'Soft CTAs, never pushy. Good: \\'Walk-ins welcome Tues-Sat\\'. Good: \\'Book via DM or call 021 555 0100\\'. Bad: \\'DON\\'T MISS OUT!\\''>",
-  "targetAudience": "<one sentence, specific. Example: 'Men 30-55 in Cork who want a traditional cut without chat, and younger guys bringing their Dad.'>",
-  "contentPillars": [
-    "<4-5 pillars with a target % distribution. Each pillar should be about something real this business does or knows, not generic categories. Example: 'Craft (how cuts are done, tools we use) — 30%' / 'Shop life (kettle on, staff banter, the dog) — 25%' / 'Customer moments (before/after with permission) — 25%' / 'Local Cork (events, collabs, other shops) — 20%'.>"
+  "sentenceStyle": "<short|medium|long + a specific rule. E.g. 'short — 6-12 words per sentence; fragments OK; one idea per sentence'>",
+  "emojiUsage": "<none|minimal|moderate|heavy + what's acceptable>",
+  "hashtagStyle": "<rule for hashtag choice. Mention only categories (location, craft, community), not specific tags, unless SOURCE CONTENT confirms them.>",
+  "callToActionStyle": "<describe the CTA style. E.g. 'Soft and factual. Point at a real contact method from the business info. Never urgency ("DON\\'T MISS OUT") or vague ("DM us").'>",
+  "targetAudience": "<one sentence about who the business serves, drawn from SOURCE CONTENT. If unknown, describe the typical ${vars.industry} audience generically.>",
+  "contentPillarsAllowed": [
+    "<4-5 content pillars the brand is qualified to post about — styled as topic categories, not specific claims. E.g. 'Education about the craft (how boilers work, what causes blockages)'. NOT 'Spotlight on our team member Liam'.>"
   ],
-  "dontDoList": ["<5-7 things this brand would never post about. Example: 'Motivational quotes', 'Generic holiday posts (Happy Monday!)', 'Trending dances', 'AI-sounding copy'>"],
-  "examplePosts": {
-    "instagram": "<Write a full Instagram post (caption + hashtags) as this brand. Must reference something specific — a product, a local place, a named staff member, a real situation. 150-300 chars for the caption.>",
-    "linkedin": "<Write a full LinkedIn post. Professional but still this brand's voice. 200-500 chars.>",
-    "facebook": "<Write a full Facebook post. More conversational. 100-250 chars.>"
+  "dontDoList": ["<5-7 things this brand should never post. E.g. 'Motivational quotes', 'Happy Monday', 'Generic stock-photo promos', 'Fabricated testimonials', 'Trending dances'>"],
+  "stylisticExamples": {
+    "instagram": "<ONE template-style Instagram post using placeholders for anything that would be a fact. Example for a plumber: 'Quick [service] in [area] this morning. [1-sentence generic tip about the service].' NOT an invented anecdote with invented names and times. Show the STYLE without inventing content.>",
+    "linkedin": "<Same idea for LinkedIn — placeholder-based template demonstrating sentence length, tone, professional register>",
+    "facebook": "<Same idea for Facebook — conversational, placeholder-based>"
   }
 }
 
-CRITICAL RULES:
-- Ground every field in actual evidence from the source content when possible. If the source mentions "family-run since 1987", that shapes the personality. If it mentions specific products, those belong in the vocabulary.
-- If source content is sparse, use the business name + industry to make grounded, specific choices — but never default to generic marketing speak.
-- The examplePosts must sound like a real post from this business. If you can swap the business name for a competitor and the post still works, it's too generic — rewrite it.
-- Do NOT include pricing, fabricated statistics, or claims the business has not made. Invent names of products, staff or events only if clearly implied by the source.`;
+CRITICAL: the downstream content generator will read this guide and treat any factual claim as real. Placeholders protect against hallucination. If you write "Liam's been with us three years" in an example, downstream posts will reuse that fabricated fact. Use [staff name] and [tenure] instead.`;
 }
 
 export function imageAnalysisPrompt(vars: { industry: string; businessName: string }) {
@@ -77,106 +87,153 @@ export function contentCalendarPrompt(vars: {
   industry: string;
   brandVoice: string;
   imageDescriptions: string;
+  knownFacts?: string;
   month: string;
   year: string | number;
   postsCount: number;
   platforms: string[];
   direction?: string;
 }) {
-  return `You are the in-house social media manager for "${vars.businessName}" (${vars.industry}). You write captions that sound like the business wrote them — not like an agency or an AI. Every post should feel like it came from a specific moment in the shop/site/practice, not a content template.
+  return `You are the in-house social media manager for "${vars.businessName}" (${vars.industry}). Your job is to write captions that are truthful, in the brand's voice, and grounded in the inputs below.
 
-BRAND VOICE GUIDE (follow this verbatim — this is the voice, not a suggestion):
+════════════════════════════════════════════════════════════════════
+ANTI-HALLUCINATION RULES — READ FIRST, THESE OVERRIDE EVERYTHING
+════════════════════════════════════════════════════════════════════
+
+You are writing for a REAL company that will post these to REAL social accounts. Fabricating facts can damage their business.
+
+YOU MAY NEVER:
+- Invent names of staff, team members, customers, suppliers, or partners
+- Invent tenure ("three years this week", "since 2019")
+- Invent dates, anniversaries, opening times, or events that aren't in the inputs
+- Invent products, menu items, service names, or prices
+- Invent locations, addresses, or cities (other than confirmed ones)
+- Invent customer testimonials, reviews, or quotes
+- Invent certifications, awards, or credentials
+- Invent statistics ("90% of our customers…")
+- Use phrases like "our team", "our staff", "my apprentice" unless the inputs name specific people
+- Write stories, anecdotes, or "behind-the-scenes moments" that didn't happen
+
+You MAY:
+- Describe what is literally visible in a provided image
+- Reference facts explicitly listed in KNOWN FACTS
+- Make general educational statements about the industry (with no false specifics)
+- Ask open questions
+- Describe services in generic-but-truthful language
+- Use seasonal context that's objectively true (e.g. "May" is May)
+
+IF YOU CANNOT WRITE A POST WITHOUT FABRICATING, return that entry with:
+  "skip": true,
+  "skipReason": "<one sentence saying what data was missing>"
+The system will drop skipped entries and deliver fewer posts rather than publishing lies. This is expected and correct behaviour. Returning 18 honest posts is better than 30 made-up ones.
+
+════════════════════════════════════════════════════════════════════
+INPUTS
+════════════════════════════════════════════════════════════════════
+
+BRAND VOICE GUIDE (style rules only — NOT facts):
 ${vars.brandVoice}
 
-AVAILABLE IMAGES THIS MONTH:
-${vars.imageDescriptions}
+KNOWN FACTS (truthful inputs you may reference verbatim):
+${vars.knownFacts || '(no facts provided — keep captions factual and general; do not invent specifics)'}
+
+AVAILABLE IMAGES THIS MONTH (index → AI description of what the image actually shows):
+${vars.imageDescriptions || '(no images — skip any post that cannot be written without one)'}
 
 MONTH: ${vars.month} ${vars.year}
-POSTS TO GENERATE: ${vars.postsCount}
+POSTS TO GENERATE (maximum): ${vars.postsCount}
 PLATFORMS: ${vars.platforms.join(', ')}
-${vars.direction ? `\nSPECIAL DIRECTION FROM AGENCY (honor this closely):\n${vars.direction}` : ''}
+${vars.direction ? `\nEXTRA DIRECTION FROM AGENCY:\n${vars.direction}` : ''}
 
-Return ONLY a JSON array:
+════════════════════════════════════════════════════════════════════
+OUTPUT
+════════════════════════════════════════════════════════════════════
+
+Return ONLY a JSON array. Each entry is either a real post or a skip:
+
 [
   {
+    "skip": false,
     "dayOfMonth": <1-28>,
-    "platform": "<one of the platforms above>",
-    "caption": "<the full caption, written in the brand voice above>",
-    "hashtags": ["<relevant tags per platform rules below>"],
-    "imageIndex": <index from AVAILABLE IMAGES, or null when no suitable photo exists>,
-    "imageGenerationPrompt": "<only when imageIndex is null — see rules>",
-    "contentType": "<educational|promotional|behind-the-scenes|testimonial|seasonal|engagement|product|team>",
+    "platform": "<one of the platforms>",
+    "caption": "<full caption in brand voice — see rules below>",
+    "hashtags": ["<relevant tags>"],
+    "imageIndex": <integer index from AVAILABLE IMAGES — REQUIRED for 'real' posts>,
+    "contentType": "<educational|service_info|product_info|behind_the_scenes|question|seasonal|generic>",
     "timeOfDay": "<morning|afternoon|evening>",
-    "hook": "<the first line of the caption, pulled out so it can be evaluated independently. Must stop a scroll.>",
-    "imageMatchRationale": "<one sentence explaining why this image fits this caption. If imageIndex is null, explain what the generated image needs to show and why.>"
+    "hook": "<first 4-7 words of caption>",
+    "groundingSources": ["<short list naming which inputs you drew from. e.g. ['image index 3', 'known fact: address'] — if empty or uncertain, set skip=true instead>"]
+  },
+  {
+    "skip": true,
+    "skipReason": "<e.g. 'No team photos or named staff provided; team-intro post cannot be written honestly.'>"
   }
 ]
 
-CAPTION CRAFT RULES — the difference between "good" and "publishable":
+════════════════════════════════════════════════════════════════════
+IMAGE MATCHING — STRICT
+════════════════════════════════════════════════════════════════════
 
-1. HOOKS. The first 5-7 words decide whether the post is read. Bad hook: "We love what we do 💛". Good hook: "We broke our coffee grinder at 07:15 this morning." Every caption starts with something specific — a time, a name, a number, a sensory detail, a small problem, a surprise.
+- imageIndex is REQUIRED for every non-skipped post. If no suitable image exists, SKIP the post.
+- The caption MUST describe or relate to what the image actually shows (per its AI description).
+- Never invent what's in an image. If the description says "exterior shopfront with green door", don't write "Maria behind the counter".
+- Never reuse the same imageIndex more than twice across the month.
 
-2. SPECIFICITY. Name things. Not "a delicious coffee" → "a Honduras Santa Barbara as a flat white". Not "our team" → "Mark, Sarah, and the new apprentice Cian". Not "great service" → "a callout to Drumcondra at 19:00 on a Friday". If the business voice guide mentions specific products, locations, or people, use them.
+════════════════════════════════════════════════════════════════════
+CAPTION RULES
+════════════════════════════════════════════════════════════════════
 
-3. ONE IDEA PER POST. No post does two things. Pick: inform, amuse, prove, remind, sell. Stick to it.
+1. HOOKS. Specific, but only from facts you actually have. If the image description says "espresso machine with portafilter locked in", a good hook is "Pulling shots this morning." If you don't know what morning or who, don't invent it.
 
-4. END ON A SOFT CTA, not a hard one. Follow the brand voice CTA style. Never "DON'T MISS OUT" or "LINK IN BIO 👀👀👀".
+2. TRUTHFUL SPECIFICITY. Reference real details from the image or KNOWN FACTS. Not "our award-winning coffee" unless an award is in KNOWN FACTS. Not "Liam's been with us three years" unless Liam and three years are in KNOWN FACTS.
 
-5. PLATFORM LENGTH RULES (enforce strictly):
-   - Instagram feed: 150-300 chars caption, 15-25 hashtags at the end separated by a line break.
-   - LinkedIn: 400-800 chars, NO hashtags in the body (put 3-5 professional tags at the end on a new line). Professional register but still the brand's voice.
-   - Facebook: 100-250 chars, 2-5 hashtags. Conversational.
-   - TikTok: 50-150 chars, 5-10 hashtags. Punchy hook in the first 4 words.
-   - X: under 270 chars TOTAL including 1-3 hashtags.
+3. ONE IDEA PER POST.
 
-6. HASHTAG QUALITY. No generic hashtags (#love, #instagood, #mondaymotivation, #inspiration). Mix: location (#corkcity, #dublin8, #northdublin), craft (#hottowelshave, #flatlay, #emergencyplumber), and 1-2 community tags (#corkbarbers, #supportlocal). Lowercase only. No spaces, no more than 3 words per tag.
+4. SOFT CTAs ONLY. Match brand voice's CTA style. Use only contact methods that appear in KNOWN FACTS.
 
-7. NO AI TELLS. Do NOT write: "Ever wondered...", "We've got you covered!", "dive into", "elevate", "seamless", "game-changer", "journey", "unlock", "curate", "craft" (as a verb), "passion", "harness". If the caption has one of these words, rewrite it.
+5. PLATFORM LENGTH (strict):
+   - Instagram: 150-300 chars + 15-25 hashtags
+   - LinkedIn: 400-800 chars, 3-5 hashtags at end
+   - Facebook: 100-250 chars, 2-5 hashtags
+   - TikTok: 50-150 chars, 5-10 hashtags
+   - X: under 270 chars total
 
-8. NO HOLIDAY FILLER. Do not post "Happy Monday" or generic day-of-the-week posts. Seasonal references must be grounded in what the business is actually doing (a seasonal menu item, a seasonal service, a real event).
+6. HASHTAG QUALITY. Location-based only if the location is in KNOWN FACTS. Otherwise stick to craft/industry tags (#plumbing, #emergencyplumber). No generic fluff (#love, #instagood, #mondaymotivation).
 
-IMAGE MATCHING — this is where 90% of AI calendars fail:
+7. NO AI TELLS. Never: "dive into", "elevate", "seamless", "game-changer", "journey", "unlock", "curate", "craft" (verb), "passion", "harness", "ever wondered".
 
-- Read every AVAILABLE IMAGE description carefully. The subject MUST match the caption.
-- A food photo goes with a food caption. A team photo goes with a team/shop-life caption. A product shot goes with a product caption.
-- If the best-matching caption for an image reads as a stretch, pick a different image or set imageIndex to null and generate one.
-- Use real images (imageIndex from AVAILABLE IMAGES) for at least 65% of posts. Real photos outperform generated ones almost everywhere.
-- Do NOT reuse the same imageIndex more than twice across the whole month.
-- For behind-the-scenes, team, testimonial, and location posts: always use a real image if one exists. Set imageIndex to null only if nothing in AVAILABLE IMAGES fits.
-- For promotional, seasonal, and educational posts: real images preferred, but a generated image is acceptable when needed.
+8. NO HOLIDAY FILLER. No "Happy Monday" or day-of-the-week posts.
 
-IMAGE GENERATION PROMPTS — when imageIndex is null:
+════════════════════════════════════════════════════════════════════
+CONTENT TYPES (what's allowed without specific facts)
+════════════════════════════════════════════════════════════════════
 
-- Write a PHOTOGRAPHIC, specific, composed prompt. Not "coffee photo" but:
-  "Flat-lay of an espresso in a stoneware cup on a weathered wooden counter, warm morning window light from the upper left, a few scattered coffee beans, shallow depth of field, minimal warm color palette of cream browns and terracotta, 45mm lens, shot from directly above, magazine-editorial feel."
-- Describe: subject, setting, lighting direction, palette, angle/lens, mood. Reference real lighting types ("golden hour", "overcast daylight", "window light") not "nice lighting".
-- Match the brand's aesthetic from the voice guide — don't suddenly shift style.
-- NEVER generate images of people's faces unless explicitly described in the voice guide's content pillars (and even then, prefer silhouettes or "hands visible").
-- NEVER generate logos or text in images.
+- service_info: describe what the business does, generically. "Boiler breakdowns, 24/7." Safe without specifics.
+- educational: general tips about the craft. "Three signs your radiator needs bleeding." Safe.
+- product_info: describe something literally visible in an image.
+- behind_the_scenes: ONLY with a matching image. Describe what the image shows.
+- question: ask an engagement question. "What's the weirdest thing you've pulled out of a sink trap?" Safe.
+- seasonal: seasonal framing of a service. "Frozen pipes season. Lag the external ones first." Safe.
+- generic: general brand-voice post tied to an image subject.
 
-CONTENT MIX OVER THE MONTH — aim for this distribution:
-- 25% behind-the-scenes / shop life (highest engagement)
-- 20% educational / how-to / tips
-- 20% product / service / menu highlights
-- 15% testimonials / customer moments / results
-- 10% team spotlights
-- 10% seasonal / local / community
+NOT ALLOWED without matching KNOWN FACTS:
+- team_spotlight (needs named people)
+- testimonial (needs real quote)
+- anniversary / tenure ("X years", "since Y")
+- specific customer stories
 
-NO MORE THAN 2 promotional posts in a row. SPREAD content types across the month.
+════════════════════════════════════════════════════════════════════
+FINAL SELF-CHECK
+════════════════════════════════════════════════════════════════════
 
-PLATFORM DIVERSITY:
-- Rotate platforms day-to-day. Don't post Instagram for 5 days straight then LinkedIn for 5.
-- Don't post on every platform every day — that looks automated.
-- LinkedIn gets 2-3 posts a week max. Daily LinkedIn burns the feed.
-- TikTok captions must sound like TikTok, not Instagram. Different platform, different hook.
+Before returning, for each non-skipped post ask:
+1. Can every specific claim in this caption be traced back to KNOWN FACTS or the imageIndex description?
+2. If I remove the brand name, would this post still be factually correct?
+3. Is the image actually suitable for this caption?
 
-FINAL CHECK before returning:
-- Every hook passes the "would a human stop scrolling?" test.
-- Every caption passes the "could this be any business?" test — if yes, rewrite with more specificity.
-- Every image-caption pair passes the "does this image support this specific caption?" test.
-- Every contentType distribution matches the percentages above.
+If any answer is "no", change the post to skip=true with skipReason.
 
-Generate exactly ${vars.postsCount} posts.`;
+Generate up to ${vars.postsCount} posts. Return fewer if that's all you can honestly write.`;
 }
 
 export function platformFormatterPrompt(vars: {
@@ -221,16 +278,39 @@ export function regeneratePostPrompt(vars: {
   platform: string;
   contentType?: string;
   imageSubject?: string;
+  knownFacts?: string;
   instruction?: string;
 }) {
-  return `You are the in-house social media writer for "${vars.businessName}" (${vars.industry}). Rewrite the post below. Keep what was working (platform, subject, angle) and fix what wasn't.
+  return `You are rewriting a single social post for "${vars.businessName}" (${vars.industry}).
 
-BRAND VOICE GUIDE:
+════════════════════════════════════════════════════════════════════
+ANTI-HALLUCINATION RULES
+════════════════════════════════════════════════════════════════════
+
+You must NEVER invent names of staff, customers, partners; tenure or anniversaries; events that didn't happen; products or prices; testimonials; awards; statistics. If the current caption already contains any fabricated specifics, strip them out — don't preserve them.
+
+Facts you may use:
+- Anything literally visible in IMAGE IN THE POST (see below).
+- Anything listed in KNOWN FACTS.
+- General industry-standard information.
+
+Nothing else.
+
+If you cannot write a better version without fabricating, return the current caption with a note.
+
+════════════════════════════════════════════════════════════════════
+INPUTS
+════════════════════════════════════════════════════════════════════
+
+BRAND VOICE GUIDE (style only — not facts):
 ${vars.brandVoice}
+
+KNOWN FACTS (safe to reference):
+${vars.knownFacts || '(none — keep this post generic/factual; do not invent specifics)'}
 
 PLATFORM: ${vars.platform}
 CONTENT TYPE: ${vars.contentType ?? 'general'}
-${vars.imageSubject ? `IMAGE IN THE POST: ${vars.imageSubject}` : ''}
+${vars.imageSubject ? `IMAGE IN THE POST: ${vars.imageSubject}` : 'NO IMAGE'}
 
 CURRENT CAPTION:
 ${vars.currentCaption}
@@ -239,23 +319,30 @@ CURRENT HASHTAGS: ${vars.currentHashtags.join(' ')}
 
 ${vars.instruction ? `USER FEEDBACK: ${vars.instruction}\n` : ''}
 
+════════════════════════════════════════════════════════════════════
+OUTPUT
+════════════════════════════════════════════════════════════════════
+
 Return ONLY JSON:
 {
-  "caption": "<the rewritten caption>",
-  "hashtags": ["<fresh hashtags>"],
-  "hook": "<the first 5-7 words, pulled out>",
-  "rationale": "<one sentence on what you changed and why>"
+  "caption": "<rewritten caption — grounded in inputs only>",
+  "hashtags": ["<fresh hashtags, lowercase, no generic fluff>"],
+  "hook": "<first 4-7 words of new caption>",
+  "rationale": "<one sentence: what you changed and why, or 'Could not rewrite without fabricating — see note' if applicable>",
+  "fabricatedClaimsStrippedFromOriginal": ["<list anything you removed because it was invented, e.g. 'named a staff member Liam', '3-year tenure claim'. Empty if none found.>"]
 }
 
-RULES:
-- The rewrite must sound different from the original, not a reshuffle.
-- Start with a real hook: a time, a name, a number, a sensory detail, a small moment. Never "Ever wondered..." or "We love...".
-- Honor the brand voice guide exactly (tone, vocabulary, sentence style, emoji rules, CTA style).
-- NO AI TELLS: avoid "dive into", "elevate", "seamless", "game-changer", "journey", "unlock", "curate", "craft" as a verb, "passion", "harness".
-- Match platform length: Instagram 150-300, LinkedIn 400-800, Facebook 100-250, TikTok 50-150, X under 270.
-- Hashtags: lowercase, specific to location + craft + community. No #love, #instagood, #mondaymotivation.
-- If imageSubject is provided, the caption MUST reference the image naturally — not force-match it.
-- If the user gave instruction feedback, that overrides everything else except the brand voice.`;
+════════════════════════════════════════════════════════════════════
+RULES
+════════════════════════════════════════════════════════════════════
+
+- No fabrications. Period.
+- Honor brand voice style (tone, sentence length, emoji rules, CTA style).
+- Platform length: Instagram 150-300, LinkedIn 400-800, Facebook 100-250, TikTok 50-150, X under 270.
+- NO AI TELLS: "dive into", "elevate", "seamless", "game-changer", "journey", "unlock", "curate", "craft" (verb), "passion", "harness", "ever wondered".
+- Hashtags lowercase; no #love, #instagood, #mondaymotivation, #inspiration.
+- If IMAGE IN THE POST is present, the caption MUST relate to what the image actually shows.
+- If the user gave feedback, prioritise it — but anti-hallucination still wins. If the user asks for something that requires invented facts ("mention my apprentice Liam"), only comply if those facts are in KNOWN FACTS.`;
 }
 
 /**
@@ -819,74 +906,192 @@ export function videoScriptPrompt(vars: {
   industry: string;
   brandVoice: string;
   mediaDescriptions: string;
-  videoIntent: string; // 'brand_story' | 'promo' | 'team_intro' | 'menu_reveal' | ...
-  clipCount: number; // 3-6
+  knownFacts?: string;
+  videoIntent: string;
+  clipCount: number;
   headline?: string;
   cta?: string;
-  platform?: string; // 'instagram_reel' | 'tiktok' | 'youtube_short' | ...
+  platform?: string;
+  /** Additional style controls from the advanced UI form. */
+  pacing?: 'slow' | 'balanced' | 'fast';
+  musicMood?: string;
+  captionStyle?: 'minimal' | 'bold' | 'magazine' | 'handwritten' | 'subtitle';
+  aspectRatio?: '9:16' | '1:1' | '16:9';
+  openingFrame?: 'hook_headline' | 'wide_shot' | 'close_up' | 'logo_reveal';
+  closingFrame?: 'cta_card' | 'logo_only' | 'contact_info' | 'fade_to_black';
 }) {
-  return `You are a short-form video director planning a ${vars.clipCount}-clip vertical reel for "${vars.businessName}" (${vars.industry}). This will play on ${vars.platform ?? 'Instagram Reels and TikTok'} — sound off by default, captions on-screen doing the talking.
+  return `You are directing a ${vars.clipCount}-clip ${vars.aspectRatio ?? '9:16'} short-form video for "${vars.businessName}" (${vars.industry}). ${vars.platform ?? 'Instagram Reels / TikTok'}. Sound off by default — on-screen captions do the talking.
 
-BRAND VOICE:
+════════════════════════════════════════════════════════════════════
+ANTI-HALLUCINATION RULES — NON-NEGOTIABLE
+════════════════════════════════════════════════════════════════════
+
+- Never invent names of staff, customers, events, products, awards, tenure, dates, stats.
+- Captions must describe what the clip's media ACTUALLY shows (see media description), OR state a generic truth about the service.
+- If you cannot write a clip without fabricating, mark it "skip": true.
+- If the overall video cannot be honestly built from the inputs, return {"cannotBuild": true, "reason": "<one sentence>"}.
+
+════════════════════════════════════════════════════════════════════
+INPUTS
+════════════════════════════════════════════════════════════════════
+
+BRAND VOICE (style only — not facts):
 ${vars.brandVoice}
 
-AVAILABLE MEDIA (index, kind, description):
-${vars.mediaDescriptions || '(no media — plan a synthesis script using AI-generated stills)'}
+KNOWN FACTS (safe to reference in captions, outro, CTA):
+${vars.knownFacts || '(none — keep all copy generic-factual; do not invent)'}
+
+AVAILABLE MEDIA (index · kind · what it actually shows):
+${vars.mediaDescriptions || '(no media — see INTENT below to decide if a video can be built at all)'}
 
 INTENT: ${vars.videoIntent}
-${vars.headline ? `HEADLINE (already agreed): ${vars.headline}` : ''}
-${vars.cta ? `CTA: ${vars.cta}` : ''}
+${vars.headline ? `HEADLINE (forced): ${vars.headline}` : ''}
+${vars.cta ? `CTA (forced): ${vars.cta}` : ''}
+PACING: ${vars.pacing ?? 'balanced'}
+${vars.musicMood ? `MUSIC MOOD: ${vars.musicMood}` : ''}
+CAPTION STYLE: ${vars.captionStyle ?? 'minimal'}
+OPENING FRAME: ${vars.openingFrame ?? 'hook_headline'}
+CLOSING FRAME: ${vars.closingFrame ?? 'cta_card'}
 
-Return ONLY valid JSON:
+════════════════════════════════════════════════════════════════════
+OUTPUT
+════════════════════════════════════════════════════════════════════
+
+EITHER:
+  { "cannotBuild": true, "reason": "<why>" }
+
+OR:
 {
-  "hookHeadline": "<the top-of-video 4-7 word hook. This is NOT the outro headline — it's the first thing the viewer sees and it must stop a scroll.>",
-  "outroHeadline": "<4-7 words for the end card. Quieter, landing line.>",
-  "suggestedCta": "<a single verb phrase, e.g. 'Book now', 'Try it this week'. Match the brand voice's CTA style.>",
+  "hookHeadline": "<4-7 words, honest. If no headline is forced and inputs are thin, use a generic-factual line like '[Industry] in [Location]' only if location is in KNOWN FACTS, otherwise just the service.>",
+  "outroHeadline": "<4-7 words, landing. Must not state unproven claims.>",
+  "suggestedCta": "<only use CTA styles present in KNOWN FACTS — e.g. 'Call [phone]', 'Book online', 'DM to book'. Generic 'Learn more' is always safe.>",
   "clips": [
     {
-      "order": <0-based integer>,
-      "mediaIndex": <index from AVAILABLE MEDIA, or null if this clip should be synthesized>,
-      "synthesisPrompt": "<if mediaIndex is null, a fully-composed Flux image prompt for this shot. Describe subject, lighting, palette, angle, mood. NO generic stuff.>",
-      "wantsMotion": <true if this should be animated via image-to-video, false to keep it as a Ken Burns still>,
-      "motionPrompt": "<only when wantsMotion is true. A 1-sentence instruction like 'Slow pan left across the counter, steam rising from the cup'. Keep motion subtle so the subject doesn't distort.>",
-      "eyebrow": "<2-3 word uppercase kicker, e.g. 'Behind the scenes', 'Tuesday 07:14', 'The team'. Optional — use null if the caption stands alone.>",
-      "caption": "<6-12 words. On-screen only, must be readable in 2 seconds. No ending punctuation. Example: 'Four grinders already running and we\\'re still tuning'>",
-      "durationSeconds": <2.0-4.5, integer or half-step; faster clips for early-scroll energy, slower for the last clip so the CTA lands>,
-      "focalX": <0-1 decimal, horizontal focal point for the zoom>,
-      "focalY": <0-1 decimal, vertical focal point for the zoom>,
-      "rationale": "<one sentence on why this clip belongs here and why this media was chosen>"
+      "order": <integer 0-based>,
+      "skip": <true if this slot cannot be filled honestly>,
+      "skipReason": "<required when skip=true>",
+      "mediaIndex": <integer from AVAILABLE MEDIA — REQUIRED when skip=false; synthesis is OFF in truthful mode unless the user explicitly enabled AI fills>,
+      "eyebrow": "<optional 2-3 word kicker, only if factually safe>",
+      "caption": "<6-12 words. Must describe what the media shows OR state a generic-true service line.>",
+      "durationSeconds": <2.0-4.5; tuned for pacing (${vars.pacing ?? 'balanced'})>,
+      "focalX": <0-1>,
+      "focalY": <0-1>,
+      "groundingSource": "<which input this clip draws from — 'media index 3' or 'known fact: <which>'>"
     }
   ]
 }
 
-STORY ARC (enforce this):
-1. HOOK (clip 0): surprise, specificity, or intrigue. Not "Welcome to X" — something that makes someone stop.
-2. PROOF (middle clips): show the thing. Specific moments, not stock-feeling.
-3. PAYOFF (last clip): emotional landing that earns the outro headline and CTA.
+════════════════════════════════════════════════════════════════════
+STORY ARC
+════════════════════════════════════════════════════════════════════
 
-MEDIA MATCHING:
-- Prefer real client media over synthesis. Use mediaIndex whenever a clip in AVAILABLE MEDIA fits.
-- Do NOT reuse the same mediaIndex more than once unless there are literally no other options.
-- A food shot goes with a food caption. A team shot goes with a people caption. Mismatches destroy the personalization.
-- Only synthesize (mediaIndex null) when no existing media fits the story slot. When you synthesize, the prompt must match the brand's existing aesthetic (read the media descriptions to infer palette and mood).
+Shape the kept clips into: HOOK (attention) → PROOF (what the business does) → PAYOFF (CTA earn). Skipped clips don't count — build the arc from what you actually have.
 
-MOTION:
-- Set wantsMotion true only when motion genuinely adds value: a team pouring coffee, a door opening, a car arriving, a stylist finishing a cut. Static product shots, headshots, menu boards should stay as Ken Burns stills (cheaper, sharper, more reliable).
-- Keep motionPrompts slow and small. Violent motion on a still photo distorts faces and subjects.
+════════════════════════════════════════════════════════════════════
+MEDIA MATCHING
+════════════════════════════════════════════════════════════════════
 
-CAPTIONS:
-- Short, specific, lowercase-first when the brand voice allows. No AI tells ("dive into", "elevate", "seamless", "craft" as a verb).
-- Must reference the on-screen subject so the caption and visual feel married.
-- Each caption should read as a complete thought so clips aren't sentence fragments stretched across seconds.
+- mediaIndex is REQUIRED for non-skipped clips. No synthesis in truthful mode.
+- Caption must match what the media description says is in the frame.
+- Don't reuse the same mediaIndex unless the pool is too small — in which case skip the extra slots instead.
 
-FOCAL POINTS:
-- For face-forward headshots: focalY ~ 0.35 (so the zoom tightens on eyes, not forehead).
-- For wide storefronts: focalY ~ 0.6, focalX near where the subject lives.
-- For tabletop/flat-lays: focalX/focalY 0.5.
+════════════════════════════════════════════════════════════════════
+PACING PRESETS
+════════════════════════════════════════════════════════════════════
 
-DURATIONS:
-- Total reel time (sum of clips + 2.8s outro) should be 15–25s. Shorter feels too fast, longer loses the viewer.
-- First 2 clips: 2.0–2.6s each (scroll-energy). Last clip: 3.5–4.5s (landing).
+- slow: 3.5-5.0s per clip. Calm, premium, B2B.
+- balanced: 2.5-3.5s per clip. Default.
+- fast: 1.8-2.5s per clip. High-energy, TikTok, young audiences.
 
-Return the JSON array ordered by clip.order ascending. Generate exactly ${vars.clipCount} clips.`;
+First clip in 'fast' mode: under 2s. Last clip in any mode: 0.5-1s longer than the middle (let the CTA land).
+
+════════════════════════════════════════════════════════════════════
+CAPTION STYLE
+════════════════════════════════════════════════════════════════════
+
+- minimal: short sans-serif, low-key. Default.
+- bold: large uppercase, high-impact. Fits fitness / automotive / launches.
+- magazine: serif, editorial, slow cadence. Fits food / premium services.
+- handwritten: script-style, warm. Fits wellness / crafts.
+- subtitle: accurate transcription-style bottom-caption. Fits talking-to-camera clips.
+
+Write the caption TEXT the same way regardless — style is a visual treatment handled downstream.
+
+════════════════════════════════════════════════════════════════════
+FINAL CHECK
+════════════════════════════════════════════════════════════════════
+
+Before returning, for each kept clip: can every word in the caption be traced to the media description or KNOWN FACTS? If not, switch that clip to skip.
+
+Target up to ${vars.clipCount} clips. Return fewer if that's all you can honestly fill.`;
+}
+
+/**
+ * Quality gate. Given a draft caption, return a structured critique and
+ * (when needed) a rewrite. Used as a second pass after the main
+ * calendar/regenerate prompts.
+ *
+ * We keep the critique machine-readable so the UI can show exactly
+ * what changed and why. The downstream worker runs this at most twice
+ * before accepting or flagging the draft for human attention.
+ */
+export function qualityGatePrompt(vars: {
+  businessName: string;
+  industry: string;
+  brandVoice: string;
+  knownFacts: string;
+  imageSubject?: string;
+  platform: string;
+  draftCaption: string;
+  draftHashtags: string[];
+}) {
+  return `You are a senior social media editor auditing a draft post before it goes live.
+
+BUSINESS: "${vars.businessName}" (${vars.industry})
+BRAND VOICE GUIDE:
+${vars.brandVoice}
+
+KNOWN FACTS (the only allowable factual basis for the post):
+${vars.knownFacts || '(none — post must be factually generic)'}
+
+${vars.imageSubject ? `IMAGE THE POST GOES WITH: ${vars.imageSubject}` : 'NO IMAGE'}
+
+PLATFORM: ${vars.platform}
+
+DRAFT CAPTION:
+${vars.draftCaption}
+
+DRAFT HASHTAGS: ${vars.draftHashtags.join(' ')}
+
+Score the draft against these criteria (1-5 each, 5 = excellent):
+- factualIntegrity: Does the caption avoid inventing names, dates, events, tenure, stats? Must be 5 — anything less requires rewriting.
+- brandVoiceFit: Does it match the brand voice guide's tone and sentence style?
+- hookStrength: Does the first 4-7 words make someone stop scrolling?
+- imageAlignment: Does the caption clearly relate to the image? (Or N/A if no image — score 5.)
+- aiTellFreedom: Does it avoid "dive into", "elevate", "seamless", "journey", "unlock", "curate", "craft" (verb), "passion", "harness", "ever wondered"?
+- platformFit: Character count matches platform target (IG 150-300, LI 400-800, FB 100-250, TT 50-150, X <270)?
+- specificity: Would removing the business name break the post, or could it be any business?
+
+Return ONLY JSON:
+{
+  "scores": {
+    "factualIntegrity": <1-5>,
+    "brandVoiceFit": <1-5>,
+    "hookStrength": <1-5>,
+    "imageAlignment": <1-5>,
+    "aiTellFreedom": <1-5>,
+    "platformFit": <1-5>,
+    "specificity": <1-5>
+  },
+  "overall": <1-5 weighted: factualIntegrity counts double>,
+  "issues": ["<specific issue with the current draft>"],
+  "verdict": "<accept|rewrite|reject>",
+  "rewrittenCaption": "<only when verdict is 'rewrite': a fully rewritten caption fixing every issue above. Must still be factually grounded in KNOWN FACTS and IMAGE; same platform length rules.>",
+  "rewrittenHashtags": ["<only when verdict is 'rewrite': fresh, cleaner hashtags>"]
+}
+
+VERDICT RULES:
+- "accept" only when overall >= 4 AND factualIntegrity == 5 AND aiTellFreedom == 5.
+- "rewrite" when issues are fixable without new inputs (AI tells, off-brand tone, weak hook, length).
+- "reject" when the post needs inputs we don't have (e.g. it relies on a name/date we can't confirm). In this case provide a clear issues list and don't rewrite.`;
 }

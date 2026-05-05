@@ -211,6 +211,14 @@ const personalizedSchema = z.object({
   direction: z.string().max(1000).optional(),
   selectedMediaIds: z.array(z.string().uuid()).max(24).optional(),
   enableMotion: z.boolean().optional(),
+  aspectRatio: z.enum(['9:16', '1:1', '16:9']).optional(),
+  pacing: z.enum(['slow', 'balanced', 'fast']).optional(),
+  musicMood: z.string().max(100).optional(),
+  captionStyle: z.enum(['minimal', 'bold', 'magazine', 'handwritten', 'subtitle']).optional(),
+  openingFrame: z.enum(['hook_headline', 'wide_shot', 'close_up', 'logo_reveal']).optional(),
+  closingFrame: z.enum(['cta_card', 'logo_only', 'contact_info', 'fade_to_black']).optional(),
+  allowSynthesis: z.boolean().optional(),
+  minimumClips: z.number().int().min(1).max(6).optional(),
 });
 
 videosRouter.post(

@@ -97,6 +97,75 @@ billingRouter.post('/portal', requireAuth, async (req, res, next) => {
 });
 
 /**
+ * Finalize a Checkout session for the signed-in client.
+ *
+ * Stripe's webhook is the source of truth in production, but in local dev
+ * (and when the webhook is temporarily delayed) the client comes back from
+ * Stripe holding a perfectly good `session_id` before the webhook lands.
+ * We look the session up directly, verify it belongs to this client, and
+ * flip the DB to `active` ourselves. Idempotent — re-running it on an
+ * already-active row is a no-op.
+ */
+const finalizeSchema = z.object({
+  sessionId: z.string().min(3),
+});
+
+billingRouter.post('/finalize', requireAuth, async (req, res, next) => {
+  try {
+    const user = (req as any).user as { role: string; clientId?: string };
+    if (user.role !== 'client' || !user.clientId) {
+      return res
+        .status(403)
+        .json({ error: { message: 'Only client users can finalize', code: 'FORBIDDEN' } });
+    }
+    const { sessionId } = finalizeSchema.parse(req.body);
+
+    const s = stripe();
+    if (!features.stripe || !s) {
+      // No Stripe configured — treat as success in dev so the UI unblocks.
+      return res.json({ data: { active: true, mocked: true } });
+    }
+
+    const session = await s.checkout.sessions.retrieve(sessionId, {
+      expand: ['subscription'],
+    });
+    const metaClientId = (session.metadata?.clientId ?? '') as string;
+    if (metaClientId && metaClientId !== user.clientId) {
+      return res
+        .status(403)
+        .json({ error: { message: 'Session does not belong to this client', code: 'FORBIDDEN' } });
+    }
+
+    const paid = session.payment_status === 'paid' || session.payment_status === 'no_payment_required';
+    if (!paid) {
+      return res.json({ data: { active: false, status: session.payment_status ?? 'pending' } });
+    }
+
+    if (isDbConfigured()) {
+      const db = getDb();
+      await db
+        .update(clients)
+        .set({
+          stripeCustomerId: typeof session.customer === 'string' ? session.customer : undefined,
+          stripeSubscriptionId:
+            typeof session.subscription === 'string'
+              ? session.subscription
+              : session.subscription?.id,
+          subscriptionStatus: 'active',
+          subscriptionStartedAt: new Date(),
+          isActive: true,
+          onboardedAt: new Date(),
+        })
+        .where(eq(clients.id, user.clientId));
+    }
+
+    res.json({ data: { active: true } });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
  * Read the current subscription state for the signed-in client. Used by the
  * portal to know whether to gate premium features and render the paywall.
  */

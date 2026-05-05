@@ -11,6 +11,7 @@ import { mockClients, getClient, slugify, type WebsiteConfig } from '@boost/core
 import { requireAuth, requireRole } from '../services/auth.js';
 import { publicLimiter } from '../middleware/rateLimit.js';
 import { sendEmail, clientInviteEmail } from '../services/resend.js';
+import { buildBrandContext } from '../services/brandContext.js';
 import { env } from '../env.js';
 
 export const clientsRouter = Router();
@@ -497,3 +498,26 @@ clientsRouter.delete(
     }
   },
 );
+
+
+/**
+ * Brand context — everything the AI knows about this client. Used in
+ * the dashboard's "Brand readiness" panel so the agency can see at a
+ * glance which fields Claude has and which are missing before they
+ * hit Generate. Safer than an opaque "why is the output generic?"
+ * guessing game.
+ */
+clientsRouter.get('/:id/brand-context', requireAuth, async (req, res, next) => {
+  try {
+    const id = String(req.params.id);
+    const user = (req as any).user as { role: string; clientId?: string };
+    if (user.role === 'client' && user.clientId !== id) {
+      return res.status(403).json({ error: { message: 'Forbidden', code: 'FORBIDDEN' } });
+    }
+    const ctx = await buildBrandContext(id);
+    if (!ctx) return res.status(404).json({ error: { message: 'Not found', code: 'NOT_FOUND' } });
+    res.json({ data: ctx });
+  } catch (e) {
+    next(e);
+  }
+});

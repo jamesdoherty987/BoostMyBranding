@@ -34,9 +34,11 @@ function SubscriptionInner() {
   const handledReturn = useRef(false);
 
   // Handle the redirect back from Stripe. Stripe's webhook flips our DB
-  // row to `active` asynchronously, so we poll the subscription endpoint
-  // for a few seconds until it catches up — otherwise the user would see
-  // a stale "Not subscribed" screen after successfully paying.
+  // row to `active` asynchronously, so we call a server-side finalize
+  // endpoint that retrieves the session directly (belt-and-braces for
+  // local dev, where webhooks can't reach localhost) and then poll a
+  // few times as a fallback — otherwise the user would see a stale
+  // "Not subscribed" screen after successfully paying.
   useEffect(() => {
     if (handledReturn.current) return;
     const s = params.get('status');
@@ -49,15 +51,31 @@ function SubscriptionInner() {
       return;
     }
 
-    // Success path: poll until webhook lands, up to ~10s.
+    const sessionId = params.get('session_id');
+
+    // Success path: ask the server to reconcile the Stripe session, then
+    // poll as a backup until the subscription row shows active.
     setConfirming(true);
     let cancelled = false;
     (async () => {
+      if (sessionId) {
+        try {
+          await api.finalizeCheckout(sessionId);
+        } catch {
+          // Non-fatal — we'll still poll. If the webhook has already
+          // landed, polling alone is enough.
+        }
+      }
+
       const deadline = Date.now() + 10_000;
+      let becameActive = false;
       while (!cancelled && Date.now() < deadline) {
         try {
           const fresh = await api.getSubscription();
-          if (fresh.active) break;
+          if (fresh.active) {
+            becameActive = true;
+            break;
+          }
         } catch {
           // Ignore; we'll try again.
         }
@@ -66,7 +84,14 @@ function SubscriptionInner() {
       if (cancelled) return;
       await refresh();
       setConfirming(false);
-      toast.success('Welcome aboard', 'Your subscription is active.');
+      if (becameActive) {
+        toast.success('Welcome aboard', 'Your subscription is active.');
+      } else {
+        toast.error(
+          'Still confirming your payment',
+          'Stripe is taking a moment. Refresh in a few seconds or contact us if this persists.',
+        );
+      }
       router.replace('/portal/subscription');
     })();
     return () => {

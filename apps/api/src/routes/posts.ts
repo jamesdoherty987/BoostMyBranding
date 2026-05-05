@@ -295,3 +295,121 @@ postsRouter.post('/batch-approve', requireAuth, async (req, res, next) => {
     next(e);
   }
 });
+
+/**
+ * Compose a net-new post from scratch. Agency-only; lets the team
+ * write a one-off manual post without running the full pipeline.
+ * Starts in `pending_internal` so it flows through the same approval
+ * state machine as generated posts.
+ */
+const composeSchema = z.object({
+  clientId: z.string().uuid(),
+  caption: z.string().min(1).max(5000),
+  hashtags: z.array(z.string().max(100)).max(50).default([]),
+  platform: z.enum([
+    'instagram',
+    'facebook',
+    'linkedin',
+    'tiktok',
+    'x',
+    'pinterest',
+    'bluesky',
+  ]),
+  imageUrl: z.string().url().max(1000).optional(),
+  imageId: z.string().uuid().optional(),
+  scheduledAt: z.string().datetime().optional(),
+});
+
+postsRouter.post('/', requireAuth, async (req, res, next) => {
+  try {
+    const user = (req as any).user as { role: string; clientId?: string };
+    if (user.role === 'client') {
+      return res
+        .status(403)
+        .json({ error: { message: 'Agency only', code: 'FORBIDDEN' } });
+    }
+    const args = composeSchema.parse(req.body);
+
+    if (!isDbConfigured()) {
+      const mockId = `post_${Date.now()}`;
+      broadcast({ type: 'post:created', payload: { id: mockId, ...args } });
+      return res.status(201).json({ data: { id: mockId, ...args } });
+    }
+
+    const db = getDb();
+    const scheduledAt = args.scheduledAt
+      ? new Date(args.scheduledAt)
+      : new Date(Date.now() + 24 * 60 * 60 * 1000); // default: tomorrow
+
+    const [row] = await db
+      .insert(posts)
+      .values({
+        clientId: args.clientId,
+        caption: args.caption,
+        platform: args.platform as any,
+        hashtags: args.hashtags,
+        generatedImageUrl: args.imageUrl ?? null,
+        imageId: args.imageId ?? null,
+        scheduledAt,
+        status: 'pending_internal',
+      })
+      .returning();
+
+    broadcast({ type: 'post:created', payload: row });
+    res.status(201).json({ data: row });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * Duplicate an existing post. Returns a new row in pending_internal
+ * with the caption/hashtags/image copied, scheduled one day later.
+ * Convenient for "this one worked well — do another like it".
+ */
+postsRouter.post('/:id/duplicate', requireAuth, loadPostForUser, async (req, res, next) => {
+  try {
+    const user = (req as any).user as { role: string };
+    if (user.role === 'client') {
+      return res
+        .status(403)
+        .json({ error: { message: 'Agency only', code: 'FORBIDDEN' } });
+    }
+    const original = (req as any).post as {
+      clientId: string;
+      caption: string;
+      platform: string;
+      hashtags: string[] | null;
+      generatedImageUrl: string | null;
+      imageId: string | null;
+      scheduledAt: Date | null;
+    };
+
+    if (!isDbConfigured()) {
+      const mockId = `post_${Date.now()}`;
+      return res.status(201).json({ data: { id: mockId, ...original } });
+    }
+    const db = getDb();
+    const baseDate = original.scheduledAt ?? new Date();
+    const nextDate = new Date(baseDate.getTime() + 24 * 60 * 60 * 1000);
+
+    const [row] = await db
+      .insert(posts)
+      .values({
+        clientId: original.clientId,
+        caption: original.caption,
+        platform: original.platform as any,
+        hashtags: original.hashtags ?? [],
+        generatedImageUrl: original.generatedImageUrl,
+        imageId: original.imageId,
+        scheduledAt: nextDate,
+        status: 'pending_internal',
+      })
+      .returning();
+
+    broadcast({ type: 'post:created', payload: row });
+    res.status(201).json({ data: row });
+  } catch (e) {
+    next(e);
+  }
+});

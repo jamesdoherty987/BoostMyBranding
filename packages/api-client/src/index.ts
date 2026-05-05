@@ -149,6 +149,58 @@ export class BoostApi {
     return this.request<Client>('/api/v1/clients/me');
   }
   /**
+   * Everything the AI knows about a client: palette, logo, contact,
+   * services, team, past hashtags, top media, + a completeness score.
+   * Used by the Brand Readiness panel in the dashboard.
+   */
+  getBrandContext(id: string) {
+    return this.request<{
+      businessName: string;
+      industry?: string;
+      brandVoiceGuide?: string;
+      websiteUrl?: string;
+      palette: {
+        primary?: string;
+        secondary?: string;
+        accent?: string;
+        pop?: string;
+        dark?: string;
+        paper?: string;
+      };
+      logoUrl?: string;
+      contact: {
+        address?: string;
+        phone?: string;
+        email?: string;
+        whatsapp?: string;
+        hours?: string;
+      };
+      socials: Record<string, string>;
+      services: Array<{ title: string; description?: string }>;
+      team: Array<{ name: string; role: string; bio?: string }>;
+      serviceAreas: string[];
+      credentials: Array<{ label: string; detail?: string }>;
+      pastHashtags: string[];
+      topMedia: Array<{
+        id: string;
+        fileUrl: string;
+        mimeType?: string | null;
+        aiDescription?: string | null;
+        qualityScore?: number | null;
+      }>;
+      completeness: {
+        hasVoice: boolean;
+        hasPalette: boolean;
+        hasLogo: boolean;
+        hasContact: boolean;
+        hasServices: boolean;
+        hasTeam: boolean;
+        hasMedia: boolean;
+        score: number;
+      };
+    }>(`/api/v1/clients/${id}/brand-context`);
+  }
+  /**
    * Agency-side: create a new client record. Returns the created row so
    * the UI can route to its detail page.
    */
@@ -255,6 +307,28 @@ export class BoostApi {
     return this.request<{ id: string; deleted: boolean }>(`/api/v1/posts/${id}`, {
       method: 'DELETE',
     });
+  }
+  /**
+   * Compose a net-new post (agency only). Lets the team write a manual
+   * post without running the full pipeline. Lands in `pending_internal`.
+   */
+  createPost(args: {
+    clientId: string;
+    caption: string;
+    hashtags?: string[];
+    platform: 'instagram' | 'facebook' | 'linkedin' | 'tiktok' | 'x' | 'pinterest' | 'bluesky';
+    imageUrl?: string;
+    imageId?: string;
+    scheduledAt?: string;
+  }) {
+    return this.request<Post>('/api/v1/posts', {
+      method: 'POST',
+      body: JSON.stringify({ hashtags: [], ...args }),
+    });
+  }
+  /** Duplicate a post — new row, +1 day schedule, pending_internal. */
+  duplicatePost(id: string) {
+    return this.request<Post>(`/api/v1/posts/${id}/duplicate`, { method: 'POST' });
   }
   batchApprove(postIds: string[]) {
     return this.request<{ approved: number }>('/api/v1/posts/batch-approve', {
@@ -421,6 +495,9 @@ export class BoostApi {
     return this.request<{
       batchId: string;
       postsGenerated: number;
+      postsRequested: number;
+      postsSkipped: number;
+      skipReasons: string[];
       steps: Array<{ key: string; durationMs: number; ok: boolean; note?: string }>;
       costCents: number;
     }>('/api/v1/automation/generate', { method: 'POST', body: JSON.stringify(args) });
@@ -667,6 +744,22 @@ export class BoostApi {
     });
   }
 
+  /**
+   * Finalize a Stripe Checkout session after the user returns from hosted
+   * checkout. Looks the session up server-side, verifies ownership, and
+   * flips the client row to `active`. Exists so local dev / delayed
+   * webhooks don't leave the user staring at a "Not subscribed" screen.
+   */
+  finalizeCheckout(sessionId: string) {
+    return this.request<{ active: boolean; status?: string; mocked?: boolean }>(
+      '/api/v1/billing/finalize',
+      {
+        method: 'POST',
+        body: JSON.stringify({ sessionId }),
+      },
+    );
+  }
+
   /** Current subscription state for the signed-in client. */
   getSubscription() {
     return this.request<{
@@ -801,6 +894,14 @@ export class BoostApi {
     direction?: string;
     selectedMediaIds?: string[];
     enableMotion?: boolean;
+    aspectRatio?: '9:16' | '1:1' | '16:9';
+    pacing?: 'slow' | 'balanced' | 'fast';
+    musicMood?: string;
+    captionStyle?: 'minimal' | 'bold' | 'magazine' | 'handwritten' | 'subtitle';
+    openingFrame?: 'hook_headline' | 'wide_shot' | 'close_up' | 'logo_reveal';
+    closingFrame?: 'cta_card' | 'logo_only' | 'contact_info' | 'fade_to_black';
+    allowSynthesis?: boolean;
+    minimumClips?: number;
   }) {
     return this.request<{
       videoUrl: string;
@@ -814,6 +915,7 @@ export class BoostApi {
         sourceUrl: string;
         durationSeconds: number;
       }>;
+      skippedClips: Array<{ order: number; reason: string }>;
       fromMock: boolean;
     }>('/api/v1/videos/personalized', {
       method: 'POST',

@@ -147,6 +147,7 @@ imagesRouter.post(
             fileSizeBytes: file.size,
             mimeType: file.mimetype,
             tags: tagArr,
+            source: 'upload',
             status: 'pending',
           })
           .returning();
@@ -320,6 +321,7 @@ imagesRouter.post(
             fileSizeBytes: file.size,
             mimeType: file.mimetype,
             tags: tagArr,
+            source: 'upload',
             // Videos land as already-approved; the agency vetted them on upload.
             status: video ? 'approved' : 'pending',
           })

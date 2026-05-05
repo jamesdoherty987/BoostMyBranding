@@ -71,7 +71,13 @@ export async function renderVideo(args: RenderArgs): Promise<RenderResult> {
     inputProps: args.props as unknown as Record<string, unknown>,
   });
 
-  const durationFrames = args.durationFrames ?? template.meta.durationFrames;
+  // Respect the template's dynamic-duration override when present. This
+  // is how MediaStory stretches/shrinks the composition to match the
+  // number of clips the client supplied without the caller having to do
+  // the math. Templates without `computeDuration` keep their default.
+  const dynamicDuration = template.computeDuration?.(args.props);
+  const durationFrames =
+    args.durationFrames ?? dynamicDuration ?? template.meta.durationFrames;
 
   await renderMedia({
     composition: {

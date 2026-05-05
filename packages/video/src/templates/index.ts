@@ -6,6 +6,7 @@ import { ProductShowcase, ProductShowcaseMeta } from './ProductShowcase';
 import { Aurora, AuroraMeta } from './Aurora';
 import { GlitchArt, GlitchArtMeta } from './GlitchArt';
 import { HoloFoil, HoloFoilMeta } from './HoloFoil';
+import { MediaStory, MediaStoryMeta, computeMediaStoryDuration } from './MediaStory';
 
 export interface TemplateMeta {
   id: string;
@@ -19,6 +20,13 @@ export interface TemplateMeta {
 export interface TemplateDef {
   meta: TemplateMeta;
   Component: FC<VideoProps>;
+  /**
+   * Optional dynamic-duration callback. Templates that sequence a
+   * user-controlled number of clips (MediaStory) override the default
+   * composition length based on runtime props. Templates without this
+   * field always render for `meta.durationFrames`.
+   */
+  computeDuration?: (props: VideoProps) => number;
 }
 
 export const TEMPLATES: Record<string, TemplateDef> = {
@@ -27,6 +35,11 @@ export const TEMPLATES: Record<string, TemplateDef> = {
   'aurora': { meta: AuroraMeta, Component: Aurora },
   'glitch-art': { meta: GlitchArtMeta, Component: GlitchArt },
   'holo-foil': { meta: HoloFoilMeta, Component: HoloFoil },
+  'media-story': {
+    meta: MediaStoryMeta,
+    Component: MediaStory,
+    computeDuration: computeMediaStoryDuration,
+  },
 };
 
 export function getTemplate(id: string): TemplateDef | undefined {
@@ -37,4 +50,4 @@ export function listTemplates(): TemplateMeta[] {
   return Object.values(TEMPLATES).map((t) => t.meta);
 }
 
-export { LiquidBlob, ProductShowcase, Aurora, GlitchArt, HoloFoil };
+export { LiquidBlob, ProductShowcase, Aurora, GlitchArt, HoloFoil, MediaStory };

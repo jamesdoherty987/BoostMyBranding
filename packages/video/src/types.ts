@@ -37,6 +37,32 @@ export interface VideoOptions {
   showCta?: boolean;
 }
 
+/**
+ * A single piece of client-provided media that a template can use.
+ * Photos are shown with a Ken Burns zoom; videos play inline (looped,
+ * trimmed to the clip duration). Each clip gets its own on-screen caption
+ * so the same template can tell the client's specific story instead of
+ * rendering a generic headline over stock motion.
+ */
+export interface MediaClip {
+  /** Publicly-accessible URL. R2 URLs work; local dev paths do not. */
+  url: string;
+  /** `image` or `video`. Determined from the mimeType in the API layer. */
+  kind: 'image' | 'video';
+  /** Duration to hold this clip in seconds. Templates clamp to their own range. */
+  durationSeconds?: number;
+  /** Short caption rendered over the clip (6-10 words). */
+  caption?: string;
+  /** Optional eyebrow ("Behind the scenes", "The team", etc.). */
+  eyebrow?: string;
+  /**
+   * Focal point 0..1 for the Ken Burns zoom on photos. Defaults to 0.5/0.5
+   * (centered). Set to match the subject so the zoom doesn't drift off it.
+   */
+  focalX?: number;
+  focalY?: number;
+}
+
 export interface VideoProps {
   /** Business name — displayed in the outro. */
   businessName: string;
@@ -54,6 +80,12 @@ export interface VideoProps {
   imageUrl?: string;
   /** Optional background video URL (used as a subtle backdrop). */
   backgroundVideoUrl?: string;
+  /**
+   * Ordered media clips for templates that sequence multiple photos/videos
+   * (the MediaStory and BrandReel templates). Ignored by templates that
+   * only use a single `imageUrl`.
+   */
+  mediaClips?: MediaClip[];
   /** Fine-tuning knobs. Most templates honor these; see each template's docs. */
   options?: VideoOptions;
 }

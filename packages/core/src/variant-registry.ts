@@ -915,3 +915,111 @@ export const ALL_VARIANT_TAGS = [
   'text-first',
 ] as const;
 export type VariantTag = (typeof ALL_VARIANT_TAGS)[number];
+
+/**
+ * Result of checking a variant's data requirements against the current
+ * website config. `met: true` means the variant will render nicely with
+ * the data the client currently has; `met: false` means picking it will
+ * produce a half-rendered section (e.g. 1 team member in a layout that
+ * needs 3+).
+ *
+ * The `missing` array is shaped so the picker can show a friendly
+ * "needs 2 more reviews" hint rather than a generic warning.
+ */
+export interface VariantRequirementCheck {
+  met: boolean;
+  missing: Array<{
+    field: string;
+    minItems: number;
+    current: number;
+    hint: string;
+  }>;
+}
+
+/**
+ * Walk a dotted path into an arbitrary config object. Used to resolve
+ * requirement field paths like `team.members` or `reviews`.
+ */
+function getByPath(target: unknown, path: string): unknown {
+  if (!target || typeof target !== 'object') return undefined;
+  const segments = path.split('.');
+  let cursor: any = target;
+  for (const s of segments) {
+    if (cursor == null) return undefined;
+    cursor = cursor[s];
+  }
+  return cursor;
+}
+
+/**
+ * Evaluate a single variant's `requires` list against the current
+ * config. Returns a structured result the picker can render directly.
+ *
+ * Semantics:
+ * - A requirement with `minItems` is checked against array length (or
+ *   the count of non-null entries if the target is sparse).
+ * - A requirement without `minItems` is treated as met when the target
+ *   path resolves to any non-null value.
+ * - The special field names `images` and `gallery.imageIndices` are
+ *   aliased to the same gallery image array for convenience, because
+ *   registry entries use both depending on the section.
+ */
+export function checkVariantRequirements(
+  variant: VariantOption,
+  config: unknown,
+): VariantRequirementCheck {
+  const missing: VariantRequirementCheck['missing'] = [];
+  const reqs = variant.requires ?? [];
+
+  for (const r of reqs) {
+    // Aliases so the registry's `field: 'images'` resolves correctly
+    // regardless of which section is being configured. Any section with a
+    // gallery image array should work here.
+    const candidatePaths =
+      r.field === 'images'
+        ? ['gallery.imageIndices', 'portfolio.projects', 'images']
+        : [r.field];
+
+    let currentCount = 0;
+    let found = false;
+    for (const p of candidatePaths) {
+      const value = getByPath(config, p);
+      if (value === undefined || value === null) continue;
+      found = true;
+      if (Array.isArray(value)) {
+        currentCount = Math.max(
+          currentCount,
+          value.filter((v) => v !== null && v !== undefined).length,
+        );
+      } else if (typeof value === 'string' && value.trim().length > 0) {
+        currentCount = Math.max(currentCount, 1);
+      } else if (typeof value === 'number') {
+        currentCount = Math.max(currentCount, 1);
+      }
+    }
+
+    if (r.minItems === undefined) {
+      // Presence-only requirement.
+      if (!found) {
+        missing.push({
+          field: r.field,
+          minItems: 1,
+          current: 0,
+          hint: r.hint,
+        });
+      }
+      continue;
+    }
+
+    if (currentCount < r.minItems) {
+      missing.push({
+        field: r.field,
+        minItems: r.minItems,
+        current: currentCount,
+        hint: r.hint,
+      });
+    }
+  }
+
+  return { met: missing.length === 0, missing };
+}

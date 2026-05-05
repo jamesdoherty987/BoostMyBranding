@@ -36,6 +36,7 @@ const POST_STATUSES = [
 const listQuerySchema = z.object({
   clientId: z.string().min(1).max(100).optional(),
   status: z.enum(POST_STATUSES).optional(),
+  batchId: z.string().uuid().optional(),
 });
 
 postsRouter.get('/', requireAuth, async (req, res, next) => {
@@ -44,6 +45,7 @@ postsRouter.get('/', requireAuth, async (req, res, next) => {
     const parsed = listQuerySchema.safeParse({
       clientId: req.query.clientId,
       status: req.query.status,
+      batchId: req.query.batchId,
     });
     if (!parsed.success) {
       return res
@@ -52,6 +54,7 @@ postsRouter.get('/', requireAuth, async (req, res, next) => {
     }
     let clientId = parsed.data.clientId;
     const status = parsed.data.status;
+    const batchId = parsed.data.batchId;
 
     if (user.role === 'client') {
       clientId = user.clientId;
@@ -62,12 +65,14 @@ postsRouter.get('/', requireAuth, async (req, res, next) => {
       let results = mockPosts;
       if (clientId) results = results.filter((p) => p.clientId === clientId);
       if (status) results = results.filter((p) => p.status === status);
+      // batch filter isn't represented in mock data — leave as-is.
       return res.json({ data: results });
     }
     const db = getDb();
     const conds = [];
     if (clientId) conds.push(eq(posts.clientId, clientId));
     if (status) conds.push(eq(posts.status, status));
+    if (batchId) conds.push(eq(posts.batchId, batchId));
     const rows =
       conds.length > 0
         ? await db.select().from(posts).where(and(...conds))

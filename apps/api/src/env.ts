@@ -60,6 +60,17 @@ const schema = z.object({
   /** Optional team id — required if the project lives in a team, not a personal account. */
   VERCEL_TEAM_ID: z.string().optional(),
 
+  /**
+   * Canva Connect OAuth credentials. When present, the dashboard exposes
+   * a per-client "Connect Canva" button that kicks off the OAuth dance
+   * and stores tokens in `client_canva_connections`. Optional —
+   * everything downstream checks `features.canva` before calling the API.
+   */
+  CANVA_CLIENT_ID: z.string().optional(),
+  CANVA_CLIENT_SECRET: z.string().optional(),
+  /** Where Canva sends users after authorising. Usually {API_URL}/api/v1/canva/callback. */
+  CANVA_REDIRECT_URI: z.string().url().optional(),
+
   CRON_SECRET: z.string().optional(),
 });
 
@@ -96,6 +107,8 @@ export const features = {
   resend: Boolean(env.RESEND_API_KEY),
   contentStudio: Boolean(env.CONTENTSTUDIO_API_KEY),
   vercel: Boolean(env.VERCEL_API_TOKEN && env.VERCEL_PROJECT_ID),
+  /** Canva Connect API is only useful when all three OAuth bits are set. */
+  canva: Boolean(env.CANVA_CLIENT_ID && env.CANVA_CLIENT_SECRET && env.CANVA_REDIRECT_URI),
 };
 
 /**

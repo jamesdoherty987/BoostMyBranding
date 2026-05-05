@@ -109,3 +109,70 @@ function aspectSize(ratio: string): [number, number] {
   const s = arToSize(ratio);
   return [s.width, s.height];
 }
+
+/**
+ * Image-to-video: turn a still photo into a 4–6s animated clip. Used by
+ * MediaStory when the agency wants motion clips without filming anything.
+ *
+ * Tries Kling 1.6 first (best motion quality) and falls back to Stable
+ * Video Diffusion when Kling rate-limits or a plan doesn't allow it. If
+ * FAL_KEY is missing we return the source image URL unchanged so the
+ * caller can degrade gracefully — MediaStory already renders photos with
+ * a Ken Burns zoom, so a "failed" motion clip still looks intentional.
+ */
+export async function animateImage(
+  imageUrl: string,
+  prompt: string,
+  opts: { duration?: 4 | 5 | 6; aspectRatio?: '9:16' | '16:9' | '1:1' } = {},
+): Promise<{ videoUrl: string; durationSeconds: number; fromMock: boolean }> {
+  const duration = opts.duration ?? 5;
+  const aspectRatio = opts.aspectRatio ?? '9:16';
+
+  if (!features.fal) {
+    return { videoUrl: imageUrl, durationSeconds: duration, fromMock: true };
+  }
+
+  const MODELS = [
+    {
+      id: 'fal-ai/kling-video/v1.6/standard/image-to-video',
+      input: () => ({
+        prompt,
+        image_url: imageUrl,
+        duration: String(duration),
+        aspect_ratio: aspectRatio,
+      }),
+    },
+    {
+      id: 'fal-ai/stable-video',
+      input: () => ({
+        image_url: imageUrl,
+        motion_bucket_id: 127,
+        cond_aug: 0.02,
+      }),
+    },
+  ] as const;
+
+  let lastError: Error | null = null;
+  for (const model of MODELS) {
+    try {
+      const result = await fal.subscribe(model.id, {
+        input: model.input(),
+        logs: false,
+      });
+      const out =
+        (result.data as any)?.video?.url ??
+        (result.data as any)?.videos?.[0]?.url ??
+        (result.data as any)?.url;
+      if (out) return { videoUrl: out as string, durationSeconds: duration, fromMock: false };
+    } catch (e) {
+      lastError = e as Error;
+      const msg = (e as Error).message ?? '';
+      if (/forbidden|403|payment|quota|limit|rate/i.test(msg)) {
+        console.warn(`[fal] ${model.id} i2v fell back: ${msg.slice(0, 80)}`);
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw lastError ?? new Error('All fal.ai image-to-video models failed');
+}

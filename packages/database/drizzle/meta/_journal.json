@@ -29,6 +29,13 @@
       "when": 1777640094378,
       "tag": "0003_subscription_status",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1777640094382,
+      "tag": "0007_media_source_and_canva",
+      "breakpoints": true
     }
   ]
 }

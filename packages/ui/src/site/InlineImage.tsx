@@ -30,13 +30,17 @@ interface InlineImageProps {
    * `about.imageIndex` pass `path="about"`. For a team member's photo,
    * pass `path="team.members.2"`. The editor appends `.imageIndex` or
    * `.imageUrl` when the user picks.
+   *
+   * When `fieldName` is `'direct'` the path itself IS the target — used
+   * for arrays of primitives like `gallery.imageIndices.3`.
    */
   path: string;
   /**
    * Which field name the config uses at this location. `imageIndex`
-   * for most blocks; `photoIndex` for team members.
+   * for most blocks; `photoIndex` for team members. Use `'direct'` to
+   * write straight to `path` (for array-of-numbers fields).
    */
-  fieldName?: 'imageIndex' | 'imageUrl' | 'photoIndex' | 'photoUrl';
+  fieldName?: 'imageIndex' | 'imageUrl' | 'photoIndex' | 'photoUrl' | 'direct';
   /** When no src resolves, show a colored placeholder instead of a broken image. */
   placeholder?: React.ReactNode;
   /** When true, render nothing if there's no image (useful for optional hero images). */

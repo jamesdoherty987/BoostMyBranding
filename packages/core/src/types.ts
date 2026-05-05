@@ -110,9 +110,22 @@ export interface ClientImage {
   clientId: string;
   fileUrl: string;
   fileName: string;
+  /** Size on disk, in bytes. Missing from mock data. */
+  fileSizeBytes?: number | null;
+  /** Content-Type; we use the `video/*` prefix to distinguish videos. */
+  mimeType?: string | null;
+  /**
+   * Optional provenance — where the asset came from. Used by the Media
+   * Studio to filter between uploaded, AI-generated, template-rendered,
+   * Canva-exported, and stock-sourced media. Missing on legacy rows; the
+   * UI treats those as "uploaded".
+   */
+  source?: 'upload' | 'ai' | 'template' | 'canva' | 'stock' | null;
   tags: string[];
   aiDescription?: string | null;
   qualityScore?: number | null;
+  /** URL of the Flux-Kontext-enhanced version when we've regenerated the image. */
+  enhancedUrl?: string | null;
   status: ImageStatus;
   uploadedAt: string;
 }

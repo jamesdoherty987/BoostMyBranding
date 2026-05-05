@@ -12,7 +12,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { eq } from 'drizzle-orm';
 import { getDb, isDbConfigured, clientImages } from '@boost/database';
-import { generateVideo, listVideoTemplates } from '../services/video.js';
+import { generateVideo, generatePersonalizedVideo, listVideoTemplates } from '../services/video.js';
 import { requireAuth, requireRole } from '../services/auth.js';
 import { broadcast } from '../services/realtime.js';
 
@@ -61,6 +61,25 @@ const renderSchema = z.object({
       dark: z.string().max(20).optional(),
       paper: z.string().max(20).optional(),
     })
+    .optional(),
+  /**
+   * Media clips used by the `media-story` template. Each clip is one of
+   * the client's uploaded photos/videos or an AI-generated still. The
+   * renderer ignores this field for other templates.
+   */
+  mediaClips: z
+    .array(
+      z.object({
+        url: z.string().url().max(1000),
+        kind: z.enum(['image', 'video']),
+        durationSeconds: z.number().min(1).max(8).optional(),
+        caption: z.string().max(140).optional(),
+        eyebrow: z.string().max(40).optional(),
+        focalX: z.number().min(0).max(1).optional(),
+        focalY: z.number().min(0).max(1).optional(),
+      }),
+    )
+    .max(6)
     .optional(),
 });
 
@@ -163,6 +182,7 @@ async function persistRenderedVideo(
         mimeType: 'video/mp4',
         tags: ['video', meta.templateId],
         aiDescription: meta.headline,
+        source: 'template',
         status: 'approved',
       })
       .returning();
@@ -173,3 +193,37 @@ async function persistRenderedVideo(
     console.warn('[videos] persistRenderedVideo failed:', (e as Error).message);
   }
 }
+
+/**
+ * Personalized video route. Unlike /render, this takes just a clientId and
+ * an intent — the service asks Claude to plan the script from the
+ * client's existing media. The heaviest route in the API: 30-60s for
+ * scripting + optional motion + Remotion render.
+ */
+const personalizedSchema = z.object({
+  clientId: z.string().uuid(),
+  intent: z
+    .enum(['brand_story', 'promo', 'team_intro', 'menu_reveal', 'before_after', 'location_tour'])
+    .optional(),
+  clipCount: z.number().int().min(3).max(6).optional(),
+  headline: z.string().max(300).optional(),
+  cta: z.string().max(60).optional(),
+  direction: z.string().max(1000).optional(),
+  selectedMediaIds: z.array(z.string().uuid()).max(24).optional(),
+  enableMotion: z.boolean().optional(),
+});
+
+videosRouter.post(
+  '/personalized',
+  requireAuth,
+  requireRole('agency_admin', 'agency_member'),
+  async (req, res, next) => {
+    try {
+      const args = personalizedSchema.parse(req.body);
+      const result = await generatePersonalizedVideo(args);
+      res.json({ data: result });
+    } catch (e) {
+      next(e);
+    }
+  },
+);

@@ -55,7 +55,7 @@ export interface SiteContextValue {
    * `team.members.2` — and the current value shape so the picker knows
    * whether to set `imageIndex` or `imageUrl`.
    */
-  onImageClick?: (context: { path: string; fieldName: 'imageIndex' | 'imageUrl' | 'photoIndex' | 'photoUrl' }) => void;
+  onImageClick?: (context: { path: string; fieldName: 'imageIndex' | 'imageUrl' | 'photoIndex' | 'photoUrl' | 'direct' }) => void;
   /**
    * Called by `SiteAIChat` when the user submits a natural-language edit.
    * The host wires this to the `editWebsiteWithAI` API and returns a short

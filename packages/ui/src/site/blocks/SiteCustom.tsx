@@ -22,6 +22,7 @@ import { useSiteContext } from '../context';
 import { brandGradient } from '../theme';
 import { resolveIcon } from '../icon-map';
 import { InlineEditable } from '../InlineEditable';
+import { InlineImage } from '../InlineImage';
 
 interface SiteCustomProps {
   config: WebsiteConfig;
@@ -191,19 +192,18 @@ function ImageStrip({
             transition={{ delay: i * 0.05, duration: 0.5 }}
           >
             <div className="aspect-square overflow-hidden rounded-2xl bg-slate-100">
-              {src ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={src}
-                  alt={item.caption ?? ''}
-                  className="h-full w-full object-cover"
-                  loading="lazy"
-                />
-              ) : (
-                <div className="flex h-full w-full items-center justify-center text-[10px] text-slate-400">
-                  No image
-                </div>
-              )}
+              <InlineImage
+                src={src}
+                alt={item.caption ?? ''}
+                className="h-full w-full"
+                path={`${pathBase}.items.${i}`}
+                fieldName="imageIndex"
+                placeholder={
+                  <div className="flex h-full w-full items-center justify-center text-[10px] text-slate-400">
+                    No image
+                  </div>
+                }
+              />
             </div>
             {item.caption != null ? (
               <figcaption className="mt-2 text-center text-[11px] text-slate-500">
@@ -239,19 +239,18 @@ function ImageTextSplit({
 
   const imageBlock = (
     <div className="overflow-hidden rounded-[2rem] shadow-xl">
-      {src ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={src}
-          alt=""
-          className="aspect-[4/5] w-full object-cover md:aspect-auto md:h-full"
-          loading="lazy"
-        />
-      ) : (
-        <div className="flex aspect-[4/5] items-center justify-center bg-slate-100 text-sm text-slate-400 md:aspect-auto md:h-full">
-          No image
-        </div>
-      )}
+      <InlineImage
+        src={src}
+        alt=""
+        className="aspect-[4/5] w-full md:aspect-auto md:h-full"
+        path={`${pathBase}.items.0`}
+        fieldName="imageIndex"
+        placeholder={
+          <div className="flex aspect-[4/5] items-center justify-center bg-slate-100 text-sm text-slate-400 md:aspect-auto md:h-full">
+            No image
+          </div>
+        }
+      />
     </div>
   );
 

@@ -7,6 +7,7 @@ import { SectionWrapper } from '../../section-wrapper';
 import { useSiteContext } from '../context';
 import { brandGradient } from '../theme';
 import { InlineEditable } from '../InlineEditable';
+import { InlineImage } from '../InlineImage';
 
 interface SiteBeforeAfterProps {
   config: WebsiteConfig;
@@ -23,7 +24,7 @@ interface SiteBeforeAfterProps {
  * images (for graceful degradation in preview / draft states).
  */
 export function SiteBeforeAfter({ config, images }: SiteBeforeAfterProps) {
-  const { embedded } = useSiteContext();
+  const { embedded, editMode } = useSiteContext();
   const ba = config.beforeAfter;
   if (!ba || !ba.pairs || ba.pairs.length === 0) return null;
 
@@ -66,12 +67,60 @@ export function SiteBeforeAfter({ config, images }: SiteBeforeAfterProps) {
                 viewport={{ once: true, margin: '-40px' }}
                 transition={{ delay: i * 0.05, duration: 0.5 }}
               >
-                <BeforeAfterSlider
-                  before={before}
-                  after={after}
-                  brandColor={`linear-gradient(135deg, ${config.brand.primaryColor}, ${config.brand.accentColor})`}
-                  fallbackGradient={brandGradient(config.brand, 120)}
-                />
+                {editMode ? (
+                  // Edit mode: show the two photos side-by-side with
+                  // InlineImage so the agency can swap either. The slider
+                  // UI would interfere with click targets.
+                  <div className="grid grid-cols-2 gap-2 overflow-hidden rounded-3xl shadow-lg">
+                    <div className="relative aspect-square bg-slate-100">
+                      <span className="pointer-events-none absolute left-2 top-2 z-10 rounded-full bg-black/50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-white backdrop-blur">
+                        Before
+                      </span>
+                      <InlineImage
+                        src={before}
+                        alt="Before"
+                        className="h-full w-full"
+                        path={`beforeAfter.pairs.${i}.beforeIndex`}
+                        fieldName="direct"
+                        placeholder={
+                          <div
+                            className="flex h-full w-full items-center justify-center text-xs font-semibold uppercase tracking-wider text-white/80"
+                            style={{ background: brandGradient(config.brand, 120) }}
+                          >
+                            Before
+                          </div>
+                        }
+                      />
+                    </div>
+                    <div className="relative aspect-square bg-slate-100">
+                      <span className="pointer-events-none absolute right-2 top-2 z-10 rounded-full bg-black/50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-white backdrop-blur">
+                        After
+                      </span>
+                      <InlineImage
+                        src={after}
+                        alt="After"
+                        className="h-full w-full"
+                        path={`beforeAfter.pairs.${i}.afterIndex`}
+                        fieldName="direct"
+                        placeholder={
+                          <div
+                            className="flex h-full w-full items-center justify-center text-xs font-semibold uppercase tracking-wider text-white/80"
+                            style={{ background: brandGradient(config.brand, 120) }}
+                          >
+                            After
+                          </div>
+                        }
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <BeforeAfterSlider
+                    before={before}
+                    after={after}
+                    brandColor={`linear-gradient(135deg, ${config.brand.primaryColor}, ${config.brand.accentColor})`}
+                    fallbackGradient={brandGradient(config.brand, 120)}
+                  />
+                )}
                 {pair.caption ? (
                   <figcaption className="mt-3 text-center text-xs text-slate-500">
                     <InlineEditable

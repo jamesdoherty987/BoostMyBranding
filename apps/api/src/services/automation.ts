@@ -320,3 +320,139 @@ function monthName(m: number) {
     'December',
   ][m - 1]!;
 }
+
+/**
+ * Regenerate a single post's caption + hashtags. Used by the Generate
+ * page's per-post "regenerate" action so users don't have to re-run the
+ * whole monthly pipeline to fix one bad caption.
+ *
+ * Optionally accepts an `instruction` — free-form feedback from the user
+ * ("make it funnier", "mention the Cork opening") — which overrides
+ * normal brand voice defaults while still honoring the voice guide.
+ */
+export async function regenerateSinglePost(args: {
+  postId: string;
+  instruction?: string;
+}): Promise<{ caption: string; hashtags: string[]; hook: string; rationale: string }> {
+  if (!isDbConfigured()) {
+    // Mock-mode fallback so the UI still feels alive in dev.
+    return {
+      caption:
+        'Quiet Tuesday, just us and a fresh batch of buns. Come by if you need an excuse to pause.',
+      hashtags: ['#corkcity', '#brunchcork', '#smallbusiness', '#corkbakery', '#tuesdaytreat'],
+      hook: 'Quiet Tuesday, just us',
+      rationale: 'Replaced generic phrasing with a specific moment and softened the CTA.',
+    };
+  }
+
+  const db = getDb();
+  const [post] = await db.select().from(posts).where(eq(posts.id, args.postId));
+  if (!post) throw new Error('Post not found');
+
+  const [client] = await db.select().from(clients).where(eq(clients.id, post.clientId));
+  if (!client) throw new Error('Client not found');
+
+  // Look up the image subject so the rewritten caption stays relevant.
+  let imageSubject: string | undefined;
+  if (post.imageId) {
+    const [img] = await db
+      .select({ aiDescription: clientImages.aiDescription })
+      .from(clientImages)
+      .where(eq(clientImages.id, post.imageId));
+    imageSubject = img?.aiDescription ?? undefined;
+  }
+
+  const { regeneratePostPrompt } = await import('./prompts.js');
+  const prompt = regeneratePostPrompt({
+    businessName: client.businessName,
+    industry: client.industry ?? 'Local Business',
+    brandVoice: client.brandVoice ?? 'Warm, professional, specific.',
+    currentCaption: post.caption,
+    currentHashtags: (post.hashtags as string[]) ?? [],
+    platform: post.platform,
+    imageSubject,
+    instruction: args.instruction,
+  });
+
+  const result = await withRetry(
+    () =>
+      generateJSON<{
+        caption: string;
+        hashtags: string[];
+        hook: string;
+        rationale: string;
+      }>(prompt, { model: 'sonnet', maxTokens: 800, temperature: 0.7 }),
+    { label: `regen:${args.postId}`, attempts: 2 },
+  );
+
+  // Persist the updated caption + hashtags so the next read sees the rewrite.
+  await db
+    .update(posts)
+    .set({
+      caption: result.caption,
+      hashtags: result.hashtags ?? [],
+      updatedAt: new Date(),
+    })
+    .where(eq(posts.id, post.id));
+
+  broadcast({
+    type: 'post:updated',
+    payload: { id: post.id, caption: result.caption, hashtags: result.hashtags },
+  });
+
+  return result;
+}
+
+/**
+ * Regenerate the image for a single post. Uses the existing caption as the
+ * seed for a concrete Flux prompt — no guessing about subject. Preserves
+ * the post's original image as fallback in case the user doesn't like the
+ * new one (stored in a transient in-memory cache is not viable, so we
+ * just persist the new URL and let the client undo by reverting).
+ */
+export async function regeneratePostImage(args: {
+  postId: string;
+  overridePrompt?: string;
+}): Promise<{ imageUrl: string; prompt: string }> {
+  if (!isDbConfigured()) {
+    return {
+      imageUrl: `https://picsum.photos/seed/regen-${args.postId}/1024/1024`,
+      prompt: args.overridePrompt ?? 'Mock regenerated image',
+    };
+  }
+
+  const db = getDb();
+  const [post] = await db.select().from(posts).where(eq(posts.id, args.postId));
+  if (!post) throw new Error('Post not found');
+
+  const [client] = await db.select().from(clients).where(eq(clients.id, post.clientId));
+  if (!client) throw new Error('Client not found');
+
+  // Build a specific Flux prompt from the caption if the caller didn't
+  // supply one. Keeps the subject aligned with what the caption says.
+  const seedPrompt =
+    args.overridePrompt?.trim() ||
+    (await generateText(
+      `Write a single-paragraph, photographic Flux prompt for a social post by "${client.businessName}" (${
+        client.industry ?? 'local business'
+      }). The image should illustrate this caption:\n\n"${post.caption}"\n\nRules:\n- Describe subject, setting, lighting, palette, angle.\n- Magazine-editorial feel.\n- No faces, no text, no logos.\n- Match the brand voice: ${client.brandVoice ?? 'warm, specific, grounded'}.\n\nReturn just the prompt, no preamble.`,
+      { model: 'sonnet', maxTokens: 300, temperature: 0.6 },
+    ));
+
+  const imageUrl = await withRetry(() => generateImage(seedPrompt, '1:1'), {
+    label: `regen-image:${args.postId}`,
+    attempts: 2,
+  });
+
+  await db
+    .update(posts)
+    .set({ generatedImageUrl: imageUrl, imageId: null, updatedAt: new Date() })
+    .where(eq(posts.id, args.postId));
+
+  broadcast({
+    type: 'post:updated',
+    payload: { id: args.postId, generatedImageUrl: imageUrl },
+  });
+
+  return { imageUrl, prompt: seedPrompt };
+}

@@ -10,53 +10,66 @@ export function brandVoicePrompt(vars: {
   businessName: string;
   industry: string;
 }) {
-  return `You are a brand strategist. Analyze the following website content and create a comprehensive brand voice guide.
+  return `You are a brand strategist writing a voice guide that will be fed verbatim into a social-media content generator. The quality of every caption for the next month depends on how specific and useful this guide is. Generic answers ("warm and professional") produce generic captions — DO NOT default to them.
 
-WEBSITE CONTENT:
-${vars.websiteMarkdown}
+BUSINESS: "${vars.businessName}" (${vars.industry})
 
-BUSINESS NAME: ${vars.businessName}
-INDUSTRY: ${vars.industry}
+SOURCE CONTENT (scraped from their website):
+${vars.websiteMarkdown || '(no website provided — infer from business name and industry)'}
 
-Generate a brand voice guide in this exact JSON format:
+Return ONLY valid JSON in this exact shape:
 {
-  "tone": "2-3 word description (e.g., 'warm and professional')",
-  "personality": "One sentence describing the brand as a person",
+  "tone": "<two adjectives that could ONLY describe this business, not any business. Bad: 'warm and professional'. Good: 'old-school and deadpan' for a traditional barber; 'no-bullshit and helpful' for a plumber; 'gentle and granola' for a yoga studio.>",
+  "personality": "<one sentence, as if describing a real person. Include age range, a quirk, and what they'd never do. Example: 'A 52-year-old barber from Cork who keeps a kettle in the back, remembers your last cut, and won't do fades just because they're trending.'>",
   "vocabulary": {
-    "use": ["list of words/phrases to use"],
-    "avoid": ["list of words/phrases to avoid"]
+    "use": ["<8-12 specific words/phrases. Pull from the source if possible. Avoid generic words like 'quality' or 'passionate'. Prefer regional or craft-specific language.>"],
+    "avoid": ["<6-10 words this brand would never use. Be specific — not just 'corporate' but actual words like 'synergy', 'disrupt', 'journey', 'curate'.>"]
   },
-  "sentenceStyle": "short|medium|long, describe preferred sentence length",
-  "emojiUsage": "none|minimal|moderate|heavy",
-  "hashtagStyle": "describe hashtag approach",
-  "callToAction": "preferred CTA style and examples",
-  "targetAudience": "describe the ideal customer",
-  "contentPillars": ["3-5 content themes"],
+  "sentenceStyle": "<short|medium|long>: <specific rule. Example: 'short — 6-12 words per sentence. Fragments are OK. One idea per sentence.'>",
+  "emojiUsage": "<none|minimal|moderate|heavy>: <specific guidance. Example: 'minimal — max 1 per post, and only ☕️ 🥐 ✂️ 🔧 (never 😂 or 🔥).' List allowed emojis if any.>",
+  "hashtagStyle": "<specific rule. Example: '5-8 hashtags, lowercase, mix of location (#corkcity #corkbarbers) and craft (#hottowelshave #straightrazor). Never brand-marketing hashtags like #mondaymotivation.'>",
+  "callToAction": "<preferred CTA phrasing + 2 example lines. Example: 'Soft CTAs, never pushy. Good: \\'Walk-ins welcome Tues-Sat\\'. Good: \\'Book via DM or call 021 555 0100\\'. Bad: \\'DON\\'T MISS OUT!\\''>",
+  "targetAudience": "<one sentence, specific. Example: 'Men 30-55 in Cork who want a traditional cut without chat, and younger guys bringing their Dad.'>",
+  "contentPillars": [
+    "<4-5 pillars with a target % distribution. Each pillar should be about something real this business does or knows, not generic categories. Example: 'Craft (how cuts are done, tools we use) — 30%' / 'Shop life (kettle on, staff banter, the dog) — 25%' / 'Customer moments (before/after with permission) — 25%' / 'Local Cork (events, collabs, other shops) — 20%'.>"
+  ],
+  "dontDoList": ["<5-7 things this brand would never post about. Example: 'Motivational quotes', 'Generic holiday posts (Happy Monday!)', 'Trending dances', 'AI-sounding copy'>"],
   "examplePosts": {
-    "instagram": "Write one example Instagram post in this brand's voice",
-    "linkedin": "Write one example LinkedIn post",
-    "facebook": "Write one example Facebook post"
+    "instagram": "<Write a full Instagram post (caption + hashtags) as this brand. Must reference something specific — a product, a local place, a named staff member, a real situation. 150-300 chars for the caption.>",
+    "linkedin": "<Write a full LinkedIn post. Professional but still this brand's voice. 200-500 chars.>",
+    "facebook": "<Write a full Facebook post. More conversational. 100-250 chars.>"
   }
-}`;
+}
+
+CRITICAL RULES:
+- Ground every field in actual evidence from the source content when possible. If the source mentions "family-run since 1987", that shapes the personality. If it mentions specific products, those belong in the vocabulary.
+- If source content is sparse, use the business name + industry to make grounded, specific choices — but never default to generic marketing speak.
+- The examplePosts must sound like a real post from this business. If you can swap the business name for a competitor and the post still works, it's too generic — rewrite it.
+- Do NOT include pricing, fabricated statistics, or claims the business has not made. Invent names of products, staff or events only if clearly implied by the source.`;
 }
 
 export function imageAnalysisPrompt(vars: { industry: string; businessName: string }) {
-  return `Analyze this image for social media suitability. You are evaluating for "${vars.businessName}", a ${vars.industry} business.
+  return `You are a photo editor evaluating this image for social media use. The business is "${vars.businessName}" (${vars.industry}).
+
+Score honestly — a 10 is a magazine-quality hero shot, a 7 is a solid usable image, a 5 is OK with a caption, a 3 or lower should not be published.
 
 Return ONLY valid JSON:
 {
-  "qualityScore": <1-10>,
-  "usable": <boolean>,
-  "issues": [...],
-  "subject": "<description>",
-  "mood": "<professional|casual|energetic|warm|luxurious|rustic|modern>",
-  "bestPlatforms": [...],
-  "suggestedCrop": "<portrait|landscape|square>",
-  "captionAngle": "<suggested content angle>",
-  "needsEditing": <boolean>,
-  "editingSuggestions": [...],
-  "fluxKontextPrompt": "<prompt for Flux Kontext if editing is needed, otherwise empty>"
-}`;
+  "qualityScore": <1-10 integer. Consider: focus, lighting, composition, on-brand subject, resolution.>,
+  "usable": <true if qualityScore >= 5 AND the subject matches the business. Otherwise false.>,
+  "issues": [<short list of specific defects. Example: ['blurry at edges', 'yellow white-balance', 'off-center subject', 'visible competitor branding', 'stock-photo vibe']. Omit if none.>],
+  "subject": "<one specific sentence. Not 'a coffee shop' but 'a flat-white in a stoneware mug on a wooden counter, morning light from the left'. Name what's actually in the frame.>",
+  "mood": "<one of: professional|casual|energetic|warm|luxurious|rustic|modern|cozy|bold|quiet>",
+  "bestPlatforms": [<subset of: 'instagram-feed', 'instagram-story', 'instagram-reel-cover', 'facebook', 'linkedin', 'tiktok-cover', 'x'. Pick based on aspect ratio and subject. Don't pick all of them.>],
+  "suggestedCrop": "<portrait|landscape|square — match the strongest composition>",
+  "captionAngle": "<ONE specific caption hook this photo could anchor. Not 'promote the service' but a specific angle like 'Tuesday morning rush — three flat whites in, and we haven't had ours yet' or 'New lash tint range landed this week — the warm brown is selling out fast'.>",
+  "tags": [<2-4 short tags for filtering: 'food', 'team', 'behind-the-scenes', 'product', 'exterior', 'before-after', 'tool-of-trade', 'customer', 'location'>],
+  "needsEditing": <true if fixable defects (exposure, crop, background clutter) would lift this from 4-6 to 7+. False if fundamentally unusable or already good.>,
+  "editingSuggestions": [<only if needsEditing. Short bullet list: 'brighten shadows', 'crop to square centering on mug', 'desaturate background'.>],
+  "fluxKontextPrompt": "<only if needsEditing. One concrete instruction to Flux Kontext. Example: 'Slightly brighten the foreground without changing the subject. Keep the mug exactly as-is. Warm the white balance by 200K.' Keep the subject unchanged — never describe a different scene.>"
+}
+
+CRITICAL: fluxKontextPrompt must preserve the original subject. Flux Kontext edits; it doesn't reimagine. If the image needs a new subject, set needsEditing to false and usable to false.`;
 }
 
 export function contentCalendarPrompt(vars: {
@@ -70,9 +83,9 @@ export function contentCalendarPrompt(vars: {
   platforms: string[];
   direction?: string;
 }) {
-  return `You are a social media manager for "${vars.businessName}", a ${vars.industry} business.
+  return `You are the in-house social media manager for "${vars.businessName}" (${vars.industry}). You write captions that sound like the business wrote them — not like an agency or an AI. Every post should feel like it came from a specific moment in the shop/site/practice, not a content template.
 
-BRAND VOICE GUIDE:
+BRAND VOICE GUIDE (follow this verbatim — this is the voice, not a suggestion):
 ${vars.brandVoice}
 
 AVAILABLE IMAGES THIS MONTH:
@@ -81,31 +94,89 @@ ${vars.imageDescriptions}
 MONTH: ${vars.month} ${vars.year}
 POSTS TO GENERATE: ${vars.postsCount}
 PLATFORMS: ${vars.platforms.join(', ')}
-${vars.direction ? `\nEXTRA DIRECTION: ${vars.direction}` : ''}
+${vars.direction ? `\nSPECIAL DIRECTION FROM AGENCY (honor this closely):\n${vars.direction}` : ''}
 
-Generate a content calendar. Return JSON array:
+Return ONLY a JSON array:
 [
   {
-    "dayOfMonth": <1-31>,
+    "dayOfMonth": <1-28>,
     "platform": "<one of the platforms above>",
-    "caption": "<full caption in brand voice>",
-    "hashtags": [...],
-    "imageIndex": <index or null>,
-    "imageGenerationPrompt": "<prompt if imageIndex null>",
-    "contentType": "<educational|promotional|behind-the-scenes|testimonial|seasonal|engagement>",
-    "timeOfDay": "<morning|afternoon|evening>"
+    "caption": "<the full caption, written in the brand voice above>",
+    "hashtags": ["<relevant tags per platform rules below>"],
+    "imageIndex": <index from AVAILABLE IMAGES, or null when no suitable photo exists>,
+    "imageGenerationPrompt": "<only when imageIndex is null — see rules>",
+    "contentType": "<educational|promotional|behind-the-scenes|testimonial|seasonal|engagement|product|team>",
+    "timeOfDay": "<morning|afternoon|evening>",
+    "hook": "<the first line of the caption, pulled out so it can be evaluated independently. Must stop a scroll.>",
+    "imageMatchRationale": "<one sentence explaining why this image fits this caption. If imageIndex is null, explain what the generated image needs to show and why.>"
   }
 ]
 
-RULES:
-- Use real images (imageIndex) for at least 60% of posts. Match the image subject to the caption — don't pair a food photo with a team post.
-- When no suitable image exists for a post, set imageIndex to null and write a detailed imageGenerationPrompt that describes exactly what the AI should generate (subject, style, mood, colors, composition). Be specific: "A flat-lay of fresh coffee beans on a marble counter, warm morning light, shot from above, minimal style" not "coffee photo".
-- For behind-the-scenes and team posts, prefer real images. For promotional and seasonal posts, AI-generated images are fine.
-- Mix content types; no more than 2 promotional in a row.
-- Vary platforms, don't post identically on all same day.
-- Seasonal references for ${vars.month} where appropriate.
-- Instagram: 150-300 chars + hashtags. LinkedIn: 200-500 chars, professional. TikTok: 50-150 chars, casual. X: under 280 chars.
-- Generate exactly ${vars.postsCount} posts.`;
+CAPTION CRAFT RULES — the difference between "good" and "publishable":
+
+1. HOOKS. The first 5-7 words decide whether the post is read. Bad hook: "We love what we do 💛". Good hook: "We broke our coffee grinder at 07:15 this morning." Every caption starts with something specific — a time, a name, a number, a sensory detail, a small problem, a surprise.
+
+2. SPECIFICITY. Name things. Not "a delicious coffee" → "a Honduras Santa Barbara as a flat white". Not "our team" → "Mark, Sarah, and the new apprentice Cian". Not "great service" → "a callout to Drumcondra at 19:00 on a Friday". If the business voice guide mentions specific products, locations, or people, use them.
+
+3. ONE IDEA PER POST. No post does two things. Pick: inform, amuse, prove, remind, sell. Stick to it.
+
+4. END ON A SOFT CTA, not a hard one. Follow the brand voice CTA style. Never "DON'T MISS OUT" or "LINK IN BIO 👀👀👀".
+
+5. PLATFORM LENGTH RULES (enforce strictly):
+   - Instagram feed: 150-300 chars caption, 15-25 hashtags at the end separated by a line break.
+   - LinkedIn: 400-800 chars, NO hashtags in the body (put 3-5 professional tags at the end on a new line). Professional register but still the brand's voice.
+   - Facebook: 100-250 chars, 2-5 hashtags. Conversational.
+   - TikTok: 50-150 chars, 5-10 hashtags. Punchy hook in the first 4 words.
+   - X: under 270 chars TOTAL including 1-3 hashtags.
+
+6. HASHTAG QUALITY. No generic hashtags (#love, #instagood, #mondaymotivation, #inspiration). Mix: location (#corkcity, #dublin8, #northdublin), craft (#hottowelshave, #flatlay, #emergencyplumber), and 1-2 community tags (#corkbarbers, #supportlocal). Lowercase only. No spaces, no more than 3 words per tag.
+
+7. NO AI TELLS. Do NOT write: "Ever wondered...", "We've got you covered!", "dive into", "elevate", "seamless", "game-changer", "journey", "unlock", "curate", "craft" (as a verb), "passion", "harness". If the caption has one of these words, rewrite it.
+
+8. NO HOLIDAY FILLER. Do not post "Happy Monday" or generic day-of-the-week posts. Seasonal references must be grounded in what the business is actually doing (a seasonal menu item, a seasonal service, a real event).
+
+IMAGE MATCHING — this is where 90% of AI calendars fail:
+
+- Read every AVAILABLE IMAGE description carefully. The subject MUST match the caption.
+- A food photo goes with a food caption. A team photo goes with a team/shop-life caption. A product shot goes with a product caption.
+- If the best-matching caption for an image reads as a stretch, pick a different image or set imageIndex to null and generate one.
+- Use real images (imageIndex from AVAILABLE IMAGES) for at least 65% of posts. Real photos outperform generated ones almost everywhere.
+- Do NOT reuse the same imageIndex more than twice across the whole month.
+- For behind-the-scenes, team, testimonial, and location posts: always use a real image if one exists. Set imageIndex to null only if nothing in AVAILABLE IMAGES fits.
+- For promotional, seasonal, and educational posts: real images preferred, but a generated image is acceptable when needed.
+
+IMAGE GENERATION PROMPTS — when imageIndex is null:
+
+- Write a PHOTOGRAPHIC, specific, composed prompt. Not "coffee photo" but:
+  "Flat-lay of an espresso in a stoneware cup on a weathered wooden counter, warm morning window light from the upper left, a few scattered coffee beans, shallow depth of field, minimal warm color palette of cream browns and terracotta, 45mm lens, shot from directly above, magazine-editorial feel."
+- Describe: subject, setting, lighting direction, palette, angle/lens, mood. Reference real lighting types ("golden hour", "overcast daylight", "window light") not "nice lighting".
+- Match the brand's aesthetic from the voice guide — don't suddenly shift style.
+- NEVER generate images of people's faces unless explicitly described in the voice guide's content pillars (and even then, prefer silhouettes or "hands visible").
+- NEVER generate logos or text in images.
+
+CONTENT MIX OVER THE MONTH — aim for this distribution:
+- 25% behind-the-scenes / shop life (highest engagement)
+- 20% educational / how-to / tips
+- 20% product / service / menu highlights
+- 15% testimonials / customer moments / results
+- 10% team spotlights
+- 10% seasonal / local / community
+
+NO MORE THAN 2 promotional posts in a row. SPREAD content types across the month.
+
+PLATFORM DIVERSITY:
+- Rotate platforms day-to-day. Don't post Instagram for 5 days straight then LinkedIn for 5.
+- Don't post on every platform every day — that looks automated.
+- LinkedIn gets 2-3 posts a week max. Daily LinkedIn burns the feed.
+- TikTok captions must sound like TikTok, not Instagram. Different platform, different hook.
+
+FINAL CHECK before returning:
+- Every hook passes the "would a human stop scrolling?" test.
+- Every caption passes the "could this be any business?" test — if yes, rewrite with more specificity.
+- Every image-caption pair passes the "does this image support this specific caption?" test.
+- Every contentType distribution matches the percentages above.
+
+Generate exactly ${vars.postsCount} posts.`;
 }
 
 export function platformFormatterPrompt(vars: {
@@ -132,6 +203,59 @@ PLATFORM RULES:
 
 Return ONLY JSON:
 { "caption": "<reformatted>", "hashtags": [...] }`;
+}
+
+/**
+ * Regenerate a single post. The user is looking at an existing caption
+ * and wants a fresh take — either because the original was bland,
+ * off-brand, or because they want to nudge the angle. Unlike the
+ * calendar prompt, this is ONE post, so we can give Claude a tighter
+ * brief and demand more specificity.
+ */
+export function regeneratePostPrompt(vars: {
+  businessName: string;
+  industry: string;
+  brandVoice: string;
+  currentCaption: string;
+  currentHashtags: string[];
+  platform: string;
+  contentType?: string;
+  imageSubject?: string;
+  instruction?: string;
+}) {
+  return `You are the in-house social media writer for "${vars.businessName}" (${vars.industry}). Rewrite the post below. Keep what was working (platform, subject, angle) and fix what wasn't.
+
+BRAND VOICE GUIDE:
+${vars.brandVoice}
+
+PLATFORM: ${vars.platform}
+CONTENT TYPE: ${vars.contentType ?? 'general'}
+${vars.imageSubject ? `IMAGE IN THE POST: ${vars.imageSubject}` : ''}
+
+CURRENT CAPTION:
+${vars.currentCaption}
+
+CURRENT HASHTAGS: ${vars.currentHashtags.join(' ')}
+
+${vars.instruction ? `USER FEEDBACK: ${vars.instruction}\n` : ''}
+
+Return ONLY JSON:
+{
+  "caption": "<the rewritten caption>",
+  "hashtags": ["<fresh hashtags>"],
+  "hook": "<the first 5-7 words, pulled out>",
+  "rationale": "<one sentence on what you changed and why>"
+}
+
+RULES:
+- The rewrite must sound different from the original, not a reshuffle.
+- Start with a real hook: a time, a name, a number, a sensory detail, a small moment. Never "Ever wondered..." or "We love...".
+- Honor the brand voice guide exactly (tone, vocabulary, sentence style, emoji rules, CTA style).
+- NO AI TELLS: avoid "dive into", "elevate", "seamless", "game-changer", "journey", "unlock", "curate", "craft" as a verb, "passion", "harness".
+- Match platform length: Instagram 150-300, LinkedIn 400-800, Facebook 100-250, TikTok 50-150, X under 270.
+- Hashtags: lowercase, specific to location + craft + community. No #love, #instagood, #mondaymotivation.
+- If imageSubject is provided, the caption MUST reference the image naturally — not force-match it.
+- If the user gave instruction feedback, that overrides everything else except the brand voice.`;
 }
 
 /**
@@ -674,4 +798,95 @@ LOGO PLACEMENT (critical — don't send logos as hero images):
 - Team member headshots go on members[].photoIndex, never on hero.imageIndex or brand.logoIndex.
 - Product shots go on products.items[].imageIndex, never on hero.
 - Gallery / portfolio images go in gallery.imageIndices[] or portfolio.projects[].imageIndices[].`;
+}
+
+/**
+ * Video script planner. Given a client's brand voice and the pool of
+ * available media (with AI subject descriptions), produce a sequenced
+ * script for a 15–25 second Reels-style short. Each clip includes:
+ *   - which media item to use (by index) OR a Flux prompt for a
+ *     generated still + motion treatment
+ *   - a short eyebrow and a punchy caption in the brand voice
+ *   - a focal point so the Ken Burns zoom stays on subject
+ *   - a duration in seconds
+ *
+ * The planner is opinionated about story arc: open with a hook clip,
+ * build through a middle, land with a payoff. Without this, Claude
+ * defaults to a list of "nice shots" with no narrative.
+ */
+export function videoScriptPrompt(vars: {
+  businessName: string;
+  industry: string;
+  brandVoice: string;
+  mediaDescriptions: string;
+  videoIntent: string; // 'brand_story' | 'promo' | 'team_intro' | 'menu_reveal' | ...
+  clipCount: number; // 3-6
+  headline?: string;
+  cta?: string;
+  platform?: string; // 'instagram_reel' | 'tiktok' | 'youtube_short' | ...
+}) {
+  return `You are a short-form video director planning a ${vars.clipCount}-clip vertical reel for "${vars.businessName}" (${vars.industry}). This will play on ${vars.platform ?? 'Instagram Reels and TikTok'} — sound off by default, captions on-screen doing the talking.
+
+BRAND VOICE:
+${vars.brandVoice}
+
+AVAILABLE MEDIA (index, kind, description):
+${vars.mediaDescriptions || '(no media — plan a synthesis script using AI-generated stills)'}
+
+INTENT: ${vars.videoIntent}
+${vars.headline ? `HEADLINE (already agreed): ${vars.headline}` : ''}
+${vars.cta ? `CTA: ${vars.cta}` : ''}
+
+Return ONLY valid JSON:
+{
+  "hookHeadline": "<the top-of-video 4-7 word hook. This is NOT the outro headline — it's the first thing the viewer sees and it must stop a scroll.>",
+  "outroHeadline": "<4-7 words for the end card. Quieter, landing line.>",
+  "suggestedCta": "<a single verb phrase, e.g. 'Book now', 'Try it this week'. Match the brand voice's CTA style.>",
+  "clips": [
+    {
+      "order": <0-based integer>,
+      "mediaIndex": <index from AVAILABLE MEDIA, or null if this clip should be synthesized>,
+      "synthesisPrompt": "<if mediaIndex is null, a fully-composed Flux image prompt for this shot. Describe subject, lighting, palette, angle, mood. NO generic stuff.>",
+      "wantsMotion": <true if this should be animated via image-to-video, false to keep it as a Ken Burns still>,
+      "motionPrompt": "<only when wantsMotion is true. A 1-sentence instruction like 'Slow pan left across the counter, steam rising from the cup'. Keep motion subtle so the subject doesn't distort.>",
+      "eyebrow": "<2-3 word uppercase kicker, e.g. 'Behind the scenes', 'Tuesday 07:14', 'The team'. Optional — use null if the caption stands alone.>",
+      "caption": "<6-12 words. On-screen only, must be readable in 2 seconds. No ending punctuation. Example: 'Four grinders already running and we\\'re still tuning'>",
+      "durationSeconds": <2.0-4.5, integer or half-step; faster clips for early-scroll energy, slower for the last clip so the CTA lands>,
+      "focalX": <0-1 decimal, horizontal focal point for the zoom>,
+      "focalY": <0-1 decimal, vertical focal point for the zoom>,
+      "rationale": "<one sentence on why this clip belongs here and why this media was chosen>"
+    }
+  ]
+}
+
+STORY ARC (enforce this):
+1. HOOK (clip 0): surprise, specificity, or intrigue. Not "Welcome to X" — something that makes someone stop.
+2. PROOF (middle clips): show the thing. Specific moments, not stock-feeling.
+3. PAYOFF (last clip): emotional landing that earns the outro headline and CTA.
+
+MEDIA MATCHING:
+- Prefer real client media over synthesis. Use mediaIndex whenever a clip in AVAILABLE MEDIA fits.
+- Do NOT reuse the same mediaIndex more than once unless there are literally no other options.
+- A food shot goes with a food caption. A team shot goes with a people caption. Mismatches destroy the personalization.
+- Only synthesize (mediaIndex null) when no existing media fits the story slot. When you synthesize, the prompt must match the brand's existing aesthetic (read the media descriptions to infer palette and mood).
+
+MOTION:
+- Set wantsMotion true only when motion genuinely adds value: a team pouring coffee, a door opening, a car arriving, a stylist finishing a cut. Static product shots, headshots, menu boards should stay as Ken Burns stills (cheaper, sharper, more reliable).
+- Keep motionPrompts slow and small. Violent motion on a still photo distorts faces and subjects.
+
+CAPTIONS:
+- Short, specific, lowercase-first when the brand voice allows. No AI tells ("dive into", "elevate", "seamless", "craft" as a verb).
+- Must reference the on-screen subject so the caption and visual feel married.
+- Each caption should read as a complete thought so clips aren't sentence fragments stretched across seconds.
+
+FOCAL POINTS:
+- For face-forward headshots: focalY ~ 0.35 (so the zoom tightens on eyes, not forehead).
+- For wide storefronts: focalY ~ 0.6, focalX near where the subject lives.
+- For tabletop/flat-lays: focalX/focalY 0.5.
+
+DURATIONS:
+- Total reel time (sum of clips + 2.8s outro) should be 15–25s. Shorter feels too fast, longer loses the viewer.
+- First 2 clips: 2.0–2.6s each (scroll-energy). Last clip: 3.5–4.5s (landing).
+
+Return the JSON array ordered by clip.order ascending. Generate exactly ${vars.clipCount} clips.`;
 }

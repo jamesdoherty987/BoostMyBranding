@@ -6,6 +6,7 @@ import { SectionWrapper } from '../../section-wrapper';
 import { useSiteContext } from '../context';
 import { brandGradient } from '../theme';
 import { InlineEditable } from '../InlineEditable';
+import { InlineImage } from '../InlineImage';
 import { GalleryFocusCards, GalleryParallax, GalleryAppleCarousel, GalleryLayoutGrid, GalleryCompare, GalleryDirectionAware, Gallery3dMarquee } from './gallery';
 
 interface SiteGalleryProps {
@@ -22,10 +23,14 @@ interface SiteGalleryProps {
  */
 export function SiteGallery({ config, images, businessName }: SiteGalleryProps) {
   const { embedded } = useSiteContext();
+  // When no indices are configured, fall back to showing every client
+  // image — better to use more of the library than to arbitrarily cap
+  // at 6 and leave good photos unused. Claude normally sets indices
+  // explicitly so this is a safety net for un-curated configs.
   const indices = config.gallery?.imageIndices?.length
     ? config.gallery.imageIndices
     : images.length > 0
-      ? images.map((_, i) => i).slice(0, 6)
+      ? images.map((_, i) => i).slice(0, 12)
       : [];
 
   const resolved = indices
@@ -104,10 +109,20 @@ function GalleryGrid({
   businessName: string;
   resolved: string[];
 }) {
+  // Map each resolved src back to its position in `gallery.imageIndices`
+  // so we can write to the exact slot when the user swaps a tile.
+  const { editMode } = useSiteContext();
+  const indices = config.gallery?.imageIndices ?? [];
+
   return (
     <div className="grid grid-cols-2 gap-3 md:grid-cols-3 md:gap-4">
       {resolved.map((src, i) => {
         const isTall = i % 5 === 0;
+        // When imageIndices is absent (auto-populated gallery), the index
+        // we write to is simply `i` because the array we'd create mirrors
+        // the resolved list 1:1.
+        const pathIndex = indices.length > 0 ? i : i;
+        const writePath = `gallery.imageIndices.${pathIndex}`;
         return (
           <motion.div
             key={`${src}-${i}`}
@@ -120,21 +135,31 @@ function GalleryGrid({
               isTall ? 'row-span-2 aspect-[3/5]' : 'aspect-square'
             }`}
           >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={src}
-              alt={`${businessName}, gallery image ${i + 1}`}
-              className="h-full w-full object-cover transition-transform duration-500 hover:scale-[1.04]"
-              loading="lazy"
-              onError={(e) => {
-                const target = e.currentTarget;
-                target.style.display = 'none';
-                const parent = target.parentElement;
-                if (parent) {
-                  parent.style.background = brandGradient(config.brand, (i * 45) % 360);
-                }
-              }}
-            />
+            {editMode ? (
+              <InlineImage
+                src={src}
+                alt={`${businessName}, gallery image ${i + 1}`}
+                className="h-full w-full"
+                path={writePath}
+                fieldName="direct"
+              />
+            ) : (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={src}
+                alt={`${businessName}, gallery image ${i + 1}`}
+                className="h-full w-full object-cover transition-transform duration-500 hover:scale-[1.04]"
+                loading="lazy"
+                onError={(e) => {
+                  const target = e.currentTarget;
+                  target.style.display = 'none';
+                  const parent = target.parentElement;
+                  if (parent) {
+                    parent.style.background = brandGradient(config.brand, (i * 45) % 360);
+                  }
+                }}
+              />
+            )}
           </motion.div>
         );
       })}

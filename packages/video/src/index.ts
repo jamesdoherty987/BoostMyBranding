@@ -3,7 +3,7 @@
  * Consumed by the API for rendering and by the dashboard for template metadata.
  */
 
-export type { VideoProps, BrandPalette } from './types';
+export type { VideoProps, BrandPalette, MediaClip, VideoOptions } from './types';
 export { DEFAULT_BRAND, VIDEO_CONFIG, FONTS } from './types';
 
 export type { TemplateDef, TemplateMeta } from './templates';

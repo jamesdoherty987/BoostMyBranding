@@ -8,6 +8,7 @@ import { SectionWrapper } from '../../section-wrapper';
 import { useSiteContext } from '../context';
 import { brandGradient } from '../theme';
 import { InlineEditable } from '../InlineEditable';
+import { InlineImage } from '../InlineImage';
 
 interface SitePortfolioProps {
   config: WebsiteConfig;
@@ -94,11 +95,16 @@ export function SitePortfolio({ config, images }: SitePortfolioProps) {
           {p.projects.map((proj, i) => {
             const projectImages = resolveProjectImages(proj, images);
             const cover = projectImages[0];
+            // In edit mode, the card is a div so the InlineImage button
+            // inside isn't nested (which would break hydration). The
+            // click target for opening the lightbox is only needed in
+            // public render anyway.
+            const Wrapper: any = editMode ? motion.div : motion.button;
             return (
-              <motion.button
+              <Wrapper
                 key={i}
-                type="button"
-                onClick={() => openProject(i)}
+                type={editMode ? undefined : 'button'}
+                onClick={editMode ? undefined : () => openProject(i)}
                 initial={embedded ? false : { opacity: 0, y: 16 }}
                 whileInView={embedded ? undefined : { opacity: 1, y: 0 }}
                 animate={embedded ? { opacity: 1, y: 0 } : undefined}
@@ -111,7 +117,22 @@ export function SitePortfolio({ config, images }: SitePortfolioProps) {
                 }`}
               >
                 <div className="relative aspect-[4/3] overflow-hidden bg-slate-100">
-                  {cover ? (
+                  {editMode ? (
+                    <InlineImage
+                      src={cover}
+                      alt={proj.title}
+                      className="h-full w-full"
+                      path={`portfolio.projects.${i}.imageIndices.0`}
+                      fieldName="direct"
+                      placeholder={
+                        <div
+                          className="h-full w-full"
+                          style={{ background: brandGradient(config.brand, 140) }}
+                          aria-hidden
+                        />
+                      }
+                    />
+                  ) : cover ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
                       src={cover}
@@ -160,7 +181,7 @@ export function SitePortfolio({ config, images }: SitePortfolioProps) {
                     </div>
                   ) : null}
                 </div>
-              </motion.button>
+              </Wrapper>
             );
           })}
         </div>

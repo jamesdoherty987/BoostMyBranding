@@ -300,7 +300,7 @@ export function MediaLibrary({ clientId }: Props) {
                     />
                   ) : (
                     <Image
-                      src={(m as any).enhancedUrl ?? m.fileUrl}
+                      src={m.enhancedUrl ?? m.fileUrl}
                       alt={m.fileName ?? ''}
                       fill
                       className="object-cover"

@@ -4,6 +4,7 @@ import type { WebsiteConfig } from '@boost/core';
 import { SectionWrapper } from '../../section-wrapper';
 import { useSiteContext } from '../context';
 import { InlineEditable } from '../InlineEditable';
+import { InlineImage } from '../InlineImage';
 
 interface SiteLogoStripProps {
   config: WebsiteConfig;
@@ -33,12 +34,14 @@ export function SiteLogoStrip({ config, images }: SiteLogoStripProps) {
       logo.imageUrl ??
       (typeof logo.imageIndex === 'number' ? images[logo.imageIndex] : undefined);
     const body = src ? (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
+      // InlineImage gives the agency a click target to swap the logo in
+      // edit mode. Public render returns a plain `<img>`.
+      <InlineImage
         src={src}
         alt={logo.name}
-        loading="lazy"
         className="h-8 w-auto max-w-[140px] object-contain opacity-60 grayscale transition-all hover:opacity-100 hover:grayscale-0 md:h-10"
+        path={`logoStrip.logos.${i}`}
+        fieldName="imageIndex"
       />
     ) : (
       <span className="text-sm font-semibold uppercase tracking-wider text-slate-400">

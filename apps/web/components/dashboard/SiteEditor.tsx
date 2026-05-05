@@ -17,6 +17,7 @@ import {
   getVariantsFor,
   hasVariants,
   findVariant,
+  checkVariantRequirements,
   ALL_VARIANT_TAGS,
   type VariantTag,
 } from '@boost/core';
@@ -939,6 +940,7 @@ function SectionManager({
       {pickerBlock ? (
         <VariantPickerSheet
           block={pickerBlock}
+          config={config}
           currentVariantId={(() => {
             if (pickerBlock === 'hero') return config.hero?.variant;
             const entry = config[pickerBlock as keyof WebsiteConfig] as
@@ -4612,12 +4614,19 @@ function VariantPickerSheet({
   alreadyInLayout,
   onClose,
   onPick,
+  config,
 }: {
   block: SiteBlockKey;
   currentVariantId: string | undefined;
   alreadyInLayout: boolean;
   onClose: () => void;
   onPick: (variantId: string) => void;
+  /**
+   * Current config passed through so the picker can warn when a variant
+   * needs more data than the client has (e.g. a 3-member layout picked
+   * with 1 member entered).
+   */
+  config: WebsiteConfig;
 }) {
   const variants = getVariantsFor(block);
   const [query, setQuery] = useState('');
@@ -4717,14 +4726,18 @@ function VariantPickerSheet({
               No styles match that filter.
             </div>
           ) : (
-            filtered.map((v) => (
-              <VariantCard
-                key={v.id}
-                variant={v}
-                isCurrent={v.id === currentVariantId}
-                onClick={() => onPick(v.id)}
-              />
-            ))
+            filtered.map((v) => {
+              const check = checkVariantRequirements(v, config);
+              return (
+                <VariantCard
+                  key={v.id}
+                  variant={v}
+                  isCurrent={v.id === currentVariantId}
+                  requirementCheck={check}
+                  onClick={() => onPick(v.id)}
+                />
+              );
+            })
           )}
         </div>
       </div>
@@ -4760,12 +4773,15 @@ function TagPill({
 function VariantCard({
   variant,
   isCurrent,
+  requirementCheck,
   onClick,
 }: {
   variant: VariantOption;
   isCurrent: boolean;
+  requirementCheck?: { met: boolean; missing: Array<{ current: number; minItems: number; hint: string }> };
   onClick: () => void;
 }) {
+  const needsData = requirementCheck && !requirementCheck.met;
   return (
     <button
       onClick={onClick}
@@ -4773,8 +4789,17 @@ function VariantCard({
       className={`group relative flex flex-col overflow-hidden rounded-xl border bg-white text-left transition-all hover:-translate-y-0.5 hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-none ${
         isCurrent
           ? 'border-[#1D9CA1] ring-2 ring-[#1D9CA1]/30'
-          : 'border-slate-200 hover:border-[#1D9CA1]/60'
+          : needsData
+            ? 'border-amber-300 hover:border-amber-400'
+            : 'border-slate-200 hover:border-[#1D9CA1]/60'
       }`}
+      title={
+        needsData
+          ? `This style needs more content: ${requirementCheck!.missing
+              .map((m) => m.hint)
+              .join('; ')}`
+          : undefined
+      }
     >
       {/* Thumbnail */}
       <div className="relative aspect-[3/2] w-full overflow-hidden bg-slate-50">
@@ -4813,15 +4838,28 @@ function VariantCard({
         <p className="mt-1 line-clamp-2 text-[10px] leading-relaxed text-slate-500">
           {variant.description}
         </p>
-        {variant.requires && variant.requires.length > 0 ? (
+        {needsData ? (
+          <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-800">
+              Needs more content
+            </p>
+            <ul className="mt-0.5 space-y-0.5">
+              {requirementCheck!.missing.map((m, i) => (
+                <li key={i} className="text-[10px] leading-snug text-amber-900">
+                  {m.current}/{m.minItems} · {m.hint}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : variant.requires && variant.requires.length > 0 ? (
           <div className="mt-2 flex flex-wrap gap-1">
             {variant.requires.map((r) => (
               <span
                 key={r.field}
-                className="rounded bg-amber-50 px-1.5 py-0.5 text-[9px] font-medium text-amber-800"
+                className="rounded bg-emerald-50 px-1.5 py-0.5 text-[9px] font-medium text-emerald-800"
                 title={r.field}
               >
-                {r.hint}
+                ✓ {r.hint}
               </span>
             ))}
           </div>

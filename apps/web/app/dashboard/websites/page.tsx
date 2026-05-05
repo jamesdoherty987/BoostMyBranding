@@ -200,7 +200,7 @@ export default function WebsitesPage() {
   const [imagePicker, setImagePicker] = useState<
     | {
         path: string;
-        fieldName: 'imageIndex' | 'imageUrl' | 'photoIndex' | 'photoUrl';
+        fieldName: 'imageIndex' | 'imageUrl' | 'photoIndex' | 'photoUrl' | 'direct';
       }
     | null
   >(null);
@@ -1345,6 +1345,22 @@ export default function WebsitesPage() {
           onPick={(pick) => {
             const fieldName = imagePicker.fieldName;
             const base = imagePicker.path;
+
+            // Direct mode: the path IS the target. Used for arrays of
+            // primitives like gallery.imageIndices.3 where we just want
+            // to set one array slot.
+            if (fieldName === 'direct') {
+              if (pick.kind === 'library') {
+                handleFieldChange(base, pick.index);
+              } else {
+                // URL-based items aren't valid in a number-array context,
+                // but we support it by using the string URL instead.
+                handleFieldChange(base, pick.url);
+              }
+              setImagePicker(null);
+              return;
+            }
+
             // Write ONLY the field the block actually reads. If the block
             // supports both imageIndex + imageUrl, clear the other so the
             // precedence is unambiguous (url wins over index when set).

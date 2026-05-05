@@ -65,7 +65,7 @@ interface SiteRendererProps {
    */
   onImageClick?: (context: {
     path: string;
-    fieldName: 'imageIndex' | 'imageUrl' | 'photoIndex' | 'photoUrl';
+    fieldName: 'imageIndex' | 'imageUrl' | 'photoIndex' | 'photoUrl' | 'direct';
   }) => void;
   /**
    * Natural-language AI edit callback for the floating "Ask AI" chat.

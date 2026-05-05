@@ -119,13 +119,17 @@ export async function generateWebsite(args: GenerateWebsiteArgs) {
     }
   }
 
-  // 2. Gather image hints (top 8, favouring enhanced/approved with a good score).
+  // 2. Gather image hints. We pass up to 20 so Claude can populate
+  // gallery / portfolio / team / products / before-after from the full
+  // library rather than only the top 8. The ones that don't make it
+  // into any config field still show up as "available" in the dashboard
+  // picker so the agency can swap them in by hand.
   const images = await db
     .select()
     .from(clientImages)
     .where(eq(clientImages.clientId, client.id))
     .orderBy(desc(clientImages.qualityScore))
-    .limit(8);
+    .limit(20);
   const imageDescriptions =
     images.length > 0
       ? images
@@ -354,7 +358,7 @@ export async function saveWebsiteConfig(args: {
   await db
     .update(clients)
     .set({
-      websiteConfig: args.config as any,
+      websiteConfig: sanitizeForSave(args.config) as any,
       websiteGeneratedAt: new Date(),
     })
     .where(eq(clients.id, args.clientId));
@@ -385,12 +389,14 @@ export async function updateWebsiteField(args: {
   const next = structuredClone(row.websiteConfig) as Record<string, any>;
   setPath(next, args.path, args.value);
 
+  const sanitized = sanitizeForSave(next);
+
   await db
     .update(clients)
-    .set({ websiteConfig: next as any, websiteGeneratedAt: new Date() })
+    .set({ websiteConfig: sanitized as any, websiteGeneratedAt: new Date() })
     .where(eq(clients.id, args.clientId));
 
-  return next as WebsiteConfig;
+  return sanitized as WebsiteConfig;
 }
 
 /**
@@ -456,6 +462,61 @@ function setPath(target: Record<string, any>, path: string[], value: unknown) {
   } else {
     cursor[lastKey] = value;
   }
+}
+
+/**
+ * Defensively clean a config before persisting. The editor can generate
+ * corrupted configs through two paths that `setPath` alone can't fix:
+ *
+ *   1. Deletes. When the UI removes `services[1]`, the array serializes
+ *      to `[{...}, null, {...}]` rather than contracting. Downstream the
+ *      renderer crashes on `service.title`.
+ *
+ *   2. Imported legacy JSON. Older configs sometimes have `null` entries
+ *      from hand-edits, which break the same way.
+ *
+ * Walking every list on save is cheap (configs are small), so we do it
+ * unconditionally. Plain objects are passed through but recursed — their
+ * keys may themselves hold arrays that need filtering.
+ *
+ * The pages array is treated as authoritative about its own slug-unique
+ * invariants; duplicates are de-duplicated keeping the first occurrence
+ * so the routing layer never sees two pages at the same slug.
+ */
+function sanitizeForSave<T>(value: T): T {
+  if (value === null || value === undefined) return value;
+  if (Array.isArray(value)) {
+    const cleaned = value
+      .filter((v) => v !== null && v !== undefined)
+      .map((v) => sanitizeForSave(v));
+    return cleaned as unknown as T;
+  }
+  if (typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      // Keep empty strings — they're user-intentional (clearing a field).
+      // Drop undefined (which JSON would swallow anyway).
+      if (v === undefined) continue;
+      out[k] = sanitizeForSave(v);
+    }
+
+    // Pages must have unique slugs so the page-by-slug lookup is deterministic.
+    if (Array.isArray((out as any).pages)) {
+      const seen = new Set<string>();
+      (out as any).pages = ((out as any).pages as Array<Record<string, unknown>>).filter(
+        (p) => {
+          const slug = typeof p.slug === 'string' ? p.slug : null;
+          if (!slug) return false;
+          if (seen.has(slug)) return false;
+          seen.add(slug);
+          return true;
+        },
+      );
+    }
+
+    return out as T;
+  }
+  return value;
 }
 
 /**

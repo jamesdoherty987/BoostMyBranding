@@ -233,6 +233,13 @@ export const clientImages = pgTable(
     fileName: text('file_name'),
     fileSizeBytes: integer('file_size_bytes'),
     mimeType: text('mime_type'),
+    /**
+     * Provenance tag: upload | ai | template | canva | stock. Lets the
+     * Media Studio filter by "videos I uploaded" vs. "AI-generated" vs.
+     * "rendered from a template" vs. "designed in Canva". Nullable so
+     * existing rows (pre-migration) default to "upload" in the UI.
+     */
+    source: text('source'),
     tags: text('tags').array().default([] as unknown as string[]),
     aiDescription: text('ai_description'),
     aiSuggestions: jsonb('ai_suggestions'),
@@ -376,4 +383,35 @@ export const leads = pgTable(
     createdAt: timestamp('created_at').defaultNow().notNull(),
   },
   (table) => ({ clientIdx: index('leads_client_idx').on(table.clientId) }),
+);
+
+// ----- Canva connections -----
+/**
+ * Per-client Canva OAuth tokens. We store one connection per client so
+ * the agency can design inside each client's own Canva workspace and
+ * export designs straight into the client's media library.
+ *
+ * Tokens are encrypted at rest only via Postgres / provider encryption;
+ * refresh happens on demand when the access token is within 60s of
+ * expiry. `updated_at` is bumped on every refresh so we can see staleness.
+ */
+export const clientCanvaConnections = pgTable(
+  'client_canva_connections',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    clientId: uuid('client_id')
+      .references(() => clients.id, { onDelete: 'cascade' })
+      .notNull(),
+    canvaUserId: text('canva_user_id'),
+    canvaTeamId: text('canva_team_id'),
+    accessToken: text('access_token').notNull(),
+    refreshToken: text('refresh_token').notNull(),
+    scopes: text('scopes'),
+    expiresAt: timestamp('expires_at').notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => ({
+    clientIdx: uniqueIndex('client_canva_connections_client_idx').on(table.clientId),
+  }),
 );

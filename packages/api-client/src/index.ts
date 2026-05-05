@@ -230,7 +230,7 @@ export class BoostApi {
   }
 
   // ----- Posts -----
-  listPosts(params: { clientId?: string; status?: string } = {}) {
+  listPosts(params: { clientId?: string; status?: string; batchId?: string } = {}) {
     const q = new URLSearchParams(
       Object.entries(params).filter(([, v]) => v != null) as [string, string][],
     ).toString();
@@ -424,6 +424,37 @@ export class BoostApi {
       steps: Array<{ key: string; durationMs: number; ok: boolean; note?: string }>;
       costCents: number;
     }>('/api/v1/automation/generate', { method: 'POST', body: JSON.stringify(args) });
+  }
+
+  /**
+   * Rewrite a single post's caption + hashtags. Uses the brand voice +
+   * (optionally) user feedback to produce a sharper take. Server persists
+   * the result so the next `listPosts` call returns the new copy.
+   */
+  regeneratePost(args: { postId: string; instruction?: string }) {
+    return this.request<{
+      caption: string;
+      hashtags: string[];
+      hook: string;
+      rationale: string;
+    }>('/api/v1/automation/regenerate-post', {
+      method: 'POST',
+      body: JSON.stringify(args),
+    });
+  }
+
+  /**
+   * Regenerate the image on a single post via Flux. Uses the post's
+   * caption as the subject brief; `overridePrompt` lets the agency fine-tune.
+   */
+  regeneratePostImage(args: { postId: string; overridePrompt?: string }) {
+    return this.request<{ imageUrl: string; prompt: string }>(
+      '/api/v1/automation/regenerate-post-image',
+      {
+        method: 'POST',
+        body: JSON.stringify(args),
+      },
+    );
   }
 
   generateWebsite(args: {
@@ -673,6 +704,20 @@ export class BoostApi {
     cta?: string;
     domain?: string;
     imageUrl?: string;
+    /**
+     * Ordered media clips for templates that sequence multiple photos/videos
+     * (the MediaStory template). Each clip has a url, kind, optional
+     * duration/caption/eyebrow and Ken-Burns focal point.
+     */
+    mediaClips?: Array<{
+      url: string;
+      kind: 'image' | 'video';
+      durationSeconds?: number;
+      caption?: string;
+      eyebrow?: string;
+      focalX?: number;
+      focalY?: number;
+    }>;
     brand?: {
       primary?: string;
       accent?: string;
@@ -733,6 +778,121 @@ export class BoostApi {
   /** List all videos saved to a client's media library. */
   listClientVideos(clientId: string) {
     return this.request<ClientImage[]>(`/api/v1/videos?clientId=${encodeURIComponent(clientId)}`);
+  }
+
+  /**
+   * Personalized video: Claude plans a 3–6 clip reel from the client's
+   * uploaded media (or synthesized stills when the library is thin),
+   * optionally animates a few of the clips, and renders the MediaStory
+   * template. Takes 30–60s — show a proper loading state.
+   */
+  generatePersonalizedVideo(args: {
+    clientId: string;
+    intent?:
+      | 'brand_story'
+      | 'promo'
+      | 'team_intro'
+      | 'menu_reveal'
+      | 'before_after'
+      | 'location_tour';
+    clipCount?: number;
+    headline?: string;
+    cta?: string;
+    direction?: string;
+    selectedMediaIds?: string[];
+    enableMotion?: boolean;
+  }) {
+    return this.request<{
+      videoUrl: string;
+      templateId: 'media-story';
+      durationSeconds: number;
+      clips: Array<{
+        order: number;
+        caption?: string;
+        eyebrow?: string;
+        sourceKind: 'upload' | 'synthesis' | 'motion';
+        sourceUrl: string;
+        durationSeconds: number;
+      }>;
+      fromMock: boolean;
+    }>('/api/v1/videos/personalized', {
+      method: 'POST',
+      body: JSON.stringify(args),
+    });
+  }
+
+  // ----- Canva -----
+
+  canvaStatus(clientId: string) {
+    return this.request<{
+      configured: boolean;
+      connected: boolean;
+      canvaUserId?: string | null;
+      canvaTeamId?: string | null;
+      scopes?: string | null;
+      expiresAt?: string | null;
+    }>(`/api/v1/canva/status?clientId=${encodeURIComponent(clientId)}`);
+  }
+
+  /**
+   * Build the Canva connect URL. We don't redirect here — we return the
+   * URL so the UI can open it in a new window. That way the dashboard
+   * page doesn't lose unsaved state while the user authorises.
+   */
+  canvaConnectUrl(clientId: string) {
+    return `${this.config.baseUrl}/api/v1/canva/connect?clientId=${encodeURIComponent(clientId)}`;
+  }
+
+  canvaDisconnect(clientId: string) {
+    return this.request<{ disconnected: boolean }>(
+      `/api/v1/canva/connection?clientId=${encodeURIComponent(clientId)}`,
+      { method: 'DELETE' },
+    );
+  }
+
+  canvaListDesigns(clientId: string) {
+    return this.request<
+      Array<{
+        id: string;
+        title?: string;
+        thumbnailUrl?: string;
+        updatedAt?: string;
+        editUrl?: string;
+      }>
+    >(`/api/v1/canva/designs?clientId=${encodeURIComponent(clientId)}`);
+  }
+
+  canvaListBrandTemplates(clientId: string) {
+    return this.request<
+      Array<{ id: string; title: string; thumbnailUrl?: string }>
+    >(`/api/v1/canva/brand-templates?clientId=${encodeURIComponent(clientId)}`);
+  }
+
+  canvaAutofill(args: {
+    clientId: string;
+    brandTemplateId: string;
+    headline?: string;
+    subheadline?: string;
+    extra?: Record<string, string>;
+    imageUrl?: string;
+    imageName?: string;
+  }) {
+    return this.request<{ designId: string; editUrl?: string; viewUrl?: string }>(
+      '/api/v1/canva/autofill',
+      { method: 'POST', body: JSON.stringify(args) },
+    );
+  }
+
+  canvaImportDesign(args: {
+    clientId: string;
+    designId: string;
+    format?: 'png' | 'jpg' | 'mp4';
+    caption?: string;
+  }) {
+    return this.request<ClientImage[]>('/api/v1/canva/import-design', {
+      method: 'POST',
+      body: JSON.stringify(args),
+    });
   }
 }
 

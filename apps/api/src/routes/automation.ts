@@ -6,7 +6,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { SITE_TEMPLATES } from '@boost/core';
-import { runMonthlyGeneration } from '../services/automation.js';
+import { runMonthlyGeneration, regenerateSinglePost, regeneratePostImage } from '../services/automation.js';
 import {
   generateWebsite,
   editWebsiteWithAI,
@@ -343,3 +343,43 @@ automationRouter.post('/publish-due', async (req, res, next) => {
     next(e);
   }
 });
+
+const regeneratePostSchema = z.object({
+  postId: z.string().min(1).max(100),
+  instruction: z.string().max(2000).optional(),
+});
+
+automationRouter.post(
+  '/regenerate-post',
+  requireAuth,
+  requireRole('agency_admin', 'agency_member'),
+  async (req, res, next) => {
+    try {
+      const args = regeneratePostSchema.parse(req.body);
+      const result = await regenerateSinglePost(args);
+      res.json({ data: result });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+const regenerateImageSchema = z.object({
+  postId: z.string().min(1).max(100),
+  overridePrompt: z.string().max(2000).optional(),
+});
+
+automationRouter.post(
+  '/regenerate-post-image',
+  requireAuth,
+  requireRole('agency_admin', 'agency_member'),
+  async (req, res, next) => {
+    try {
+      const args = regenerateImageSchema.parse(req.body);
+      const result = await regeneratePostImage(args);
+      res.json({ data: result });
+    } catch (e) {
+      next(e);
+    }
+  },
+);

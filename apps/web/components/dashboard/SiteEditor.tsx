@@ -709,19 +709,27 @@ function SectionManager({
   // page at a time.
   const pages = config.pages ?? [];
   const activePage = pages.find((p) => p.slug === activePageSlug);
+  // "Multipage" from the renderer's POV means `pages.length > 0` — even
+  // a single entry there wins over `config.layout` via `resolvePage`. We
+  // mirror that here so edits go to the same field the renderer reads.
+  const hasPages = pages.length > 0;
   const isMultipage = pages.length > 1;
 
-  const layout: SiteBlockKey[] = isMultipage
+  const layout: SiteBlockKey[] = hasPages
     ? activePage?.layout ?? pages[0]?.layout ?? DEFAULT_LAYOUT[config.template ?? 'service']
     : config.layout ?? DEFAULT_LAYOUT[config.template ?? 'service'];
   const available = ALL_BLOCKS.filter((b) => !layout.includes(b));
 
   const setLayout = (newLayout: SiteBlockKey[]) => {
-    if (isMultipage && activePage) {
+    // Write to the same field `resolvePage` reads. If there's any page
+    // in config.pages (even just the implicit "home"), the renderer
+    // sources layout from that page — so we update there too.
+    if (hasPages) {
+      const activeSlug = activePage?.slug ?? pages[0]?.slug ?? 'home';
       onChange({
         ...config,
         pages: pages.map((p) =>
-          p.slug === activePage.slug ? { ...p, layout: newLayout } : p,
+          p.slug === activeSlug ? { ...p, layout: newLayout } : p,
         ),
       });
     } else {
@@ -779,13 +787,14 @@ function SectionManager({
       }
     }
 
-    if (isMultipage && activePage) {
+    if (hasPages) {
+      const activeSlug = activePage?.slug ?? pages[0]?.slug ?? 'home';
       onChange({
         ...config,
         ...seeded,
         ...variantPatch,
         pages: pages.map((p) =>
-          p.slug === activePage.slug ? { ...p, layout: newLayout } : p,
+          p.slug === activeSlug ? { ...p, layout: newLayout } : p,
         ),
       });
     } else {

@@ -323,6 +323,46 @@ RULES:
 }
 
 /**
+ * Atomic full-config save. Unlike `updateWebsiteField` (which does a
+ * read-modify-write on the JSONB blob), this takes the caller's full
+ * config and overwrites in a single query. Safe to call from the editor
+ * without worrying about races between parallel requests — there's only
+ * one request per save.
+ *
+ * This is the correct path for the dashboard's auto-save + manual Save
+ * button, which send every top-level field together. The older
+ * `updateWebsiteField` is kept for tiny, isolated edits (e.g. a single
+ * headline change in the review panel).
+ */
+export async function saveWebsiteConfig(args: {
+  clientId: string;
+  config: WebsiteConfig;
+}): Promise<WebsiteConfig> {
+  if (!isDbConfigured()) {
+    throw new Error('Database not configured');
+  }
+  const db = getDb();
+
+  // Verify the client exists so we return a clean 404 rather than a
+  // silent noop when the id is wrong.
+  const [row] = await db
+    .select({ id: clients.id })
+    .from(clients)
+    .where(eq(clients.id, args.clientId));
+  if (!row) throw new Error('Client not found');
+
+  await db
+    .update(clients)
+    .set({
+      websiteConfig: args.config as any,
+      websiteGeneratedAt: new Date(),
+    })
+    .where(eq(clients.id, args.clientId));
+
+  return args.config;
+}
+
+/**
  * Targeted edit of a single field. Used by the inline section editor so a
  * single headline change doesn't round-trip through Claude.
  */

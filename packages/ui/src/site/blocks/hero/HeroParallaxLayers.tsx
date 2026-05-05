@@ -142,7 +142,7 @@ export function HeroParallaxLayers({
             >
               <div
                 aria-hidden
-                className="absolute inset-0"
+                className="pointer-events-none absolute inset-0"
                 style={{ boxShadow: `0 40px 80px -20px rgba(${primaryRgb}, 0.35)` }}
               />
               {/*
@@ -159,15 +159,19 @@ export function HeroParallaxLayers({
               />
               <div
                 aria-hidden
-                className="absolute inset-0"
+                className="pointer-events-none absolute inset-0"
                 style={{
                   background:
                     'linear-gradient(180deg, transparent 40%, rgba(0,0,0,0.4) 100%)',
                 }}
               />
-              {/* Tagline card — floats independently on scroll for extra depth */}
+              {/* Tagline card — floats independently on scroll for extra depth.
+                  `pointer-events-none` so it doesn't steal clicks from the
+                  image underneath (critical in edit mode so InlineImage's
+                  click target works). */}
               <motion.div
-                className="absolute bottom-5 left-5 right-5 rounded-2xl bg-white/90 p-4 shadow-lg backdrop-blur"
+                aria-hidden
+                className="pointer-events-none absolute bottom-5 left-5 right-5 rounded-2xl bg-white/90 p-4 shadow-lg backdrop-blur"
                 style={motionDisabled ? undefined : { y: tagY }}
               >
                 <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">
@@ -184,7 +188,7 @@ export function HeroParallaxLayers({
             <motion.div
               aria-hidden
               style={motionDisabled ? undefined : { y: orbOneY }}
-              className="absolute -left-6 -top-6 h-28 w-28 rounded-full blur-2xl"
+              className="pointer-events-none absolute -left-6 -top-6 h-28 w-28 rounded-full blur-2xl"
             >
               <div
                 className="h-full w-full rounded-full"
@@ -194,7 +198,7 @@ export function HeroParallaxLayers({
             <motion.div
               aria-hidden
               style={motionDisabled ? undefined : { y: orbTwoY }}
-              className="absolute -bottom-10 -right-8 h-40 w-40 rounded-full blur-3xl"
+              className="pointer-events-none absolute -bottom-10 -right-8 h-40 w-40 rounded-full blur-3xl"
             >
               <div
                 className="h-full w-full rounded-full"

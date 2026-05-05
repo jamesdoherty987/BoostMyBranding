@@ -11,6 +11,7 @@ import {
   generateWebsite,
   editWebsiteWithAI,
   updateWebsiteField,
+  saveWebsiteConfig,
 } from '../services/websites.js';
 import { generateHeroImage } from '../services/heroImage.js';
 import { getDb, isDbConfigured, clients } from '@boost/database';
@@ -228,6 +229,38 @@ automationRouter.post(
         clientId: args.clientId,
         path: pathSegments,
         value: args.value,
+      });
+      res.json({ data: { config } });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+/**
+ * Atomic full-config save. Preferred over /update-website-field for
+ * editor saves because it avoids races between parallel JSONB writes.
+ * The editor sends the entire config in one request.
+ */
+const saveConfigSchema = z.object({
+  clientId: z.string().min(1).max(100),
+  // We accept an arbitrary object here because the WebsiteConfig shape is
+  // validated downstream by the renderer's sanitizer. Stricter validation
+  // would reject optional fields that legitimately differ between
+  // templates.
+  config: z.record(z.any()),
+});
+
+automationRouter.post(
+  '/save-website-config',
+  requireAuth,
+  requireRole('agency_admin', 'agency_member'),
+  async (req, res, next) => {
+    try {
+      const args = saveConfigSchema.parse(req.body);
+      const config = await saveWebsiteConfig({
+        clientId: args.clientId,
+        config: args.config as any,
       });
       res.json({ data: { config } });
     } catch (e) {

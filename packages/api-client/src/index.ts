@@ -509,6 +509,21 @@ export class BoostApi {
     );
   }
 
+  /**
+   * Atomic full-config save. Use this for editor saves so parallel
+   * JSONB writes can't race. Sends the entire WebsiteConfig in one
+   * request — the server overwrites the blob in a single UPDATE.
+   */
+  saveWebsiteConfig(args: { clientId: string; config: WebsiteConfig }) {
+    return this.request<{ config: WebsiteConfig }>(
+      '/api/v1/automation/save-website-config',
+      {
+        method: 'POST',
+        body: JSON.stringify(args),
+      },
+    );
+  }
+
   /** Regenerate (or first-generate) the AI hero image for a client. */
   generateHeroImage(args: { clientId: string; overridePrompt?: string }) {
     return this.request<{ imageUrl: string; prompt: string; fromMock?: boolean }>(

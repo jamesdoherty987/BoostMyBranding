@@ -64,10 +64,10 @@ export function InlineImage({
     return <img src={src} alt={alt} className={className} loading="lazy" />;
   }
 
-  // Edit mode: wrap in a clickable button. Hovering reveals a "Change" chip.
-  // We remap the path to the sub-page's override namespace when applicable so
-  // a click on an About sub-page's photo writes to `pages.N.blocks.about.*`
-  // rather than stomping the homepage.
+  // Edit mode: wrap in a clickable button. Always shows a "Change photo"
+  // chip so the click target is obvious — no hover required. This is
+  // critical on touch devices where hover-to-reveal doesn't work, and
+  // also helps first-time users who don't realize the image is clickable.
   const openPicker = () => {
     const writePath = remapPathForPage(path, currentPageSlug, pageIndex);
     onImageClick?.({ path: writePath, fieldName });
@@ -77,7 +77,7 @@ export function InlineImage({
     <button
       type="button"
       onClick={openPicker}
-      className={`group relative block overflow-hidden outline-2 outline-offset-2 outline-transparent transition-all hover:outline-[#1D9CA1] ${
+      className={`group relative block overflow-hidden outline outline-2 outline-dashed outline-[#1D9CA1]/60 outline-offset-2 transition-all hover:outline-solid hover:outline-[#1D9CA1] ${
         className ?? ''
       }`}
       aria-label="Change image"
@@ -87,19 +87,22 @@ export function InlineImage({
         // eslint-disable-next-line @next/next/no-img-element
         <img src={src} alt={alt} className="h-full w-full object-cover" loading="lazy" />
       ) : (
-        <div className="flex h-full w-full items-center justify-center bg-slate-100 text-slate-400">
-          <ImageIcon className="h-6 w-6" />
+        <div className="flex h-full w-full flex-col items-center justify-center gap-2 bg-slate-100 text-slate-500">
+          <ImageIcon className="h-8 w-8" />
+          <span className="text-xs font-medium">Click to add image</span>
         </div>
       )}
-      {/* Hover overlay — dimmed scrim + pill. */}
-      <span
-        aria-hidden
-        className="pointer-events-none absolute inset-0 flex items-center justify-center bg-[#1D9CA1]/0 transition-colors group-hover:bg-[#1D9CA1]/30"
-      >
-        <span className="rounded-full bg-white/95 px-3 py-1 text-xs font-semibold text-slate-900 opacity-0 shadow-lg backdrop-blur transition-opacity group-hover:opacity-100">
+      {/* Always-visible "Change photo" chip when an image exists. Darkens
+          on hover so it looks obviously interactive. */}
+      {src ? (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute bottom-2 right-2 flex items-center gap-1 rounded-full bg-white/95 px-2.5 py-1 text-[10px] font-semibold text-slate-900 shadow-md backdrop-blur transition-all group-hover:bg-[#1D9CA1] group-hover:text-white"
+        >
+          <ImageIcon className="h-2.5 w-2.5" />
           Change photo
         </span>
-      </span>
+      ) : null}
     </button>
   );
 }

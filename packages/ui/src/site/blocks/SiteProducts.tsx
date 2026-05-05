@@ -8,6 +8,7 @@ import { SectionWrapper } from '../../section-wrapper';
 import { useSiteContext } from '../context';
 import { brandGradient } from '../theme';
 import { InlineEditable } from '../InlineEditable';
+import { InlineImage } from '../InlineImage';
 
 interface SiteProductsProps {
   config: WebsiteConfig;
@@ -102,21 +103,20 @@ export function SiteProducts({ config, images }: SiteProductsProps) {
                 }`}
               >
                 <div className="relative aspect-[4/3] overflow-hidden bg-slate-100">
-                  {src ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={src}
-                      alt={item.name}
-                      className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.04]"
-                      loading="lazy"
-                    />
-                  ) : (
-                    <div
-                      className="h-full w-full"
-                      style={{ background: brandGradient(config.brand, 120) }}
-                      aria-hidden
-                    />
-                  )}
+                  <InlineImage
+                    src={src}
+                    alt={item.name}
+                    path={`products.items.${realIndex}`}
+                    fieldName="imageIndex"
+                    className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.04]"
+                    placeholder={
+                      <div
+                        className="h-full w-full"
+                        style={{ background: brandGradient(config.brand, 120) }}
+                        aria-hidden
+                      />
+                    }
+                  />
                   {item.badge ? (
                     <span
                       className="absolute left-3 top-3 rounded-full bg-white/95 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider shadow-sm backdrop-blur"

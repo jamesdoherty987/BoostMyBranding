@@ -361,28 +361,39 @@ export default function WebsitesPage() {
   };
 
   /**
-   * Inline edit handler. Patches the local config optimistically, then
-   * persists via the update-field endpoint. If the API fails we roll back
-   * to the previous value so the UI stays consistent with server state.
+   * Inline edit handler. Patches the local config optimistically and
+   * routes the change through the same debounced full-config save path
+   * as the editor panel. We used to call `updateWebsiteField` here, but
+   * that raced the editor's `saveWebsiteConfig` flush: the editor kept a
+   * stale `pendingConfigRef` snapshot, and when its debounce fired it
+   * overwrote inline picks (image uploads, colour swatches, etc).
+   *
+   * Unifying both paths means there's one source of truth — the full
+   * config in `pendingConfigRef` — and one way to persist it.
    */
   const handleFieldChange = useCallback(
-    async (path: string, value: unknown) => {
+    (path: string, value: unknown) => {
       if (!config || !newSite.clientId) return;
 
-      // Optimistic local patch so the preview updates instantly. Mirrors
-      // the server-side `setPath` — when we write into an array by index,
-      // we fill earlier holes with `{}` so downstream renders don't hit
-      // `member is null` (sparse holes serialize as null via JSON).
+      // Source from the latest pending snapshot if one exists — this is
+      // vital when `handleFieldChange` is called multiple times in the
+      // same tick (e.g. ImagePicker sets both `imageIndex` and clears
+      // `imageUrl`). React hasn't re-rendered yet, so `config` still
+      // holds the pre-first-call value; reading the ref lets us chain.
+      const source = (pendingConfigRef.current ?? config) as WebsiteConfig;
+
+      // Optimistic local patch. Mirrors the server-side `setPath` —
+      // when we write into an array by index, we fill earlier holes
+      // with `{}` so downstream renders don't hit `member is null`
+      // (sparse holes serialize as null via JSON).
       //
       // Critical: when a numeric segment follows, the parent MUST be an
       // array. If a previous write accidentally created the parent as
-      // `{"0": ...}` (which happens when the old code set a fresh {}
-      // placeholder and then indexed into it), we coerce it back to an
-      // array here. Otherwise the renderer gets `services = {0: {...}}`
-      // and `sanitizeConfig` correctly warns "expected array, got object".
+      // `{"0": ...}`, we coerce it back to an array here. Otherwise the
+      // renderer gets `services = {0: {...}}` and `sanitizeConfig`
+      // correctly warns "expected array, got object".
       const segments = path.split('.').filter((s) => s.length > 0);
-      const prev = structuredClone(config) as any;
-      const next = structuredClone(config) as any;
+      const next = structuredClone(source) as any;
       let cursor = next;
       for (let i = 0; i < segments.length - 1; i++) {
         const k = segments[i]!;
@@ -436,18 +447,12 @@ export default function WebsitesPage() {
       } else {
         cursor[lastKey] = value;
       }
-      setConfig(next);
 
-      try {
-        await api.updateWebsiteField({
-          clientId: newSite.clientId,
-          path,
-          value,
-        });
-      } catch (e) {
-        setConfig(prev);
-        toast.error('Save failed', (e as Error).message);
-      }
+      // Route through the editor's save pipeline so the debounced
+      // `saveWebsiteConfig` always sees this change. We call the
+      // handler below directly via the ref so we don't depend on
+      // hoisting.
+      handleConfigChangeRef.current?.(next as WebsiteConfig);
     },
     [config, newSite.clientId],
   );
@@ -463,67 +468,111 @@ export default function WebsitesPage() {
    * sections around or rapidly clicking color swatches.
    */
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingConfigRef = useRef<WebsiteConfig | null>(null);
+  // Ref holds the latest `handleConfigChange`. `handleFieldChange` calls
+  // it through the ref so inline edits (image pick, colour swatch, etc.)
+  // funnel into the same debounced save pipeline as the editor panel,
+  // without creating a React-style circular dependency in `useCallback`.
+  const handleConfigChangeRef = useRef<((c: WebsiteConfig) => void) | null>(null);
   const [saving, setSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+
+  /**
+   * Persist the full config in a single atomic request. The previous
+   * approach sent 36 parallel `updateWebsiteField` calls, which the
+   * server handled as read-modify-write on the same JSONB blob — they
+   * raced each other and late-completing writes silently reverted
+   * earlier ones (that's why section reorders "saved" then reappeared
+   * after reload). One request, one UPDATE, no races.
+   */
+  const persistConfig = useCallback(
+    async (next: WebsiteConfig) => {
+      if (!newSite.clientId) return;
+      setSaving(true);
+      try {
+        await api.saveWebsiteConfig({
+          clientId: newSite.clientId,
+          config: next,
+        });
+        setLastSaved(new Date());
+        setHasUnsavedChanges(false);
+        pendingConfigRef.current = null;
+      } catch (e) {
+        toast.error('Save failed', (e as Error).message);
+        throw e;
+      } finally {
+        setSaving(false);
+      }
+    },
+    [newSite.clientId],
+  );
+
+  /**
+   * Flush any pending debounced save right now and wait for it. Called
+   * by the manual Save button and before unmount.
+   */
+  const flushSave = useCallback(async () => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    const pending = pendingConfigRef.current;
+    if (!pending) return;
+    await persistConfig(pending);
+  }, [persistConfig]);
 
   const handleConfigChange = useCallback(
     (next: WebsiteConfig) => {
       setConfig(next);
+      pendingConfigRef.current = next;
+      setHasUnsavedChanges(true);
 
       // Debounce the persist — 1.5s after the last change.
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = setTimeout(async () => {
-        if (!newSite.clientId) return;
-        setSaving(true);
-        try {
-          // We use the AI edit endpoint with a no-op instruction to persist
-          // the full config. This is a bit of a hack — ideally we'd have a
-          // dedicated "save config" endpoint. But editWebsiteWithAI with
-          // the current config and an empty instruction just round-trips
-          // the config through normalizeConfig and saves it.
-          //
-          // Actually, let's use updateWebsiteField with the root path to
-          // overwrite the whole config. Simpler.
-          await api.updateWebsiteField({
-            clientId: newSite.clientId,
-            path: 'brand',
-            value: next.brand,
-          });
-          // Save layout + hero + pages in parallel
-          await Promise.all([
-            api.updateWebsiteField({
-              clientId: newSite.clientId,
-              path: 'layout',
-              value: next.layout,
-            }),
-            api.updateWebsiteField({
-              clientId: newSite.clientId,
-              path: 'hero',
-              value: next.hero,
-            }),
-            next.pages
-              ? api.updateWebsiteField({
-                  clientId: newSite.clientId,
-                  path: 'pages',
-                  value: next.pages,
-                })
-              : Promise.resolve(),
-            api.updateWebsiteField({
-              clientId: newSite.clientId,
-              path: 'navigation',
-              value: next.navigation,
-            }),
-          ]);
-          setLastSaved(new Date());
-        } catch (e) {
-          toast.error('Auto-save failed', (e as Error).message);
-        } finally {
-          setSaving(false);
-        }
+      saveTimerRef.current = setTimeout(() => {
+        saveTimerRef.current = null;
+        const pending = pendingConfigRef.current;
+        if (!pending) return;
+        persistConfig(pending).catch(() => {
+          /* toast already shown */
+        });
       }, 1500);
     },
-    [newSite.clientId],
+    [persistConfig],
   );
+
+  // Keep the ref up-to-date so `handleFieldChange` always calls the
+  // latest handler (captures latest `persistConfig` reference).
+  useEffect(() => {
+    handleConfigChangeRef.current = handleConfigChange;
+  }, [handleConfigChange]);
+
+  // Warn before leaving the page with unsaved edits. `returnValue` is
+  // required for Firefox; modern browsers show a generic dialog.
+  useEffect(() => {
+    if (!hasUnsavedChanges && !saving) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [hasUnsavedChanges, saving]);
+
+  // Cmd/Ctrl+S triggers a manual save.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+        if (hasUnsavedChanges || saveTimerRef.current) {
+          e.preventDefault();
+          flushSave();
+        }
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [flushSave, hasUnsavedChanges]);
 
   return (
     <>
@@ -1049,12 +1098,17 @@ export default function WebsitesPage() {
                 <div className="flex items-center gap-3">
                   <h2 className="text-sm font-semibold text-slate-900">Live preview</h2>
                   {saving ? (
-                    <span className="flex items-center gap-1.5 text-[11px] text-slate-500">
+                    <span className="flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-700">
                       <Loader2 className="h-3 w-3 animate-spin" />
                       Saving…
                     </span>
+                  ) : hasUnsavedChanges ? (
+                    <span className="flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-700">
+                      <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-500" />
+                      Unsaved changes
+                    </span>
                   ) : lastSaved ? (
-                    <span className="flex items-center gap-1.5 text-[11px] text-emerald-600">
+                    <span className="flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-medium text-emerald-700">
                       <Check className="h-3 w-3" />
                       Saved
                     </span>
@@ -1068,6 +1122,23 @@ export default function WebsitesPage() {
                   ) : null}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
+                  {/* Manual Save button — useful when the user wants to
+                      persist right now without waiting for the 1.5s
+                      debounce (e.g. before reloading or closing the tab). */}
+                  <Button
+                    size="sm"
+                    variant={hasUnsavedChanges ? 'primary' : 'outline'}
+                    onClick={() => flushSave()}
+                    disabled={saving || !hasUnsavedChanges}
+                    title="Save now (⌘S)"
+                  >
+                    {saving ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Check className="h-3 w-3" />
+                    )}
+                    {saving ? 'Saving' : 'Save'}
+                  </Button>
                   {/* Inline edit toggle — exposed here so it's discoverable
                       without diving into the editor panel. */}
                   <Button
@@ -1195,7 +1266,15 @@ export default function WebsitesPage() {
                         Click any headline, subheading, or service card in the preview below to edit. Press Enter to save, Esc to cancel.
                       </div>
                     ) : null}
-                    <PreviewFrame device={device}>
+                    <PreviewFrame
+                      device={device}
+                      liveUrl={
+                        selectedClient?.slug
+                          ? `${APP_URL}/sites/${selectedClient.slug}`
+                          : undefined
+                      }
+                      pageSlug={previewPageSlug}
+                    >
                       <SiteRenderer
                         config={config}
                         businessName={selectedClient?.businessName ?? 'Your Business'}

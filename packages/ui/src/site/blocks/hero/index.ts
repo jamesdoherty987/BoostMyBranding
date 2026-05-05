@@ -15,3 +15,6 @@ export { HeroTwoColumnImage } from './HeroTwoColumnImage';
 export { HeroMeteors } from './HeroMeteors';
 export { HeroVortex } from './HeroVortex';
 export { HeroLamp } from './HeroLamp';
+export { HeroShootingStars } from './HeroShootingStars';
+export { HeroBoxes } from './HeroBoxes';
+export { HeroRipple } from './HeroRipple';

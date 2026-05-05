@@ -1,7 +1,7 @@
 // @ts-nocheck
 "use client";
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { SparklesCore } from "@/aceternity/ui/sparkles";
+import { SparklesCore } from "./sparkles";
 import { AnimatePresence, motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { IconDotsVertical } from "@tabler/icons-react";

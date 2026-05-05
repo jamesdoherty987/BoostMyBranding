@@ -3,7 +3,7 @@
 
 import { useMotionValue, motion, useMotionTemplate } from "framer-motion";
 import React, { MouseEvent as ReactMouseEvent, useState } from "react";
-import { CanvasRevealEffect } from "@/aceternity/ui/canvas-reveal-effect";
+import { CanvasRevealEffect } from "./canvas-reveal-effect";
 import { cn } from "@/lib/utils";
 
 export const CardSpotlight = ({

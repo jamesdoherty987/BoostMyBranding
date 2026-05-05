@@ -6,7 +6,7 @@ import { SectionWrapper } from '../../section-wrapper';
 import { useSiteContext } from '../context';
 import { brandGradient } from '../theme';
 import { InlineEditable } from '../InlineEditable';
-import { CtaWithImages, CtaCenteredBold, CtaMovingBorder } from './cta';
+import { CtaWithImages, CtaCenteredBold, CtaMovingBorder, CtaTextReveal } from './cta';
 
 interface SiteCtaProps {
   config: WebsiteConfig;
@@ -34,6 +34,9 @@ export function SiteCta({ config, images = [] }: SiteCtaProps) {
   }
   if (variant === 'moving-border') {
     return <CtaMovingBorder config={config} />;
+  }
+  if (variant === 'text-reveal') {
+    return <CtaTextReveal config={config} />;
   }
   // `simple` and `masonry-images` (not yet wired) both use the original
   // strip — masonry-images is a placeholder that falls back cleanly.

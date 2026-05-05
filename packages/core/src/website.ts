@@ -108,7 +108,10 @@ export type HeroVariant =
   | 'two-column-image'
   | 'meteors'
   | 'vortex'
-  | 'lamp';
+  | 'lamp'
+  | 'shooting-stars'
+  | 'boxes'
+  | 'ripple';
 
 /**
  * A single page in a multipage site. `slug` is the URL segment (`about`,
@@ -478,7 +481,8 @@ export interface WebsiteConfig {
      *   - marquee               : auto-scrolling Aceternity InfiniteMovingCards
      *   - carousel              : single featured quote with prev/next
      *   - masonry               : Pinterest-style variable-height grid
-     *   - draggable             : stacked cards visitors drag through
+     *   - draggable             : physical-feeling drag-around cards
+     *   - stack                 : Aceternity card-stack cycling through reviews
      *   - animated-testimonials : Aceternity-style carousel with photo
      */
     variant?:
@@ -487,6 +491,7 @@ export interface WebsiteConfig {
       | 'carousel'
       | 'masonry'
       | 'draggable'
+      | 'stack'
       | 'animated-testimonials';
   };
 
@@ -813,13 +818,15 @@ export interface WebsiteConfig {
      *   - masonry-images : bold headline beside a masonry photo wall
      *   - centered-bold  : huge centered text on deep gradient
      *   - moving-border  : centered text with animated glowing-border button
+     *   - text-reveal    : Aceternity hover-to-reveal text card
      */
     variant?:
       | 'simple'
       | 'with-images'
       | 'masonry-images'
       | 'centered-bold'
-      | 'moving-border';
+      | 'moving-border'
+      | 'text-reveal';
   };
 
   /**
@@ -1158,6 +1165,9 @@ export const HERO_VARIANTS: HeroVariant[] = [
   'meteors',
   'vortex',
   'lamp',
+  'shooting-stars',
+  'boxes',
+  'ripple',
 ];
 
 /**

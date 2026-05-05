@@ -6,7 +6,7 @@ import type { WebsiteConfig } from '@boost/core';
 import { SectionWrapper } from '../../section-wrapper';
 import { useSiteContext } from '../context';
 import { InlineEditable } from '../InlineEditable';
-import { ReviewsMarquee, ReviewsCarousel, ReviewsStack } from './reviews';
+import { ReviewsMarquee, ReviewsCarousel, ReviewsStack, ReviewsDraggable } from './reviews';
 
 interface SiteReviewsProps {
   config: WebsiteConfig;
@@ -57,8 +57,10 @@ export function SiteReviews({ config, images }: SiteReviewsProps) {
             <ReviewsMarquee config={config} />
           ) : variant === 'carousel' || variant === 'animated-testimonials' ? (
             <ReviewsCarousel config={config} images={images} />
-          ) : variant === 'draggable' ? (
+          ) : variant === 'stack' ? (
             <ReviewsStack config={config} />
+          ) : variant === 'draggable' ? (
+            <ReviewsDraggable config={config} />
           ) : (
             <ReviewsGrid config={config} embedded={embedded} reviews={reviews} />
           )}

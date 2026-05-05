@@ -39,6 +39,9 @@ import {
   HeroMeteors,
   HeroVortex,
   HeroLamp,
+  HeroShootingStars,
+  HeroBoxes,
+  HeroRipple,
 } from './hero';
 import { HeroCutouts } from './hero/HeroCutouts';
 
@@ -151,6 +154,18 @@ export function SiteHero({ config, images, businessName, embedded }: SiteHeroPro
 
     case 'lamp':
       variantEl = <HeroLamp config={config} embedded={embedded} />;
+      break;
+
+    case 'shooting-stars':
+      variantEl = <HeroShootingStars config={config} embedded={embedded} />;
+      break;
+
+    case 'boxes':
+      variantEl = <HeroBoxes config={config} embedded={embedded} />;
+      break;
+
+    case 'ripple':
+      variantEl = <HeroRipple config={config} embedded={embedded} />;
       break;
 
     case 'parallax-layers':

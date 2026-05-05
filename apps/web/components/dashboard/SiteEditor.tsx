@@ -446,6 +446,18 @@ const HERO_VARIANT_META: Record<HeroVariant, { label: string; description: strin
     label: 'Lamp',
     description: 'Dramatic overhead spotlight. Luxury, cinematic.',
   },
+  'shooting-stars': {
+    label: 'Shooting stars',
+    description: 'Streaks of light across a dark sky. Dreamy, premium.',
+  },
+  boxes: {
+    label: 'Boxes',
+    description: 'Animated grid of color-shifting boxes. Bold, tech-forward.',
+  },
+  ripple: {
+    label: 'Ripple',
+    description: 'Radial ripple effect behind centered copy. Calm, modern.',
+  },
 };
 
 interface SiteEditorProps {

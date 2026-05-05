@@ -196,7 +196,7 @@ Return ONLY valid JSON in this exact shape:
     "ctaPrimary": { "label": "<action verb>", "href": "<#section or url>" },
     "ctaSecondary": { "label": "...", "href": "..." },
     "imageIndex": <index from AVAILABLE IMAGES, or null if none suit the hero>,
-    "variant": "<spotlight|beams|floating-icons|parallax-layers|gradient-mesh|aurora|wavy|sparkles|hero-highlight|dither|multicolor|full-bg-image|two-column-image|meteors|vortex|lamp>",
+    "variant": "<spotlight|beams|floating-icons|parallax-layers|gradient-mesh|aurora|wavy|sparkles|hero-highlight|dither|multicolor|full-bg-image|two-column-image|meteors|vortex|lamp|shooting-stars|boxes|ripple>",
     "floatingIcons": ["<6-8 Lucide icon names OR emoji strings — only when variant is floating-icons>"],
     "cutouts": [
       {
@@ -652,6 +652,9 @@ HERO VARIANT GUIDE — pick the one that matches the business personality:
 - "meteors": Falling meteor trails on a dark canvas. Event / launch / nightlife energy. Best for gyms, event venues, photographers, anything night-oriented.
 - "vortex": Swirling colored particles behind centered copy. Premium and dynamic. Best for creative agencies, tech-adjacent trades, modern restaurants.
 - "lamp": Dramatic overhead spotlight that fades up as the page loads. Luxury and cinematic. Best for high-end services, boutique hotels, event venues, luxury retail.
+- "shooting-stars": Starry night sky with occasional meteors streaking across. Dreamy and premium. Best for observatories, rooftop venues, night photography, night-oriented businesses.
+- "boxes": Animated 3D-tilted grid of boxes that color-shift on hover. Tech-forward and interactive. Best for design studios, creative agencies, modern retail.
+- "ripple": Subtle radial ripple pattern behind centered copy on a light background. Calm and modern. Best for wellness, spas, tech-adjacent trades.
 
 IMAGE GUIDANCE:
 - Set hero.imageIndex to a number ONLY if an AVAILABLE IMAGE looks like a strong hero (wide, high-quality, representative). Otherwise null — the system will generate a custom AI illustration.

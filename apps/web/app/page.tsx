@@ -23,7 +23,7 @@ const jsonLd = {
       logo: `${BASE}/favicon.png`,
       sameAs: ['https://instagram.com/boostmybranding'],
       description:
-        'A dedicated social media management team for modern local businesses. We plan, write, and publish every post so your brand keeps showing up.',
+        'A boutique social media team for modern local businesses. We plan, write, shoot, and publish every post so your brand always shows up looking sharp.',
       contactPoint: {
         '@type': 'ContactPoint',
         email: COMPANY.email,
@@ -43,7 +43,7 @@ const jsonLd = {
       name: 'Social Media Management',
       provider: { '@id': `${BASE}/#organization` },
       description:
-        'Monthly social media content creation, scheduling, and publishing for local businesses. 30 posts per month across Instagram, Facebook, LinkedIn, TikTok, and more.',
+        'Monthly social media content creation, scheduling, and publishing for local businesses. 10 hand-crafted posts per month on Instagram and TikTok, with an optional custom website.',
       areaServed: { '@type': 'Country', name: COMPANY.country },
       serviceType: 'Social Media Management',
       offers: TIERS.map((t) => ({
@@ -63,7 +63,7 @@ const jsonLd = {
           name: 'How long until my first posts go live?',
           acceptedAnswer: {
             '@type': 'Answer',
-            text: 'Roughly a week. We spend the first few days learning your business, then build your brand brief and start publishing.',
+            text: 'Around a week. We spend the first few days learning your business, then build your brand brief and start publishing.',
           },
         },
         {
@@ -71,7 +71,7 @@ const jsonLd = {
           name: 'Which platforms do you cover?',
           acceptedAnswer: {
             '@type': 'Answer',
-            text: 'Instagram, Facebook, LinkedIn, TikTok, X (Twitter), Pinterest, and Bluesky. Stories and Reels included.',
+            text: 'Instagram and TikTok. Reels, Stories, and grid posts, all tailored to each platform.',
           },
         },
         {

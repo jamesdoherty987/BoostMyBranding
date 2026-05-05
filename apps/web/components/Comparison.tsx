@@ -6,7 +6,7 @@ import { SectionWrapper, Logo } from '@boost/ui';
 
 /**
  * Comparison table + testimonial strip, framed as "running it yourself"
- * vs. "letting a social team run it for you" — the agency positioning.
+ * vs. "letting a social team run it for you", the agency positioning.
  *
  * Mobile: two stacked columns per row (DIY left, BMB right) with the
  * label inline. Desktop: classic three-column table.
@@ -14,19 +14,19 @@ import { SectionWrapper, Logo } from '@boost/ui';
 
 const ROWS = [
   {
-    label: 'Writing & captions',
+    label: 'Writing and captions',
     diy: 'Scrambling for angles every week',
     bmb: 'Writers in your voice, every post',
   },
   {
-    label: 'Photos & editing',
+    label: 'Photos and editing',
     diy: 'Phone shots, feed looks amateur',
-    bmb: 'Edited for every platform',
+    bmb: 'Edited and sized for every platform',
   },
   {
     label: 'Planning',
     diy: 'Post when you can, inconsistent',
-    bmb: 'Monthly calendar, a week ahead',
+    bmb: 'Monthly calendar, planned a week ahead',
   },
   {
     label: 'Team',
@@ -35,8 +35,8 @@ const ROWS = [
   },
   {
     label: 'Your time',
-    diy: '10–15 hours a week',
-    bmb: 'Zero — we handle it all',
+    diy: '10 to 15 hours a week',
+    bmb: 'Zero. We handle it all.',
   },
 ];
 
@@ -52,7 +52,7 @@ const QUOTES = [
     role: 'Atlas Fitness',
   },
   {
-    text: "Website + social for one price, way cheaper than hiring a marketer. Bookings doubled in two months.",
+    text: "Website and social for one price, way cheaper than hiring a marketer. Bookings doubled in two months.",
     name: 'Luca Romano',
     role: 'Verde Cafe',
   },
@@ -68,7 +68,7 @@ export function Comparison() {
             <span className="text-slate-400">done properly.</span>
           </h2>
           <p className="mt-3 text-sm text-slate-600 md:mt-4 md:text-base">
-            The same standard an in-house team would deliver, without the cost of hiring one.
+            The standard an in-house team would deliver, without the cost of hiring one.
           </p>
         </div>
 
@@ -97,7 +97,7 @@ export function Comparison() {
                 transition={{ duration: 0.5, delay: i * 0.05 }}
                 className="grid grid-cols-2 md:grid-cols-[1fr_1fr_1fr]"
               >
-                {/* Label — desktop only as its own column */}
+                {/* Label, desktop only as its own column */}
                 <div className="hidden border-r border-slate-100 p-4 text-sm font-semibold text-slate-900 md:flex md:items-center">
                   {row.label}
                 </div>

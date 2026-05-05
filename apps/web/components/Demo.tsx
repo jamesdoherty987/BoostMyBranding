@@ -18,7 +18,7 @@ const STEPS: Step[] = [
     icon: Lightbulb,
     num: 1,
     title: 'Learn your brand',
-    body: 'We study your business, tone, and customers — then build your brand brief.',
+    body: 'We study your business, tone, and customers, then build your brand brief.',
     accent: '#48D886',
   },
   {
@@ -31,14 +31,14 @@ const STEPS: Step[] = [
   {
     icon: Wand2,
     num: 3,
-    title: 'Polish & schedule',
-    body: 'Every post is checked, edited, and queued across all your platforms.',
+    title: 'Polish and schedule',
+    body: 'Every post is checked, edited, and queued for Instagram and TikTok.',
     accent: '#48D886',
   },
   {
     icon: BarChart3,
     num: 4,
-    title: 'Publish & report',
+    title: 'Publish and report',
     body: 'Posts go live on schedule. Friday summary of what shipped and how it performed.',
     accent: '#FFEC3D',
   },
@@ -70,7 +70,7 @@ export function Demo() {
         </div>
 
         <div ref={containerRef} className="relative mt-10 md:mt-16">
-          {/* Animated beams — desktop only */}
+          {/* Animated beams, desktop only */}
           <div className="hidden md:block">
             {nodeRefs.slice(0, -1).map((fromRef, i) => {
               const nextStep = STEPS[i + 1];

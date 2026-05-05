@@ -51,10 +51,20 @@ clientsRouter.get('/me', requireAuth, async (req, res, next) => {
   }
 });
 
+// Hex color like `#1D9CA1` — 3 or 6 digits, # required.
+const hexColor = z.string().regex(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, 'Must be a hex color like #1D9CA1');
+
 const updateMeSchema = z.object({
   industry: z.string().max(100).optional(),
   websiteUrl: z.string().url().max(500).optional().or(z.literal('')),
   socialAccounts: z.record(z.string(), z.string().max(200)).optional(),
+  brandColors: z
+    .object({
+      primary: hexColor,
+      secondary: hexColor,
+      accent: hexColor,
+    })
+    .optional(),
 });
 
 clientsRouter.patch('/me', requireAuth, async (req, res, next) => {
@@ -74,6 +84,7 @@ clientsRouter.patch('/me', requireAuth, async (req, res, next) => {
         ...(patch.industry !== undefined ? { industry: patch.industry } : {}),
         ...(patch.websiteUrl !== undefined ? { websiteUrl: patch.websiteUrl || null } : {}),
         ...(patch.socialAccounts !== undefined ? { socialAccounts: patch.socialAccounts } : {}),
+        ...(patch.brandColors !== undefined ? { brandColors: patch.brandColors } : {}),
         updatedAt: new Date(),
       })
       .where(eq(clients.id, user.clientId))

@@ -15,7 +15,7 @@ export function Pricing() {
             One monthly price. <span className="text-gradient-brand">No hourly rates.</span>
           </h2>
           <p className="mt-3 text-sm text-slate-600 md:mt-4 md:text-lg">
-            Flat fee, cancel any time after the first {COMPANY.minCommitmentMonths} months.
+            Flat fee, no surprises. Cancel any time after the first {COMPANY.minCommitmentMonths} months.
           </p>
         </div>
 

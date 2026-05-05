@@ -12,7 +12,7 @@ export function Footer() {
           <div>
             <Logo />
             <p className="mt-3 max-w-xs text-sm text-slate-600">
-              Social growth, done for you. Social media that sounds like you, written by a real team.
+              A boutique social team for modern local businesses. Sharp posts, in your voice, every month.
             </p>
           </div>
           <div>

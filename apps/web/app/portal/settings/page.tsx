@@ -34,6 +34,11 @@ export default function SettingsPage() {
   const [websiteUrl, setWebsiteUrl] = useState('');
   const [industry, setIndustry] = useState('');
   const [socials, setSocials] = useState<Record<string, string>>({});
+  const [brandColors, setBrandColors] = useState<{ primary: string; secondary: string; accent: string }>({
+    primary: '#1D9CA1',
+    secondary: '#0F172A',
+    accent: '#48D886',
+  });
   const [saving, setSaving] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -47,6 +52,11 @@ export default function SettingsPage() {
     setWebsiteUrl(row.websiteUrl ?? '');
     setIndustry(row.industry ?? '');
     setSocials(row.socialAccounts ?? {});
+    setBrandColors({
+      primary: row.brandColors?.primary ?? '#1D9CA1',
+      secondary: row.brandColors?.secondary ?? '#0F172A',
+      accent: row.brandColors?.accent ?? '#48D886',
+    });
     setDirty(false);
   };
 
@@ -67,12 +77,23 @@ export default function SettingsPage() {
   }
 
   const save = async () => {
+    // Validate hex format — type="color" always gives us valid values, but
+    // the text input lets people type anything. Bail early so the error
+    // comes from us, not a generic API 400.
+    const hexRe = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
+    for (const key of ['primary', 'secondary', 'accent'] as const) {
+      if (!hexRe.test(brandColors[key])) {
+        toast.error('Invalid color', `${key} must be a hex value like #1D9CA1`);
+        return;
+      }
+    }
     setSaving(true);
     try {
       await api.updateMyClient({
         industry: industry || undefined,
         websiteUrl: websiteUrl || undefined,
         socialAccounts: socials,
+        brandColors,
       });
       toast.success('Saved', 'Your preferences are updated');
       setDirty(false);
@@ -159,25 +180,42 @@ export default function SettingsPage() {
 
       <section className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
         <h2 className="text-sm font-semibold text-slate-900">Brand colors</h2>
-        <div className="mt-3 flex gap-3">
-          {(['primary', 'secondary', 'accent'] as const).map((key) => {
-            const hex = data.brandColors?.[key] ?? '#48D886';
-            return (
-              <div key={key} className="flex-1 text-center">
-                <div
-                  className="h-12 rounded-xl border border-slate-200"
-                  style={{ backgroundColor: hex }}
-                />
-                <div className="mt-1 text-[10px] uppercase tracking-widest text-slate-500">
-                  {key}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-        <p className="mt-3 text-xs text-slate-500">
-          Want to change these? Drop us a message in chat.
+        <p className="text-xs text-slate-500">
+          Used across your posts, videos, and website. Tap a swatch to pick a new shade.
         </p>
+        <div className="mt-3 grid grid-cols-3 gap-3">
+          {(['primary', 'secondary', 'accent'] as const).map((key) => (
+            <div key={key}>
+              <div className="text-[10px] font-medium uppercase tracking-widest text-slate-500">
+                {key}
+              </div>
+              <div className="mt-1.5 flex items-center gap-2">
+                <input
+                  type="color"
+                  value={brandColors[key]}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setBrandColors((c) => ({ ...c, [key]: v }));
+                    markDirty();
+                  }}
+                  className="h-10 w-10 shrink-0 cursor-pointer rounded-xl border border-slate-200"
+                  aria-label={`${key} color`}
+                />
+                <Input
+                  value={brandColors[key]}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setBrandColors((c) => ({ ...c, [key]: v }));
+                    markDirty();
+                  }}
+                  className="h-10 flex-1 font-mono text-xs uppercase no-zoom"
+                  maxLength={7}
+                  placeholder="#1D9CA1"
+                />
+              </div>
+            </div>
+          ))}
+        </div>
       </section>
 
       <section className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">

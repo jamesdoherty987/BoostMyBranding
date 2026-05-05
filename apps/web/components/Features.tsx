@@ -37,7 +37,7 @@ const FEATURES: Feature[] = [
     title: 'Posts that sound like you.',
     tag: 'Your voice, not ours',
     body:
-      "We study your site, your tone, and the way you actually talk to customers. Every caption lands in your voice, no generic 'Happy Monday!' filler.",
+      "We study your site, your tone, and how you actually talk to customers. Every caption lands in your voice. No generic 'Happy Monday!' filler.",
     accent: 'teal',
     art: 'voice',
     span: 'lg',
@@ -47,16 +47,16 @@ const FEATURES: Feature[] = [
     title: 'Photos that stop the scroll.',
     tag: 'Magazine-quality feed',
     body:
-      "We source the best shots, clean them up, and size them for every platform. Feeds that look like a magazine, not a group chat.",
+      "We pick the best shots, clean them up, and size them for every platform. Feeds that look like a magazine, not a group chat.",
     accent: 'yellow',
     art: 'photos',
   },
   {
     icon: CalendarClock,
-    title: '30 posts, planned every month.',
-    tag: 'Never miss a day',
+    title: '10 posts, crafted every month.',
+    tag: 'Quality over quantity',
     body:
-      "A full calendar goes out monthly, spaced across the right days and platforms. We handle everything from planning to publishing.",
+      "We'd rather ship 10 posts worth sharing than 30 that get ignored. A proper monthly calendar, planned and published on the right days.",
     accent: 'green',
     art: 'calendar',
   },
@@ -74,7 +74,7 @@ const FEATURES: Feature[] = [
     title: 'A website that moves with you.',
     tag: 'Live same-day updates',
     body:
-      "Fast, mobile-first, built around your brand. New menu, new hours, new service - tell us and it's live that day.",
+      "Fast, mobile-first, built around your brand. New menu, new hours, new service. Tell us and it's live that day.",
     accent: 'teal',
     art: 'website',
   },
@@ -90,8 +90,8 @@ export function Features() {
             <span className="text-gradient-brand">sells.</span>
           </h2>
           <p className="mt-3 text-sm text-slate-600 md:mt-4 md:text-lg">
-            Every post is planned around your brand, your customers, and what actually moves the
-            needle: bookings, foot traffic, enquiries.
+            Every post is built around your brand, your customers, and what actually moves
+            the needle: bookings, foot traffic, enquiries.
           </p>
         </div>
 
@@ -110,7 +110,7 @@ function FeatureCard({ feature, index }: { feature: Feature; index: number }) {
   const cardRef = useRef<HTMLElement>(null);
 
   /*
-   * CSS-powered 3D tilt — sets CSS custom properties on mousemove.
+   * CSS-powered 3D tilt. Sets CSS custom properties on mousemove.
    * The actual rotation is handled by a CSS transition on the element,
    * which the browser composites on the GPU. No JS animation loop.
    */
@@ -157,7 +157,7 @@ function FeatureCard({ feature, index }: { feature: Feature; index: number }) {
         feature.span === 'lg' ? 'col-span-2 md:col-span-2' : ''
       }`}
     >
-      {/* Accent bar — top edge */}
+      {/* Accent bar, top edge */}
       <div
         aria-hidden
         className="h-1 w-full md:h-1.5"
@@ -165,7 +165,7 @@ function FeatureCard({ feature, index }: { feature: Feature; index: number }) {
       />
 
       {/*
-        Shimmer sweep — a diagonal highlight that slides across the card
+        Shimmer sweep, a diagonal highlight that slides across the card
         once when it enters the viewport. Gives a "freshly polished" feel.
       */}
       <motion.div
@@ -197,7 +197,7 @@ function FeatureCard({ feature, index }: { feature: Feature; index: number }) {
           </div>
         </div>
 
-        {/* Illustration — desktop only */}
+        {/* Illustration, desktop only */}
         <div className="relative mt-5 hidden min-h-[120px] items-start md:flex">
           <FeatureIllustration kind={feature.art} />
         </div>
@@ -322,14 +322,14 @@ function PhotosArt() {
 }
 
 function CalendarArt() {
-  const filled = [1, 2, 4, 5, 8, 9, 11, 14, 16, 17, 19, 22, 25, 26, 28];
+  const filled = [2, 5, 8, 11, 14, 17, 20, 23, 26, 29];
   const brandRotation = ['#1D9CA1', '#48D886', '#FFEC3D'];
   return (
     <div className="flex w-full flex-col gap-2">
       <div className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-widest text-slate-500">
         <span>Apr</span>
         <span className="rounded-full bg-[#48D886]/15 px-2 py-0.5 text-[#1D9CA1]">
-          30 posts live
+          10 posts live
         </span>
       </div>
       <div className="grid grid-cols-10 gap-[3px]">

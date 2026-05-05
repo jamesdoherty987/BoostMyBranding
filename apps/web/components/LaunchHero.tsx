@@ -12,10 +12,10 @@ import { ArrowRight, Zap, CheckCircle2 } from 'lucide-react';
  * Desktop (md+): sticky 120vh parallax, rocket absolutely positioned right,
  * driven by scroll transforms.
  *
- * Mobile: compact layout — copy stacked above a centered rocket that sits
+ * Mobile: compact layout, copy stacked above a centered rocket that sits
  * directly under the text. On scroll the rocket flies upward over the copy
  * (z-index above the text) creating a "launch" feel. No forced 100vh so
- * there's no empty space — the hero is only as tall as its content.
+ * there's no empty space, the hero is only as tall as its content.
  */
 export function LaunchHero() {
   const ref = useRef<HTMLDivElement>(null);
@@ -105,7 +105,7 @@ export function LaunchHero() {
           style={reduced ? undefined : { opacity: copyOpacity, y: copyY }}
         >
           <h1 className="mx-auto max-w-5xl text-balance text-[28px] font-bold leading-[1.05] tracking-tight text-slate-900 sm:text-5xl md:text-7xl lg:text-[92px] lg:leading-[0.95]">
-            Launch your brand.
+            Social media,
             <br />
             <span className="relative inline-block">
               <span
@@ -115,7 +115,7 @@ export function LaunchHero() {
                     'linear-gradient(90deg, #1D9CA1 0%, #48D886 50%, #FFEC3D 100%)',
                 }}
               >
-                Watch it fly.
+                handled beautifully.
               </span>
               {!reduced ? (
                 <motion.span
@@ -141,8 +141,8 @@ export function LaunchHero() {
           </h1>
 
           <p className="mx-auto mt-3 max-w-2xl text-balance text-[14px] leading-relaxed text-slate-600 sm:mt-5 sm:text-lg md:mt-6 md:text-xl">
-            Done-for-you social media that looks professional. We plan, write, and
-            publish every post — you don&apos;t have to do a thing.
+            A boutique team running your Instagram and TikTok. We plan, write, shoot,
+            and publish every post so your brand keeps showing up looking sharp.
           </p>
 
           <div className="mt-4 flex w-full max-w-sm flex-col items-stretch gap-2.5 sm:w-auto sm:max-w-none sm:flex-row sm:items-center md:mt-8 md:gap-3">
@@ -162,19 +162,19 @@ export function LaunchHero() {
 
           <ul className="mt-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[11px] text-slate-500 sm:mt-6 sm:gap-x-5 sm:text-sm">
             <li className="inline-flex items-center gap-1">
-              <CheckCircle2 className="h-3.5 w-3.5 text-[#48D886] sm:h-4 sm:w-4" /> Setup in a week
-            </li>
-            <li className="inline-flex items-center gap-1">
-              <CheckCircle2 className="h-3.5 w-3.5 text-[#48D886] sm:h-4 sm:w-4" /> Cancel any time
+              <CheckCircle2 className="h-3.5 w-3.5 text-[#48D886] sm:h-4 sm:w-4" /> Live in a week
             </li>
             <li className="inline-flex items-center gap-1">
               <CheckCircle2 className="h-3.5 w-3.5 text-[#48D886] sm:h-4 sm:w-4" /> Flat monthly fee
+            </li>
+            <li className="inline-flex items-center gap-1">
+              <CheckCircle2 className="h-3.5 w-3.5 text-[#48D886] sm:h-4 sm:w-4" /> Cancel any time
             </li>
           </ul>
         </motion.div>
 
         {/*
-          Mobile rocket — centered directly under the copy, in normal flow.
+          Mobile rocket, centered directly under the copy, in normal flow.
           z-30 so it flies OVER the text when scrolling up. The container
           has no overflow-hidden on mobile so the rocket can escape upward.
         */}
@@ -197,7 +197,7 @@ export function LaunchHero() {
         </motion.div>
 
         {/*
-          Desktop rocket — absolutely positioned on the right, driven by
+          Desktop rocket, absolutely positioned on the right, driven by
           scroll parallax. Hidden on mobile.
         */}
         <motion.div
@@ -218,7 +218,7 @@ export function LaunchHero() {
           />
         </motion.div>
 
-        {/* Scroll hint — desktop only */}
+        {/* Scroll hint, desktop only */}
         <motion.div
           aria-hidden
           className="absolute inset-x-0 bottom-6 z-20 hidden justify-center text-xs font-medium tracking-widest text-slate-500 md:flex"

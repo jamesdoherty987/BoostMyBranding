@@ -236,6 +236,7 @@ export class BoostApi {
     industry?: string;
     websiteUrl?: string;
     socialAccounts?: Record<string, string>;
+    brandColors?: { primary: string; secondary: string; accent: string };
   }) {
     return this.request<Client>('/api/v1/clients/me', {
       method: 'PATCH',

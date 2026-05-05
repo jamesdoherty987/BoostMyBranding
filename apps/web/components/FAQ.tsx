@@ -8,27 +8,35 @@ import { ChevronDown } from 'lucide-react';
 const faqs = [
   {
     q: 'How long until my first posts go live?',
-    a: "Roughly a week. We spend the first few days learning your business — your site, your tone, how you talk to customers — then we build your brand brief and start publishing.",
+    a: "Around a week. We spend the first few days learning your business, your site, your tone, how you talk to customers, then we build your brand brief and start publishing.",
+  },
+  {
+    q: 'Why only 10 posts a month?',
+    a: "Because 10 posts people actually stop for beats 30 posts they scroll past. We put the effort into each one: the hook, the photo, the caption. That's what moves bookings, not volume.",
   },
   {
     q: "What if I don't have good photos?",
-    a: "We can work from whatever you've got, even quick phone shots. If you're short on content, we can shoot new photos on our visits, or create on-brand imagery in-house to fill the gaps.",
+    a: "We can work with whatever you've got, even quick phone shots. If you're short on content, we shoot fresh photos on our visits or create on-brand imagery in-house to fill the gaps.",
   },
   {
     q: 'Do I have to approve every post?',
-    a: "No. We handle everything — writing, scheduling, publishing. You can check in any time through your portal, but you never have to approve or review anything. That's the whole point.",
+    a: "No. We handle the writing, scheduling, and publishing. You can check in any time through your portal, but you never have to approve or review anything. That's the whole point.",
   },
   {
     q: 'Which platforms do you cover?',
-    a: "Instagram, Facebook, LinkedIn, TikTok, X (Twitter), Pinterest, and Bluesky. Stories and Reels included. We tailor each post to the platform, no copy-pasting.",
+    a: "Instagram and TikTok for now. They're where our clients see the most pull, and focusing on two lets us do both properly: Reels, Stories, and grid posts, each tailored to the platform.",
+  },
+  {
+    q: 'Can you add LinkedIn, Facebook, or others later?',
+    a: "Yes. If your business grows into a platform that makes sense, we'll add it. We'd rather recommend it than upsell it.",
   },
   {
     q: 'Who writes the posts?',
-    a: "Our in-house writers and editors. Every client is assigned a dedicated account manager who gets to know your business. The team reviews everything internally before it goes live.",
+    a: "Our in-house writers and editors. Every client gets a dedicated account manager who knows your business. The team reviews everything internally before it goes live.",
   },
   {
     q: 'Can I cancel?',
-    a: "Yes, monthly after the first 3 months. We ask for a short runway so we can properly build your brand voice and actually deliver results, not just activity.",
+    a: "Yes, monthly after the first 3 months. We ask for a short runway so we can properly build your brand voice and deliver results, not just activity.",
   },
 ];
 

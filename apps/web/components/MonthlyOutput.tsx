@@ -2,32 +2,19 @@
 
 import { motion } from 'framer-motion';
 import { SectionWrapper, Badge } from '@boost/ui';
-import {
-  Instagram,
-  Facebook,
-  Linkedin,
-  Music2,
-  Twitter,
-  Cloud,
-  Pin,
-} from 'lucide-react';
+import { Instagram, Music2 } from 'lucide-react';
 
 /**
  * Compact "what you get" showcase. Three glass-y cards on a brand gradient
- * backdrop — a visual answer to "so what actually ships?"
+ * backdrop, a visual answer to "so what actually ships?"
  *
- * The 30-posts card animates a wave of gradient tiles on view so the grid
- * feels alive, not static. The platforms card has platform-colored dots.
+ * The 10-posts card animates a wave of gradient tiles on view so the grid
+ * feels alive, not static. The platforms card shows Instagram and TikTok.
  */
 
 const PLATFORMS = [
   { icon: Instagram, color: '#E1306C', name: 'Instagram' },
-  { icon: Facebook, color: '#1877F2', name: 'Facebook' },
-  { icon: Linkedin, color: '#0A66C2', name: 'LinkedIn' },
   { icon: Music2, color: '#000000', name: 'TikTok' },
-  { icon: Twitter, color: '#0f172a', name: 'X' },
-  { icon: Cloud, color: '#0085FF', name: 'Bluesky' },
-  { icon: Pin, color: '#E60023', name: 'Pinterest' },
 ];
 
 export function MonthlyOutput() {
@@ -52,7 +39,7 @@ export function MonthlyOutput() {
             What's included every month
           </Badge>
           <h2 className="text-3xl font-bold tracking-tight text-white md:text-5xl">
-            More than a post-a-day service.
+            Fewer posts. A lot more craft.
           </h2>
           <p className="mt-3 text-sm text-white/70 md:mt-4 md:text-lg">
             A proper social team looking after your brand. One flat fee, every month.
@@ -60,7 +47,7 @@ export function MonthlyOutput() {
         </div>
 
         <div className="mt-8 grid grid-cols-2 gap-3 md:mt-14 md:grid-cols-3 md:gap-5">
-          {/* 30 posts */}
+          {/* 10 posts */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
@@ -72,15 +59,15 @@ export function MonthlyOutput() {
               Ships
             </div>
             <div className="mt-1 flex items-baseline gap-1 md:mt-2">
-              <span className="text-4xl font-bold text-white md:text-7xl">30</span>
+              <span className="text-4xl font-bold text-white md:text-7xl">10</span>
               <span className="text-sm text-white/70 md:text-lg">posts</span>
             </div>
             <p className="mt-1 hidden text-sm text-white/60 md:mt-2 md:block">
-              A mix of posts, reels, stories, and carousels, planned together.
+              A mix of Reels, Stories, and grid posts, each one worth sharing.
             </p>
 
-            <div className="mt-3 hidden grid-cols-6 gap-1.5 md:mt-6 md:grid">
-              {Array.from({ length: 30 }).map((_, i) => (
+            <div className="mt-3 hidden grid-cols-5 gap-1.5 md:mt-6 md:grid">
+              {Array.from({ length: 10 }).map((_, i) => (
                 <div
                   key={i}
                   className="aspect-square rounded"
@@ -94,7 +81,7 @@ export function MonthlyOutput() {
             </div>
           </motion.div>
 
-          {/* 7 platforms */}
+          {/* 2 platforms */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
@@ -106,11 +93,11 @@ export function MonthlyOutput() {
               Published to
             </div>
             <div className="mt-1 flex items-baseline gap-1 md:mt-2">
-              <span className="text-4xl font-bold text-white md:text-7xl">7</span>
+              <span className="text-4xl font-bold text-white md:text-7xl">2</span>
               <span className="text-sm text-white/70 md:text-lg">platforms</span>
             </div>
             <p className="mt-1 hidden text-sm text-white/60 md:mt-2 md:block">
-              Reformatted per platform: captions, hashtags, aspect ratios.
+              Instagram and TikTok, tailored per platform: captions, hashtags, aspect ratios.
             </p>
 
             <div className="mt-3 flex flex-wrap gap-1.5 md:mt-6 md:gap-2.5">
@@ -120,12 +107,13 @@ export function MonthlyOutput() {
                   initial={{ opacity: 0, scale: 0.8 }}
                   whileInView={{ opacity: 1, scale: 1 }}
                   viewport={{ once: true }}
-                  transition={{ delay: 0.2 + i * 0.04 }}
-                  className="flex h-7 w-7 items-center justify-center rounded-lg shadow-md md:h-10 md:w-10 md:rounded-xl"
+                  transition={{ delay: 0.2 + i * 0.08 }}
+                  className="flex h-8 items-center gap-2 rounded-lg px-2.5 text-xs font-semibold text-white shadow-md md:h-10 md:rounded-xl md:px-3 md:text-sm"
                   style={{ backgroundColor: p.color }}
                   aria-label={p.name}
                 >
-                  <p.icon className="h-3 w-3 text-white md:h-4 md:w-4" />
+                  <p.icon className="h-3.5 w-3.5 md:h-4 md:w-4" />
+                  <span>{p.name}</span>
                 </motion.div>
               ))}
             </div>
@@ -149,11 +137,11 @@ export function MonthlyOutput() {
                   <span className="text-sm text-white/70 md:text-lg">effort</span>
                 </div>
                 <p className="mt-1 text-xs text-white/60 md:mt-2 md:text-sm">
-                  We handle everything. You get back to running your business.
+                  Your account manager runs the whole show. You get back to running your business.
                 </p>
               </div>
 
-              {/* Checkmark circle — desktop only */}
+              {/* Checkmark circle, desktop only */}
               <div className="hidden items-center justify-center py-2 md:mt-6 md:flex">
                 <svg viewBox="0 0 100 100" className="h-24 w-24">
                   <circle cx="50" cy="50" r="44" stroke="rgba(255,255,255,0.1)" strokeWidth="8" fill="none" />

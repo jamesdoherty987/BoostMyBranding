@@ -11,7 +11,7 @@ const EMAIL = COMPANY.email;
 
 /**
  * Floating "Get in touch" button with a compact popup. Shown on the
- * marketing surface only — hidden on /dashboard/*, /portal/*, and the
+ * marketing surface only. Hidden on /dashboard/*, /portal/*, and the
  * rendered client sites at /sites/* where it would clash with each
  * surface's own chrome and CTA patterns.
  */

@@ -1,9 +1,8 @@
 'use client';
 
 import { use, useState } from 'react';
-import Link from 'next/link';
 import Image from 'next/image';
-import { notFound } from 'next/navigation';
+import { notFound, useRouter } from 'next/navigation';
 import useSWR from 'swr';
 import {
   getClient,
@@ -26,6 +25,7 @@ import {
   MessageSquare,
   Sparkles,
   LayoutGrid,
+  Loader2,
 } from 'lucide-react';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { MediaLibrary } from '@/components/dashboard/content-hub/MediaLibrary';
@@ -45,7 +45,9 @@ const TABS: Array<{ id: Tab; label: string; icon: typeof LayoutGrid }> = [
 
 export default function ClientDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const router = useRouter();
   const [tab, setTab] = useState<Tab>('overview');
+  const [inviting, setInviting] = useState(false);
 
   // Live client data with mock fallback so dev still works.
   const { data: client, isLoading } = useSWR<Client | undefined>(
@@ -83,16 +85,21 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
         subtitle={`${client.industry ?? '—'} · ${client.email}`}
         action={
           <div className="flex gap-2">
-            <Link href="/dashboard/clients">
-              <Button size="sm" variant="ghost">
-                <ArrowLeft className="h-4 w-4" />
-                <span className="hidden sm:inline">Back</span>
-              </Button>
-            </Link>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => router.push('/dashboard/clients')}
+            >
+              <ArrowLeft className="h-4 w-4" />
+              <span className="hidden sm:inline">Back</span>
+            </Button>
             <Button
               size="sm"
               variant="outline"
+              disabled={inviting}
               onClick={async () => {
+                if (inviting) return;
+                setInviting(true);
                 try {
                   const res = await api.inviteClient(client.id);
                   if (res.sent) {
@@ -112,11 +119,19 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                   }
                 } catch (e) {
                   toast.error('Invite failed', (e as Error).message);
+                } finally {
+                  setInviting(false);
                 }
               }}
             >
-              <Mail className="h-4 w-4" />
-              <span className="hidden sm:inline">Send invite</span>
+              {inviting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Mail className="h-4 w-4" />
+              )}
+              <span className="hidden sm:inline">
+                {inviting ? 'Sending…' : 'Send invite'}
+              </span>
             </Button>
             <Button size="sm" onClick={() => setTab('posts')}>
               <Sparkles className="h-4 w-4" />
@@ -134,10 +149,12 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
             <Card>
               <CardContent className="p-6">
                 <div className="flex items-center gap-3">
-                  <div className="relative h-14 w-14 overflow-hidden rounded-2xl bg-slate-100">
+                  <div className="relative flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-slate-100 text-sm font-semibold text-slate-500">
                     {client.logoUrl ? (
-                      <Image src={client.logoUrl} alt="" fill unoptimized />
-                    ) : null}
+                      <Image src={client.logoUrl} alt={`${client.businessName} logo`} fill unoptimized />
+                    ) : (
+                      <span aria-hidden="true">{getInitials(client.businessName)}</span>
+                    )}
                   </div>
                   <div className="min-w-0">
                     <div className="truncate font-semibold text-slate-900">
@@ -150,7 +167,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                 </div>
                 <div className="mt-4 flex flex-wrap gap-1.5">
                   <SubscriptionBadge status={client.subscriptionStatus} />
-                  <Badge tone="brand">{client.subscriptionTier.replace('_', ' ')}</Badge>
+                  <Badge tone="brand">{client.subscriptionTier.replace(/_/g, ' ')}</Badge>
                 </div>
                 <div className="mt-4 flex items-center gap-2 text-xs text-slate-500">
                   <TrendingUp className="h-3.5 w-3.5 text-[#1D9CA1]" />
@@ -190,22 +207,28 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                 <div className="text-xs font-medium uppercase tracking-widest text-slate-400">
                   Brand colors
                 </div>
-                <div className="mt-3 flex gap-2">
-                  {(['primary', 'secondary', 'accent'] as const).map((key) => {
-                    const color = client.brandColors?.[key] ?? '#e2e8f0';
-                    return (
-                      <div key={key} className="flex-1">
-                        <div
-                          className="h-12 rounded-xl border border-slate-200"
-                          style={{ backgroundColor: color }}
-                        />
-                        <div className="mt-1.5 text-[10px] text-slate-500">
-                          {color}
+                {client.brandColors?.primary || client.brandColors?.secondary || client.brandColors?.accent ? (
+                  <div className="mt-3 flex gap-2">
+                    {(['primary', 'secondary', 'accent'] as const).map((key) => {
+                      const color = client.brandColors?.[key];
+                      return (
+                        <div key={key} className="flex-1">
+                          <div
+                            className="h-12 rounded-xl border border-slate-200"
+                            style={{ backgroundColor: color ?? '#f1f5f9' }}
+                          />
+                          <div className="mt-1.5 text-[10px] text-slate-500">
+                            {color ?? '—'}
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
-                </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="mt-2 text-xs text-slate-500">
+                    Not set yet. Add brand colors from the client&apos;s settings.
+                  </p>
+                )}
               </CardContent>
             </Card>
           </aside>
@@ -213,14 +236,20 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
           {/* Main content */}
           <section>
             {/* Tab strip */}
-            <div className="mb-4 flex gap-1 overflow-x-auto rounded-2xl border border-slate-200 bg-white p-1">
+            <div
+              role="tablist"
+              aria-label="Client sections"
+              className="mb-4 flex gap-1 overflow-x-auto rounded-2xl border border-slate-200 bg-white p-1"
+            >
               {TABS.map((t) => {
                 const active = tab === t.id;
                 return (
                   <button
                     key={t.id}
+                    role="tab"
+                    aria-selected={active}
                     onClick={() => setTab(t.id)}
-                    className={`inline-flex shrink-0 items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold transition ${
+                    className={`inline-flex shrink-0 items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary ${
                       active
                         ? 'bg-gradient-cta text-white shadow-brand'
                         : 'text-slate-600 hover:bg-slate-100'
@@ -377,4 +406,13 @@ function SubscriptionBadge({
           ? 'danger'
           : 'default';
   return <Badge tone={tone}>{meta.label}</Badge>;
+}
+
+function getInitials(name: string) {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((p) => p[0]?.toUpperCase() ?? '')
+    .join('');
 }

@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import useSWR from 'swr';
 import { motion } from 'framer-motion';
 import { mockClients, formatCurrency, getStatusMeta } from '@boost/core';
@@ -36,13 +36,30 @@ export default function ClientsPage() {
     }
   });
 
-  const filtered = data.filter((c) => c.businessName.toLowerCase().includes(q.toLowerCase()));
+  // Search across the most useful fields. Business name is the primary
+  // one but agencies often look up a client by contact name or email
+  // they were just on the phone with.
+  const filtered = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    if (!needle) return data;
+    return data.filter((c) => {
+      const haystack = [
+        c.businessName,
+        c.contactName,
+        c.email,
+        c.industry ?? '',
+      ]
+        .join(' ')
+        .toLowerCase();
+      return haystack.includes(needle);
+    });
+  }, [data, q]);
 
   return (
     <>
       <PageHeader
         title="Clients"
-        subtitle={`${data.length} brands on BoostMyBranding`}
+        subtitle={`${data.length} brand${data.length === 1 ? '' : 's'} on BoostMyBranding`}
         action={
           <Button size="sm" onClick={() => setCreateOpen(true)}>
             <Plus className="h-4 w-4" />
@@ -57,23 +74,41 @@ export default function ClientsPage() {
           <Input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Search clients…"
-            className="pl-10 no-zoom"
+            placeholder="Search by name, contact, or email…"
+            className="pl-10 pr-10 no-zoom"
+            aria-label="Search clients"
           />
+          {q ? (
+            <button
+              type="button"
+              onClick={() => setQ('')}
+              aria-label="Clear search"
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          ) : null}
         </div>
 
-        {isLoading ? (
+        {isLoading && data.length === 0 ? (
           <div className="flex justify-center p-12"><Spinner size={28} /></div>
         ) : filtered.length === 0 ? (
           <div className="rounded-3xl border border-dashed border-slate-200 p-12 text-center">
             <p className="text-sm text-slate-600">
-              {q ? `No clients matching "${q}"` : 'No clients yet.'}
+              {q ? `No clients matching "${q}"` : 'No clients yet. Add your first one to get started.'}
             </p>
-            {q ? (
-              <Button variant="ghost" size="sm" className="mt-3" onClick={() => setQ('')}>
-                Clear search
-              </Button>
-            ) : null}
+            <div className="mt-3 flex justify-center gap-2">
+              {q ? (
+                <Button variant="ghost" size="sm" onClick={() => setQ('')}>
+                  Clear search
+                </Button>
+              ) : (
+                <Button size="sm" onClick={() => setCreateOpen(true)}>
+                  <Plus className="h-4 w-4" />
+                  New client
+                </Button>
+              )}
+            </div>
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -82,24 +117,26 @@ export default function ClientsPage() {
                 key={c.id}
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.04 }}
+                transition={{ delay: Math.min(i * 0.04, 0.3) }}
               >
                 <Link
                   href={`/dashboard/clients/${c.id}`}
-                  className="group block overflow-hidden rounded-2xl border border-slate-200 bg-white transition-all hover:shadow-lg hover:-translate-y-0.5"
+                  className="group block overflow-hidden rounded-2xl border border-slate-200 bg-white transition-all hover:shadow-lg hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary focus-visible:ring-offset-2"
                 >
                   <div className="relative h-24 bg-gradient-cta md:h-28">
-                    <div className="absolute left-5 -bottom-6 h-14 w-14 overflow-hidden rounded-2xl border-4 border-white bg-white md:h-16 md:w-16">
+                    <div className="absolute left-5 -bottom-6 flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl border-4 border-white bg-white text-sm font-semibold text-slate-500 md:h-16 md:w-16">
                       {c.logoUrl ? (
-                        <Image src={c.logoUrl} alt="" fill unoptimized />
-                      ) : null}
+                        <Image src={c.logoUrl} alt={`${c.businessName} logo`} fill unoptimized />
+                      ) : (
+                        <span aria-hidden="true">{getInitials(c.businessName)}</span>
+                      )}
                     </div>
                   </div>
                   <div className="p-5 pt-8">
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
                         <h3 className="truncate font-semibold text-slate-900">{c.businessName}</h3>
-                        <p className="truncate text-xs text-slate-500">{c.industry}</p>
+                        <p className="truncate text-xs text-slate-500">{c.industry || '—'}</p>
                       </div>
                       <Badge tone={TIER_TONES[c.subscriptionTier]}>
                         {TIER_LABELS[c.subscriptionTier]}
@@ -111,7 +148,14 @@ export default function ClientsPage() {
                     <div className="mt-4 grid grid-cols-3 gap-2 border-t border-slate-100 pt-4 text-center">
                       <Stat label="Posts" value={c.stats?.postsThisMonth ?? 0} />
                       <Stat label="Waiting" value={c.stats?.pendingApproval ?? 0} />
-                      <Stat label="MRR" value={formatCurrency(c.monthlyPriceCents ?? 0)} />
+                      <Stat
+                        label="MRR"
+                        value={
+                          c.monthlyPriceCents && c.monthlyPriceCents > 0
+                            ? formatCurrency(c.monthlyPriceCents)
+                            : '—'
+                        }
+                      />
                     </div>
                   </div>
                 </Link>
@@ -123,7 +167,13 @@ export default function ClientsPage() {
 
       {createOpen ? (
         <CreateClientModal
-          onClose={() => setCreateOpen(false)}
+          onClose={async () => {
+            // Always refresh the list on close — the client may have
+            // been created and the user clicked "Skip" instead of
+            // "Open client profile".
+            await mutate();
+            setCreateOpen(false);
+          }}
           onCreated={async (newClientId) => {
             await mutate();
             setCreateOpen(false);
@@ -135,6 +185,15 @@ export default function ClientsPage() {
       ) : null}
     </>
   );
+}
+
+function getInitials(name: string) {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((p) => p[0]?.toUpperCase() ?? '')
+    .join('');
 }
 
 function Stat({ label, value }: { label: string; value: string | number }) {
@@ -194,10 +253,21 @@ function CreateClientModal({
   const [inviteLink, setInviteLink] = useState<string>('');
   const [creating, setCreating] = useState(false);
   const [sendingInvite, setSendingInvite] = useState(false);
+  const [generatingLink, setGeneratingLink] = useState(false);
   const [copied, setCopied] = useState(false);
 
   const update = (patch: Partial<typeof form>) =>
     setForm((f) => ({ ...f, ...patch }));
+
+  // Close on Escape — but never while a create request is in flight,
+  // we don't want to orphan a half-created client.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !creating) onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [creating, onClose]);
 
   const create = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -246,6 +316,23 @@ function CreateClientModal({
     }
   };
 
+  // Manual "generate the link" for the rare case where the initial
+  // createClient → inviteClient call failed but the client itself was
+  // created. Without this the user gets stuck with an empty, disabled
+  // copy field.
+  const generateLink = async () => {
+    if (!createdClientId || generatingLink) return;
+    setGeneratingLink(true);
+    try {
+      const res = await api.inviteClient(createdClientId);
+      setInviteLink(res.link);
+    } catch (e) {
+      toast.error("Couldn't generate link", (e as Error).message);
+    } finally {
+      setGeneratingLink(false);
+    }
+  };
+
   const copyLink = async () => {
     if (!inviteLink) return;
     try {
@@ -259,20 +346,25 @@ function CreateClientModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       aria-label="Create new client"
-      onClick={onClose}
+      onClick={() => {
+        // Don't allow backdrop-close while creating — the request is
+        // still in flight and we need to surface the result.
+        if (!creating) onClose();
+      }}
     >
       <div
-        className="relative max-h-[90vh] w-[92vw] max-w-lg overflow-y-auto rounded-3xl bg-white p-6 shadow-2xl"
+        className="relative max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-3xl bg-white p-6 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <button
           type="button"
           onClick={onClose}
-          className="absolute right-4 top-4 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+          disabled={creating}
+          className="absolute right-4 top-4 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
           aria-label="Close"
         >
           <X className="h-4 w-4" />
@@ -288,8 +380,11 @@ function CreateClientModal({
 
             <form onSubmit={create} className="mt-6 space-y-3">
               <div>
-                <label className="text-xs font-semibold text-slate-700">Business name</label>
+                <label htmlFor="new-client-business" className="text-xs font-semibold text-slate-700">
+                  Business name
+                </label>
                 <Input
+                  id="new-client-business"
                   required
                   className="mt-1"
                   value={form.businessName}
@@ -301,8 +396,11 @@ function CreateClientModal({
 
               <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                 <div>
-                  <label className="text-xs font-semibold text-slate-700">Contact name</label>
+                  <label htmlFor="new-client-contact" className="text-xs font-semibold text-slate-700">
+                    Contact name
+                  </label>
                   <Input
+                    id="new-client-contact"
                     required
                     className="mt-1"
                     value={form.contactName}
@@ -311,8 +409,11 @@ function CreateClientModal({
                   />
                 </div>
                 <div>
-                  <label className="text-xs font-semibold text-slate-700">Email</label>
+                  <label htmlFor="new-client-email" className="text-xs font-semibold text-slate-700">
+                    Email
+                  </label>
                   <Input
+                    id="new-client-email"
                     required
                     type="email"
                     className="mt-1"
@@ -324,10 +425,11 @@ function CreateClientModal({
               </div>
 
               <div>
-                <label className="text-xs font-semibold text-slate-700">
+                <label htmlFor="new-client-industry" className="text-xs font-semibold text-slate-700">
                   Industry <span className="font-normal text-slate-400">(optional)</span>
                 </label>
                 <Input
+                  id="new-client-industry"
                   className="mt-1"
                   value={form.industry}
                   onChange={(e) => update({ industry: e.target.value })}
@@ -336,10 +438,11 @@ function CreateClientModal({
               </div>
 
               <div>
-                <label className="text-xs font-semibold text-slate-700">
+                <label htmlFor="new-client-website" className="text-xs font-semibold text-slate-700">
                   Existing website <span className="font-normal text-slate-400">(optional)</span>
                 </label>
                 <Input
+                  id="new-client-website"
                   type="url"
                   className="mt-1"
                   value={form.websiteUrl}
@@ -352,7 +455,7 @@ function CreateClientModal({
               </div>
 
               <div className="flex items-center justify-end gap-2 border-t border-slate-100 pt-4">
-                <Button type="button" variant="ghost" onClick={onClose}>
+                <Button type="button" variant="ghost" onClick={onClose} disabled={creating}>
                   Cancel
                 </Button>
                 <Button type="submit" disabled={creating}>
@@ -425,37 +528,61 @@ function CreateClientModal({
                     </p>
                   </div>
                 </div>
-                <div className="mt-3 flex items-center gap-2">
-                  <input
-                    readOnly
-                    value={inviteLink}
-                    onClick={(e) => (e.target as HTMLInputElement).select()}
-                    className="flex-1 truncate rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 font-mono text-[10px] text-slate-700"
-                  />
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={copyLink}
-                    disabled={!inviteLink}
-                  >
-                    {copied ? (
-                      <>
-                        <Check className="h-3 w-3" />
-                        Copied
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="h-3 w-3" />
-                        Copy
-                      </>
-                    )}
-                  </Button>
-                </div>
+                {inviteLink ? (
+                  <div className="mt-3 flex items-center gap-2">
+                    <input
+                      readOnly
+                      value={inviteLink}
+                      onClick={(e) => (e.target as HTMLInputElement).select()}
+                      className="flex-1 truncate rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 font-mono text-[10px] text-slate-700"
+                      aria-label="Invite link"
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={copyLink}
+                    >
+                      {copied ? (
+                        <>
+                          <Check className="h-3 w-3" />
+                          Copied
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="h-3 w-3" />
+                          Copy
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="mt-3 flex items-center gap-2">
+                    <p className="flex-1 text-[11px] text-slate-500">
+                      Link couldn&apos;t be generated automatically.
+                    </p>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={generateLink}
+                      disabled={generatingLink}
+                    >
+                      {generatingLink ? (
+                        <>
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                          Generating…
+                        </>
+                      ) : (
+                        'Generate link'
+                      )}
+                    </Button>
+                  </div>
+                )}
               </div>
             </div>
 
-            <div className="mt-6 flex items-center justify-between border-t border-slate-100 pt-4">
+            <div className="mt-6 flex items-center justify-between gap-3 border-t border-slate-100 pt-4">
               <button
                 type="button"
                 onClick={onClose}

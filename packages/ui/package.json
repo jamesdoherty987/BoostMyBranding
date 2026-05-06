@@ -8,6 +8,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./site": "./src/site/index.ts",
+    "./globe": "./src/aceternity/ui/globe.tsx",
     "./styles.css": "./src/styles.css",
     "./theme": "./src/theme.ts",
     "./tailwind-preset.cjs": "./tailwind-preset.cjs",

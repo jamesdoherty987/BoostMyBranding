@@ -39,3 +39,9 @@ export {
   openCommandPalette,
   type CommandItem,
 } from './command-palette';
+
+// Aceternity primitives used in the marketing site. The github-globe
+// `World` lives behind a subpath export (`@boost/ui/globe`) so it isn't
+// dragged into the default bundle — it needs `ssr: false` and pulls in
+// three.js, which would otherwise crash server-side renders.
+export type { GlobeConfig } from './aceternity/ui/globe';

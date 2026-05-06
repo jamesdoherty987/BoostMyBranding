@@ -9,6 +9,9 @@ import type {
   HeroVariant,
   PageConfig,
   VariantOption,
+  HeroIllustrationStyle,
+  HeroIllustrationMotion,
+  HeroIllustration,
 } from '@boost/core';
 import {
   DEFAULT_LAYOUT,
@@ -20,6 +23,9 @@ import {
   checkVariantRequirements,
   ALL_VARIANT_TAGS,
   type VariantTag,
+  ILLUSTRATION_STYLES,
+  DEFAULT_ILLUSTRATION_BY_TEMPLATE,
+  defaultMotionForStyle,
 } from '@boost/core';
 import {
   Button,
@@ -2208,6 +2214,8 @@ function HeroEditor({
       </div>
 
       <CutoutsEditor config={config} onChange={onChange} clientId={clientId} />
+
+      <IllustrationEditor config={config} onChange={onChange} clientId={clientId} />
     </div>
   );
 }
@@ -5785,5 +5793,369 @@ function VariantCard({
         ) : null}
       </div>
     </button>
+  );
+}
+
+
+/* ------------------------------------------------------------------ */
+/* Illustration Editor — big scroll-driven hero object                 */
+/* ------------------------------------------------------------------ */
+
+const ILLUSTRATION_MOTIONS: Array<{
+  value: HeroIllustrationMotion;
+  label: string;
+  description: string;
+}> = [
+  { value: 'parallax', label: 'Parallax', description: 'Smooth scroll-Y, slight zoom out. Safe default.' },
+  { value: 'launch', label: 'Launch', description: 'Rocket-style flight up on scroll.' },
+  { value: 'float', label: 'Float', description: 'Gentle bob, no scroll dependency.' },
+  { value: 'drift', label: 'Drift', description: 'Diagonal drift across the hero on scroll.' },
+  { value: 'orbit', label: 'Orbit', description: 'Continuous small circular motion.' },
+  { value: 'tilt-3d', label: 'Tilt 3D', description: 'Follows the cursor in 3D. Desktop only.' },
+  { value: 'none', label: 'None', description: 'Static. No motion.' },
+];
+
+/**
+ * Editor for the scroll-driven hero illustration. Agencies can:
+ *   - Pick a built-in style (rocket, wrench, coffee cup, etc.), brand-tinted.
+ *   - Choose a motion preset (launch, parallax, float, drift, orbit, tilt-3d, none).
+ *   - Tweak side (left/right) and size (0.5–1.5×).
+ *   - Upload a custom SVG/PNG to override the built-in style.
+ *   - Store a prompt alongside the illustration for future regeneration.
+ *   - Clear the illustration entirely.
+ *
+ * Uploads use `api.uploadImages` with an `illustration` tag so they land
+ * in the client's media library alongside the rest of the assets.
+ */
+function IllustrationEditor({
+  config,
+  onChange,
+  clientId,
+}: {
+  config: WebsiteConfig;
+  onChange: (c: WebsiteConfig) => void;
+  clientId: string;
+}) {
+  const illustration: HeroIllustration | undefined = config.hero?.illustration;
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+
+  const setField = (patch: Partial<HeroIllustration>) => {
+    const next: HeroIllustration = {
+      ...(illustration ?? {}),
+      ...patch,
+    };
+    onChange({
+      ...config,
+      hero: { ...config.hero, illustration: next },
+    });
+  };
+
+  const clear = () => {
+    onChange({
+      ...config,
+      hero: { ...config.hero, illustration: undefined },
+    });
+  };
+
+  const enable = () => {
+    // Seed with a template-based default so the preview updates immediately.
+    const template = config.template ?? 'service';
+    const style = DEFAULT_ILLUSTRATION_BY_TEMPLATE[template] ?? 'rocket';
+    onChange({
+      ...config,
+      hero: {
+        ...config.hero,
+        illustration: {
+          style,
+          side: 'right',
+          scale: 1,
+        },
+      },
+    });
+  };
+
+  const onFile = async (file: File) => {
+    if (!clientId) {
+      toast.error('Pick a client first');
+      return;
+    }
+    if (!file.type.startsWith('image/')) {
+      toast.error('Pick an image file', 'SVG or transparent PNG works best.');
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      toast.error('Too large', 'Keep illustrations under 8MB.');
+      return;
+    }
+    setUploading(true);
+    try {
+      const rows = await api.uploadImages(clientId, [file], ['illustration']);
+      const url = rows[0]?.fileUrl;
+      if (!url) throw new Error('Upload returned no URL');
+      setField({ customUrl: url });
+      toast.success('Illustration updated', 'Custom image replaces the built-in style.');
+    } catch (e) {
+      toast.error('Upload failed', (e as Error).message);
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  // Surface a warning when the current hero variant + image will cause
+  // the renderer to suppress the illustration. Mirrors the logic in
+  // `SiteHero` so the hint stays in sync with the actual render.
+  const heroImageSet =
+    config.hero?.imageIndex != null || Boolean(config.hero?.aiImageUrl);
+  const variantConflict = (() => {
+    if (!illustration) return null;
+    const variant = config.hero?.variant ?? 'parallax-layers';
+    if (variant === 'full-bg-image') {
+      return 'The hero variant is Full background image, which fills the whole hero with a photo. Switch the hero variant to see the illustration.';
+    }
+    if (
+      (variant === 'parallax-layers' || variant === 'two-column-image') &&
+      heroImageSet &&
+      (illustration.side ?? 'right') === 'right'
+    ) {
+      return `The ${variant} variant already shows the hero photo on the right. Move the illustration to the Left side, or swap the hero variant, to avoid overlap.`;
+    }
+    return null;
+  })();
+
+  return (
+    <div className="space-y-3 border-t border-slate-100 pt-4">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-medium text-slate-600">
+          Scroll-driven illustration
+          {illustration ? (
+            <span className="ml-2 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
+              On
+            </span>
+          ) : (
+            <span className="ml-2 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">
+              Off
+            </span>
+          )}
+        </p>
+        {illustration ? (
+          <button
+            type="button"
+            onClick={clear}
+            className="text-[10px] font-medium text-slate-500 hover:text-rose-600"
+          >
+            Remove
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={enable}
+            className="rounded-full border border-dashed border-slate-300 px-2 py-0.5 text-[10px] font-medium text-slate-600 transition-colors hover:border-[#1D9CA1] hover:text-[#1D9CA1]"
+          >
+            Add illustration
+          </button>
+        )}
+      </div>
+
+      <p className="text-[10px] text-slate-400">
+        A big scroll-animated object next to the hero copy, brand-tinted
+        automatically. Think of the rocket on our marketing page, but keyed
+        to the business. Hidden automatically when the hero variant already
+        shows a large photo on the same side.
+      </p>
+
+      {/* Conflict warning — shown when the current hero variant hides
+          the illustration so the agency isn't left wondering why the
+          preview is empty. */}
+      {variantConflict ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-900">
+          <span className="font-semibold">Heads up. </span>
+          {variantConflict}
+        </div>
+      ) : null}
+
+      {illustration ? (
+        <div className="space-y-4 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+          {/* Style picker grid (built-in SVGs) */}
+          {!illustration.customUrl ? (
+            <div>
+              <p className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+                Style
+              </p>
+              <div className="grid grid-cols-5 gap-1.5">
+                {ILLUSTRATION_STYLES.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => setField({ style: s.id })}
+                    title={`${s.label} — ${s.description}`}
+                    className={`flex aspect-square flex-col items-center justify-center rounded-lg border text-lg transition-all ${
+                      illustration.style === s.id
+                        ? 'border-[#1D9CA1] bg-white shadow-sm ring-2 ring-[#1D9CA1]/25'
+                        : 'border-slate-200 bg-white hover:border-slate-400'
+                    }`}
+                  >
+                    <span>{s.preview}</span>
+                    <span className="mt-0.5 truncate text-[8px] font-medium text-slate-600">
+                      {s.label}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-2">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={illustration.customUrl}
+                alt=""
+                className="h-14 w-14 shrink-0 rounded-lg border border-slate-200 object-contain p-1"
+              />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[11px] font-semibold text-slate-800">
+                  Custom image
+                </p>
+                <p className="truncate text-[10px] text-slate-500">
+                  {illustration.customUrl}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setField({ customUrl: undefined })}
+                className="rounded-md px-2 py-1 text-[10px] text-slate-500 hover:bg-slate-100"
+              >
+                Use built-in
+              </button>
+            </div>
+          )}
+
+          {/* Motion — when unset, show which preset the renderer will
+              use (matches the default-motion-for-style mapping in the
+              illustration layer) so the pill accurately reflects what
+              the user will see. */}
+          <div>
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+              Motion
+              {illustration.motion == null ? (
+                <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-medium text-slate-500">
+                  auto
+                </span>
+              ) : null}
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {ILLUSTRATION_MOTIONS.map((m) => {
+                const effective =
+                  illustration.motion ?? defaultMotionForStyle(illustration.style);
+                const isSelected = effective === m.value;
+                const isExplicit = illustration.motion === m.value;
+                return (
+                  <button
+                    key={m.value}
+                    type="button"
+                    onClick={() => setField({ motion: m.value })}
+                    title={m.description}
+                    className={`rounded-full border px-2.5 py-1 text-[10px] font-medium transition-colors ${
+                      isSelected
+                        ? isExplicit
+                          ? 'border-[#1D9CA1] bg-[#1D9CA1] text-white'
+                          : 'border-[#1D9CA1]/40 bg-[#1D9CA1]/10 text-[#1D9CA1]'
+                        : 'border-slate-200 bg-white text-slate-700 hover:border-slate-400'
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Side + scale */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+                Side
+              </p>
+              <div className="flex gap-1.5">
+                {(['left', 'right'] as const).map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => setField({ side: s })}
+                    className={`flex-1 rounded-full border px-2.5 py-1 text-[10px] font-medium capitalize transition-colors ${
+                      (illustration.side ?? 'right') === s
+                        ? 'border-[#1D9CA1] bg-[#1D9CA1] text-white'
+                        : 'border-slate-200 bg-white text-slate-700 hover:border-slate-400'
+                    }`}
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+                Size · {(illustration.scale ?? 1).toFixed(2)}×
+              </p>
+              <input
+                type="range"
+                min={0.5}
+                max={1.5}
+                step={0.05}
+                value={illustration.scale ?? 1}
+                onChange={(e) => setField({ scale: Number(e.target.value) })}
+                className="w-full"
+              />
+            </div>
+          </div>
+
+          {/* Custom upload */}
+          <div className="flex items-center justify-between gap-2 border-t border-slate-200 pt-3">
+            <p className="text-[10px] text-slate-500">
+              Upload your own SVG or transparent PNG to override the built-in style.
+            </p>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading || !clientId}
+              className="flex shrink-0 items-center gap-1 rounded-full border border-dashed border-slate-300 px-2 py-0.5 text-[10px] font-medium text-slate-600 transition-colors hover:border-[#1D9CA1] hover:text-[#1D9CA1] disabled:opacity-50"
+            >
+              {uploading ? (
+                <Loader2 className="h-2.5 w-2.5 animate-spin" />
+              ) : (
+                <Plus className="h-2.5 w-2.5" />
+              )}
+              Upload
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/png,image/svg+xml,image/webp"
+              hidden
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) onFile(f);
+              }}
+            />
+          </div>
+
+          {/* Prompt — stored alongside, useful for later regeneration.
+              Independent of the hero's aiImagePrompt which drives the
+              photo/background image. */}
+          <div>
+            <label className="mb-1 block text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+              Regeneration brief (optional)
+            </label>
+            <textarea
+              value={illustration.prompt ?? ''}
+              onChange={(e) => setField({ prompt: e.target.value })}
+              placeholder="e.g. 'a stylised espresso cup with steam in our brand teal' — stored so you can regenerate later."
+              rows={2}
+              className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] text-slate-700 placeholder:text-slate-400 focus:border-[#1D9CA1] focus:outline-none focus:ring-1 focus:ring-[#1D9CA1]/30"
+            />
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }

@@ -1,6 +1,7 @@
 'use client';
 
 import { ArrowRight } from 'lucide-react';
+import { motion, useReducedMotion } from 'framer-motion';
 import type { WebsiteConfig } from '@boost/core';
 import { SectionWrapper } from '../../section-wrapper';
 import { useSiteContext } from '../context';
@@ -18,9 +19,15 @@ interface SiteCtaProps {
  * Call-to-action section. Dispatches to one of four layouts based on
  * `cta.variant`. Default stays as the original gradient strip for
  * backward compatibility with existing configs.
+ *
+ * The simple variant now gets a slow moving radial glow behind it plus
+ * a reveal-in-on-scroll animation so the section feels alive rather
+ * than static.
  */
 export function SiteCta({ config, images = [] }: SiteCtaProps) {
   const { embedded, editMode } = useSiteContext();
+  const reduced = useReducedMotion();
+  const motionDisabled = Boolean(reduced) || Boolean(embedded);
   const cta = config.cta;
   if (!cta || !cta.heading) return null;
 
@@ -44,11 +51,33 @@ export function SiteCta({ config, images = [] }: SiteCtaProps) {
   return (
     <SectionWrapper immediate={embedded} id="cta" className="bg-white py-12 md:py-16">
       <div className="mx-auto max-w-5xl px-4">
-        <div
-          className="overflow-hidden rounded-[2rem] px-8 py-10 text-white shadow-xl md:px-14 md:py-12"
+        <motion.div
+          initial={motionDisabled ? undefined : { opacity: 0, scale: 0.96, y: 20 }}
+          whileInView={motionDisabled ? undefined : { opacity: 1, scale: 1, y: 0 }}
+          viewport={{ once: true, margin: '-60px' }}
+          transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+          className="relative overflow-hidden rounded-[2rem] px-8 py-10 text-white shadow-xl md:px-14 md:py-12"
           style={{ background: brandGradient(config.brand, 120) }}
         >
-          <div className="flex flex-col items-start gap-6 md:flex-row md:items-center md:justify-between">
+          {/* Slow drifting radial highlight — cheap composited motion,
+              keeps the strip from feeling flat. Disabled on reduced
+              motion / embedded preview. */}
+          {motionDisabled ? null : (
+            <motion.div
+              aria-hidden
+              className="pointer-events-none absolute inset-0"
+              animate={{
+                background: [
+                  'radial-gradient(60% 60% at 15% 30%, rgba(255,255,255,0.25), transparent 60%)',
+                  'radial-gradient(60% 60% at 85% 70%, rgba(255,255,255,0.25), transparent 60%)',
+                  'radial-gradient(60% 60% at 15% 30%, rgba(255,255,255,0.25), transparent 60%)',
+                ],
+              }}
+              transition={{ duration: 9, repeat: Infinity, ease: 'easeInOut' }}
+            />
+          )}
+
+          <div className="relative flex flex-col items-start gap-6 md:flex-row md:items-center md:justify-between">
             <div className="max-w-xl">
               <h2 className="text-2xl font-bold tracking-tight md:text-4xl">
                 <InlineEditable
@@ -102,7 +131,7 @@ export function SiteCta({ config, images = [] }: SiteCtaProps) {
               ) : null}
             </div>
           </div>
-        </div>
+        </motion.div>
       </div>
     </SectionWrapper>
   );

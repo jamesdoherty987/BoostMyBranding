@@ -6,6 +6,7 @@ import type { WebsiteConfig } from '@boost/core';
 import { SectionWrapper } from '../../section-wrapper';
 import { useSiteContext } from '../context';
 import { InlineEditable } from '../InlineEditable';
+import { SectionHeader } from './SectionHeader';
 import { ReviewsMarquee, ReviewsCarousel, ReviewsStack, ReviewsDraggable } from './reviews';
 
 interface SiteReviewsProps {
@@ -33,24 +34,13 @@ export function SiteReviews({ config, images }: SiteReviewsProps) {
   return (
     <SectionWrapper immediate={embedded} id="reviews" className="bg-white py-14 md:py-20 lg:py-28">
       <div className="mx-auto max-w-6xl px-4">
-        <div className="mx-auto max-w-2xl text-center">
-          <InlineEditable
-            path="reviewsSection.eyebrow"
-            value={config.reviewsSection?.eyebrow ?? 'Reviews'}
-            as="p"
-            className="text-xs font-semibold uppercase tracking-[0.25em]"
-            style={{ color: 'var(--bmb-site-primary)' }}
-            placeholder="Section eyebrow…"
-          />
-          <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 md:text-5xl">
-            <InlineEditable
-              path="reviewsSection.heading"
-              value={config.reviewsSection?.heading ?? 'What customers say.'}
-              as="span"
-              placeholder="Section heading…"
-            />
-          </h2>
-        </div>
+        <SectionHeader
+          eyebrowPath="reviewsSection.eyebrow"
+          headingPath="reviewsSection.heading"
+          eyebrow={config.reviewsSection?.eyebrow ?? 'Reviews'}
+          heading={config.reviewsSection?.heading ?? 'What customers say.'}
+          embedded={embedded}
+        />
 
         <div className="mt-10">
           {variant === 'marquee' ? (

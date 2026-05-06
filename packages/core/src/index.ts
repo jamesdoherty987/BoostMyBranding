@@ -4,6 +4,7 @@ export * from './website.js';
 export * from './config.js';
 export * from './video-templates.js';
 export * from './variant-registry.js';
+export * from './illustrations.js';
 
 /** Format cents to display currency. */
 export function formatCurrency(cents: number, currency = 'EUR') {

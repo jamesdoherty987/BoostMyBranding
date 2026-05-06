@@ -165,6 +165,12 @@ export function sanitizeConfig(config: WebsiteConfig): WebsiteConfig {
     c.hero = { ...c.hero, floatingIcons: clean(c.hero.floatingIcons) };
   }
 
+  // CTA avatars — sparse holes left behind when the user picks slot 3
+  // without picking 0/1/2 first.
+  if (c.cta?.avatars) {
+    c.cta = { ...c.cta, avatars: clean(c.cta.avatars) };
+  }
+
   // Multipage — apply the same cleanup inside each page's blocks.
   if (c.pages) {
     c.pages = (clean(c.pages) ?? []).map((page) => {

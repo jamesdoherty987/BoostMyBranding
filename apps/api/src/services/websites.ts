@@ -15,8 +15,23 @@
 
 import { eq, desc } from 'drizzle-orm';
 import { getDb, isDbConfigured, clients, clientImages } from '@boost/database';
-import type { WebsiteConfig, SiteTemplate, HeroVariant, SiteBlockKey } from '@boost/core';
-import { DEFAULT_LAYOUT, DEFAULT_HERO_VARIANT, HERO_VARIANTS, slugify } from '@boost/core';
+import type {
+  WebsiteConfig,
+  SiteTemplate,
+  HeroVariant,
+  SiteBlockKey,
+  HeroIllustration,
+  HeroIllustrationStyle,
+  HeroIllustrationMotion,
+} from '@boost/core';
+import {
+  DEFAULT_LAYOUT,
+  DEFAULT_HERO_VARIANT,
+  HERO_VARIANTS,
+  DEFAULT_ILLUSTRATION_BY_TEMPLATE,
+  ILLUSTRATION_STYLES,
+  slugify,
+} from '@boost/core';
 import { generateJSON } from './claude.js';
 import { scrapeWebsite } from './scraper.js';
 import { websiteConfigPrompt } from './prompts.js';
@@ -137,10 +152,18 @@ export async function generateWebsite(args: GenerateWebsiteArgs) {
             (img, idx) =>
               `[${idx}] ${img.aiDescription ?? img.fileName ?? 'photo'}${
                 img.qualityScore ? ` (score ${img.qualityScore})` : ''
-              }`,
+              }${img.tags && img.tags.length > 0 ? ` · tags: ${img.tags.join(', ')}` : ''}`,
           )
           .join('\n')
       : undefined;
+
+  // Media profile — a structured summary of what visual content is
+  // available. Drives the generator's section-selection rules so we
+  // don't emit e.g. a Gallery with two tiles or a Portfolio with no
+  // project photos. Claude reads this alongside imageDescriptions and
+  // uses it as authoritative "these are the media you actually have".
+  const mediaProfile = buildMediaProfile(images);
+  const mediaProfileSummary = formatMediaProfile(mediaProfile);
 
   // Template still passed as a HINT — Claude is free to pick a better one.
   const templateHint = args.template ?? inferTemplate(client.industry);
@@ -158,6 +181,7 @@ export async function generateWebsite(args: GenerateWebsiteArgs) {
     hasBooking: args.hasBooking,
     hasHours: args.hasHours,
     imageDescriptions,
+    mediaProfile: mediaProfileSummary,
     template: templateHint,
     suggestions: args.suggestions,
     seededFacts: buildSeededFacts(args),
@@ -170,7 +194,7 @@ export async function generateWebsite(args: GenerateWebsiteArgs) {
 
   // Claude picks the template — fall back to the hint if it didn't.
   const chosenTemplate = (raw.template ?? templateHint) as SiteTemplate;
-  const config = normalizeConfig(raw, chosenTemplate);
+  const config = normalizeConfig(raw, chosenTemplate, { seedIllustration: true });
 
   // Apply seeded facts AFTER Claude's pass so they're authoritative.
   // Contact info, team, service areas, trust badges, socials — the agency
@@ -264,6 +288,14 @@ RULES:
 - If asked to change the team block's overall card style ("use minimal cards for the whole team"), set team.variant. Individual member overrides still win.
 - If asked to change the hero style, update brand.heroStyle.
 - If asked to change the hero look/variant, update hero.variant to one of: spotlight, beams, floating-icons, parallax-layers, gradient-mesh, aurora, wavy, sparkles, hero-highlight, dither, multicolor, full-bg-image, two-column-image, meteors, vortex, lamp, shooting-stars, boxes, ripple.
+- If asked to change the hero illustration / prop / scroll object / "flying thing" / "rocket-like object", update hero.illustration. Shape: { style, motion, side, scale, customUrl?, prompt? }.
+  - style (pick one that matches the business): rocket, wrench, coffee-cup, dumbbell, scissors, leaf, house, tooth, pencil, gavel, camera, car, paw, briefcase, shopping-bag.
+  - motion (pick the feel): launch (rocket-style upward flight on scroll), float (gentle bob), drift (diagonal on scroll), orbit (continuous circling), tilt-3d (mouse-follow 3D tilt), parallax (moderate scroll-Y), none (static).
+  - side: left or right. Default right.
+  - scale: 0.5 to 1.5 multiplier. Default 1.
+  - customUrl: set ONLY if the agency explicitly uploaded an image. Don't invent URLs. When set, style is ignored.
+  - prompt: short brief stored alongside the illustration so later edits can reference it.
+- If asked to remove the hero illustration, set hero.illustration to null (or remove the field entirely).
 - If asked for a typewriter / typing / flipping-words / generative text effect on the headline, set hero.headlineEffect to one of: typewriter (types character-by-character), flip-words (last word cycles — also populate hero.flipWords with 2-5 alternatives), generate (words fade in one-by-one). Clear this field to go back to the static gradient headline.
 - If asked to change the testimonials style, update reviewsSection.variant to one of: grid (default), marquee (auto-scroll), carousel (one at a time with avatars), masonry, draggable (physical drag-around cards), stack (cycling card-stack), animated-testimonials.
 - If asked to change the services style, update servicesSection.variant to one of: cards (default), bento (featured span big tiles), sticky-scroll (scroll reveal), hover-effect (card spotlight), 3d-cards, wobble (tilting cards), glare (shiny premium cards), expandable (click-to-open modal with full details).
@@ -526,7 +558,11 @@ function sanitizeForSave<T>(value: T): T {
  * returns a page with an invalid slug or missing layout, which we
  * sanitize here rather than crashing in the renderer.
  */
-function normalizeConfig(raw: Partial<WebsiteConfig>, template: SiteTemplate): WebsiteConfig {
+function normalizeConfig(
+  raw: Partial<WebsiteConfig>,
+  template: SiteTemplate,
+  options: { seedIllustration?: boolean } = {},
+): WebsiteConfig {
   const brand = {
     tagline: raw.brand?.tagline ?? 'Good work, done well.',
     tone: raw.brand?.tone ?? 'warm',
@@ -569,6 +605,11 @@ function normalizeConfig(raw: Partial<WebsiteConfig>, template: SiteTemplate): W
       aiImageUrl: raw.hero?.aiImageUrl ?? null,
       aiImagePrompt: raw.hero?.aiImagePrompt,
       cutouts: raw.hero?.cutouts,
+      illustration: normalizeIllustration(
+        raw.hero?.illustration,
+        template,
+        options.seedIllustration ?? false,
+      ),
     },
     about: raw.about
       ? {
@@ -577,6 +618,8 @@ function normalizeConfig(raw: Partial<WebsiteConfig>, template: SiteTemplate): W
           body: raw.about.body ?? '',
           bullets: raw.about.bullets,
           imageIndex: raw.about.imageIndex ?? null,
+          secondaryImageIndex: raw.about.secondaryImageIndex ?? null,
+          secondaryImageUrl: raw.about.secondaryImageUrl ?? null,
         }
       : undefined,
     stats: raw.stats,
@@ -633,6 +676,66 @@ function normalizeConfig(raw: Partial<WebsiteConfig>, template: SiteTemplate): W
     navigation: raw.navigation ?? ['Home', 'Services', 'About', 'Contact'],
     pages: normalizePages(raw.pages, rootLayout),
   };
+}
+
+/**
+ * Ensure the hero illustration the model/agency supplied is valid. Every
+ * field is optional, and unknown values fall back to safe defaults. When
+ * `raw` is undefined we return undefined (no illustration) — a fresh
+ * generation opts in via `seedDefaultIfMissing = true` so new sites get
+ * one automatically, but AI edits or field saves on existing configs
+ * don't suddenly sprout an illustration out of nowhere.
+ */
+function normalizeIllustration(
+  raw: HeroIllustration | undefined,
+  template: SiteTemplate,
+  seedDefaultIfMissing = false,
+): HeroIllustration | undefined {
+  if (!raw && !seedDefaultIfMissing) return undefined;
+
+  const validStyleIds = new Set<HeroIllustrationStyle>(
+    ILLUSTRATION_STYLES.map((s) => s.id),
+  );
+  const validMotion: HeroIllustrationMotion[] = [
+    'launch',
+    'float',
+    'drift',
+    'orbit',
+    'tilt-3d',
+    'parallax',
+    'none',
+  ];
+
+  const fallbackStyle: HeroIllustrationStyle =
+    DEFAULT_ILLUSTRATION_BY_TEMPLATE[template] ?? 'rocket';
+
+  const customUrl =
+    typeof raw?.customUrl === 'string' && raw.customUrl.trim()
+      ? raw.customUrl.trim()
+      : undefined;
+
+  // When a custom image is supplied we don't carry a built-in style —
+  // precedence rules in the renderer would ignore it anyway.
+  const style = customUrl
+    ? undefined
+    : raw?.style && validStyleIds.has(raw.style as HeroIllustrationStyle)
+      ? (raw.style as HeroIllustrationStyle)
+      : fallbackStyle;
+
+  const motion =
+    raw?.motion && validMotion.includes(raw.motion) ? raw.motion : undefined;
+
+  const side = raw?.side === 'left' ? 'left' : 'right';
+
+  const scale =
+    typeof raw?.scale === 'number' && Number.isFinite(raw.scale)
+      ? Math.max(0.5, Math.min(1.5, raw.scale))
+      : 1;
+
+  const prompt =
+    typeof raw?.prompt === 'string' ? raw.prompt.slice(0, 500) : undefined;
+
+  return { style, motion, side, scale, customUrl, prompt };
 }
 
 /**
@@ -791,6 +894,115 @@ const TEMPLATE_DEFAULTS: Record<SiteTemplate, { primary: string; accent: string 
   nonprofit: { primary: '#059669', accent: '#f59e0b' },
   tech: { primary: '#4338ca', accent: '#06b6d4' },
 };
+
+/**
+ * Summarise the client's media library into a small structured profile
+ * the generator prompt uses to gate section selection. We classify each
+ * image by its AI tags (if present) + description keywords so we can
+ * tell Claude: "you have 8 hero-quality photos, 3 before/after pairs,
+ * 2 team headshots, no logo" — and the prompt uses those counts to
+ * decide whether to emit the matching blocks.
+ */
+interface MediaProfile {
+  total: number;
+  /** qualityScore >= 7 */
+  heroQuality: number;
+  /** qualityScore >= 5 */
+  usable: number;
+  /** min(before-tagged, after-tagged) — pairable only if both exist */
+  beforeAfterPairs: number;
+  /** tag "team" OR description mentions staff/person/portrait */
+  team: number;
+  /** tag "product" OR description mentions product/item */
+  product: number;
+  /** tag "logo" OR description mentions logo/brand-mark */
+  logo: number;
+  /** tag "video" OR mime type starts with video/ */
+  video: number;
+  /** exterior + interior shots of the location */
+  location: number;
+}
+
+function buildMediaProfile(
+  rows: Array<{
+    aiDescription: string | null;
+    tags: string[] | null;
+    qualityScore: number | null;
+    mimeType: string | null;
+  }>,
+): MediaProfile {
+  const has = (tags: string[] | null | undefined, t: string): boolean =>
+    Array.isArray(tags) && tags.includes(t);
+
+  let heroQuality = 0;
+  let usable = 0;
+  let before = 0;
+  let after = 0;
+  let team = 0;
+  let product = 0;
+  let logo = 0;
+  let video = 0;
+  let location = 0;
+
+  for (const img of rows) {
+    const q = img.qualityScore ?? 0;
+    if (q >= 7) heroQuality++;
+    if (q >= 5) usable++;
+    const d = img.aiDescription ?? '';
+    if (has(img.tags, 'before') || /before[- ]and[- ]after|before shot|original state/i.test(d)) before++;
+    if (has(img.tags, 'after') || /after shot|finished (job|work)|completed/i.test(d)) after++;
+    if (
+      has(img.tags, 'team') ||
+      /\b(team|staff|owner|founder|barber|stylist|technician|dentist|plumber|chef|therapist|trainer|headshot|portrait)\b/i.test(
+        d,
+      )
+    ) {
+      team++;
+    }
+    if (has(img.tags, 'product') || /\bproduct|item|bottle|package|bouquet|cake\b/i.test(d)) product++;
+    if (has(img.tags, 'logo') || /\blogo|brand mark|wordmark\b/i.test(d)) logo++;
+    if (has(img.tags, 'video') || (img.mimeType ?? '').startsWith('video/')) video++;
+    if (
+      has(img.tags, 'exterior') ||
+      has(img.tags, 'interior') ||
+      has(img.tags, 'location') ||
+      /shopfront|exterior|interior|storefront/i.test(d)
+    ) {
+      location++;
+    }
+  }
+
+  return {
+    total: rows.length,
+    heroQuality,
+    usable,
+    beforeAfterPairs: Math.min(before, after),
+    team,
+    product,
+    logo,
+    video,
+    location,
+  };
+}
+
+/**
+ * Format the media profile into the human-readable block for the prompt.
+ * Keeps the prompt predictable — every number is on its own line so the
+ * model can cite exact counts when deciding which blocks to include.
+ */
+function formatMediaProfile(profile: MediaProfile): string {
+  return [
+    `Total images: ${profile.total}`,
+    `Hero-quality photos (score >= 7): ${profile.heroQuality}`,
+    `Usable photos (score >= 5): ${profile.usable}`,
+    `Before/after pairs available: ${profile.beforeAfterPairs}`,
+    `Team / people shots: ${profile.team}`,
+    `Product shots: ${profile.product}`,
+    `Logo files: ${profile.logo}`,
+    `Video assets: ${profile.video}`,
+    `Location (exterior/interior) shots: ${profile.location}`,
+  ].join('\n');
+}
 
 /**
  * Turn the seeded-facts subset of `GenerateWebsiteArgs` into a

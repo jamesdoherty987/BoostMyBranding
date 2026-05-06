@@ -6,6 +6,7 @@ import type { WebsiteConfig } from '@boost/core';
 import { SectionWrapper } from '../../section-wrapper';
 import { useSiteContext } from '../context';
 import { InlineEditable } from '../InlineEditable';
+import { SectionHeader } from './SectionHeader';
 
 interface SiteFAQProps {
   config: WebsiteConfig;
@@ -27,24 +28,13 @@ export function SiteFAQ({ config }: SiteFAQProps) {
   return (
     <SectionWrapper immediate={embedded} id="faq" className="bg-slate-50 py-14 md:py-20 lg:py-28">
       <div className={`mx-auto px-4 ${variant === 'grid' ? 'max-w-6xl' : 'max-w-3xl'}`}>
-        <div className="text-center">
-          <InlineEditable
-            path="faqSection.eyebrow"
-            value={config.faqSection?.eyebrow ?? 'FAQ'}
-            as="p"
-            className="text-xs font-semibold uppercase tracking-[0.25em]"
-            style={{ color: 'var(--bmb-site-primary)' }}
-            placeholder="Section eyebrow…"
-          />
-          <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 md:text-5xl">
-            <InlineEditable
-              path="faqSection.heading"
-              value={config.faqSection?.heading ?? 'Questions, answered.'}
-              as="span"
-              placeholder="Section heading…"
-            />
-          </h2>
-        </div>
+        <SectionHeader
+          eyebrowPath="faqSection.eyebrow"
+          headingPath="faqSection.heading"
+          eyebrow={config.faqSection?.eyebrow ?? 'FAQ'}
+          heading={config.faqSection?.heading ?? 'Questions, answered.'}
+          embedded={embedded}
+        />
 
         {variant === 'grid' ? (
           // 2-column grid: every answer visible. Great for quick skim on

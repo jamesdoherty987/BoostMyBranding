@@ -365,6 +365,14 @@ export function websiteConfigPrompt(vars: {
   hasHours?: boolean;
   hasBooking?: boolean;
   imageDescriptions?: string;
+  /**
+   * Structured summary of what media is available: counts of hero-quality
+   * photos, team shots, product shots, before/after pairs, logos, etc.
+   * Used by the generator as HARD GATES on which image-heavy blocks it
+   * can emit — no populating a Gallery with 2 photos, no beforeAfter
+   * without real pairs, no portfolio without multi-image projects.
+   */
+  mediaProfile?: string;
   template?: SiteTemplate;
   suggestions?: string;
   /**
@@ -380,7 +388,38 @@ export function websiteConfigPrompt(vars: {
 BUSINESS DESCRIPTION:
 ${vars.description}
 
-${vars.existingMarkdown ? `EXISTING SITE CONTENT (for voice + facts):\n${vars.existingMarkdown}\n` : ''}${vars.services?.length ? `KNOWN SERVICES: ${vars.services.join(', ')}\n` : ''}${vars.imageDescriptions ? `AVAILABLE IMAGES:\n${vars.imageDescriptions}\n` : ''}${vars.template ? `TEMPLATE HINT (may override if a different one fits better): ${vars.template}\n` : ''}${vars.suggestions ? `AGENCY SUGGESTIONS:\n${vars.suggestions}\n` : ''}${vars.seededFacts ? `\nAUTHORITATIVE BUSINESS FACTS (use these exactly — do NOT invent or paraphrase the values. These are ground truth from the agency):\n${vars.seededFacts}\n` : ''}
+${vars.existingMarkdown ? `EXISTING SITE CONTENT (for voice + facts):\n${vars.existingMarkdown}\n` : ''}${vars.services?.length ? `KNOWN SERVICES: ${vars.services.join(', ')}\n` : ''}${vars.imageDescriptions ? `AVAILABLE IMAGES:\n${vars.imageDescriptions}\n` : ''}${vars.mediaProfile ? `\nMEDIA PROFILE (authoritative counts — use these to gate which image-heavy blocks you emit):\n${vars.mediaProfile}\n` : ''}${vars.template ? `TEMPLATE HINT (may override if a different one fits better): ${vars.template}\n` : ''}${vars.suggestions ? `AGENCY SUGGESTIONS:\n${vars.suggestions}\n` : ''}${vars.seededFacts ? `\nAUTHORITATIVE BUSINESS FACTS (use these exactly — do NOT invent or paraphrase the values. These are ground truth from the agency):\n${vars.seededFacts}\n` : ''}
+
+════════════════════════════════════════════════════════════════════
+SECTION GATING — READ FIRST, THESE OVERRIDE EVERYTHING ELSE
+════════════════════════════════════════════════════════════════════
+
+You must NEVER add a block's key to "layout" unless the block can be
+populated with real content. Empty blocks render as nothing, which
+leaves holes in the page. Check the MEDIA PROFILE above against these
+rules before choosing the layout:
+
+- "gallery" — include ONLY when usable photos (score >= 5) >= 6 AND at least some aren't team/product/logo shots. Populate \`gallery.imageIndices\` with at least 6 indices. If the count is below 6, omit "gallery" from layout entirely.
+- "beforeAfter" — include ONLY when beforeAfterPairs >= 2. Populate each pair with both \`beforeIndex\` and \`afterIndex\`. If zero or one pair exists, omit "beforeAfter" from layout.
+- "portfolio" — include ONLY when usable photos >= 8 AND the industry is one that shows portfolios (trades, creatives, photographers, architects, landscapers, agencies, event planners). Each project needs at least 2 image indices. If you can't assemble 3+ projects with multi-image indices, omit "portfolio".
+- "products" — include ONLY when the business is retail / food-to-take-away / florists / bakeries / online-shop capable AND product shots >= 4. If the description doesn't mention selling physical items, omit "products".
+- "logoStrip" — include ONLY when at least one logo file exists in the media (logo count >= 3 for "press/partners" logos, not the business's own logo). If there's no evidence of press features or partners, omit.
+- "video" — include ONLY when the description or seeded facts explicitly mention a video URL. Do NOT invent a URL. Omit otherwise.
+- "logoIndex" (brand.logoIndex) — set ONLY when the media has at least one logo file. Otherwise leave null.
+- "team" — include ONLY when the business has multiple named people (check KNOWN SERVICES + description + seeded facts for 2+ team members). Solo traders skip team entirely. If team shots = 0 but 2+ people are named in facts, team is still OK but omit photoIndex from members without photos — the renderer falls back to initials.
+- "menu" — include ONLY when template is food OR the description mentions a menu / dishes / drinks list. Populate 3-6 categories with 3+ items each.
+- "priceList" — include ONLY when the business bills by fixed per-service pricing (barbers, salons, nail techs, trades with set "from" prices, mechanics). If pricing is bespoke/quote-only, omit.
+- "schedule" — include ONLY for class-based businesses (gyms, yoga, fitness studios, dance classes) with a real weekly grid.
+- "serviceAreas" — include ONLY for mobile/callout businesses (plumbers, electricians, mobile beauty, cleaners) AND the description mentions areas OR the agency supplied them as seeded facts.
+- "trustBadges" — include ONLY for regulated trades / medical / legal / dental AND there's evidence in KNOWN FACTS or the description of a real credential. Don't invent certifications.
+- "newsletter" — include ONLY for content-rhythm businesses (cafes with new seasonal menus, shops with monthly stock drops, fitness coaches with weekly tips). Skip for one-off transactional services (plumbers, locksmiths).
+- "announcement" — include ONLY when something is time-specific in the description (holiday hours, sale, grand opening). Permanent announcements train readers to ignore the bar.
+
+Hero illustration (the new scroll-driven brand object) is handled in
+hero.illustration and is always safe to include — the renderer picks
+a sensible default for the industry when you leave it unset.
+
+════════════════════════════════════════════════════════════════════
 
 Return ONLY valid JSON in this exact shape:
 {
@@ -422,7 +461,14 @@ Return ONLY valid JSON in this exact shape:
         "speed": <0.5-2>,
         "shadow": <0-2>
       }
-    ]
+    ],
+    "illustration": {
+      "style": "<rocket|wrench|coffee-cup|dumbbell|scissors|leaf|house|tooth|pencil|gavel|camera|car|paw|briefcase|shopping-bag — pick the one that best matches the industry. Rocket for tech/launch energy; wrench for trades; coffee-cup for cafes; dumbbell for fitness; scissors for salons/barbers; leaf for wellness/eco/landscaping; house for real estate; tooth for dental; pencil for education/design; gavel for legal; camera for photography; car for automotive; paw for pet care; briefcase for professional/consulting; shopping-bag for retail>",
+      "motion": "<launch|float|drift|orbit|tilt-3d|parallax|none — launch for rocket, parallax or float for most others. Leave null to use the per-style default.>",
+      "side": "<left|right — default right>",
+      "scale": <0.8-1.2 multiplier>,
+      "prompt": "<optional short brief, e.g. 'a clean espresso cup with steam in our brand teal' — stored for later regeneration>"
+    }
   },
   "stats": [
     { "value": <number>, "suffix": "<optional>", "prefix": "<optional>", "label": "<label>" }
@@ -433,7 +479,9 @@ Return ONLY valid JSON in this exact shape:
     "heading": "...",
     "body": "<2-3 short paragraphs separated by blank lines>",
     "bullets": ["<3-5 short proof points>"],
-    "imageIndex": <number or null>
+    "imageIndex": <number or null>,
+    "secondaryImageIndex": <index from AVAILABLE IMAGES for the small accent tile beside the main about photo, or null — pick a second distinct usable photo>,
+    "secondaryImageUrl": null
   },
   "servicesSection": { "eyebrow": "<short uppercase kicker, e.g. 'What we do'>", "heading": "<punchy, e.g. 'Every job, done properly.'>", "tagline": "<1 short sentence under the heading>" },
   "services": [
@@ -572,7 +620,10 @@ Return ONLY valid JSON in this exact shape:
     "buttonLabel": "<e.g. 'Book now'>",
     "buttonHref": "#contact",
     "secondaryLabel": "<optional — often 'Call' or 'WhatsApp'>",
-    "secondaryHref": "<tel: or mailto: or wa.me URL>"
+    "secondaryHref": "<tel: or mailto: or wa.me URL>",
+    "avatars": [
+      { "imageIndex": <index from AVAILABLE IMAGES — omit this whole array if variant is not 'with-images' or there aren't 4+ good photos>}
+    ]
   },
   "customSections": [
     {

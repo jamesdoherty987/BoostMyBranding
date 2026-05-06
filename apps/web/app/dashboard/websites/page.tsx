@@ -200,7 +200,16 @@ export default function WebsitesPage() {
   const [imagePicker, setImagePicker] = useState<
     | {
         path: string;
-        fieldName: 'imageIndex' | 'imageUrl' | 'photoIndex' | 'photoUrl' | 'direct';
+        fieldName:
+          | 'imageIndex'
+          | 'imageUrl'
+          | 'photoIndex'
+          | 'photoUrl'
+          | 'logoIndex'
+          | 'logoUrl'
+          | 'secondaryImageIndex'
+          | 'secondaryImageUrl'
+          | 'direct';
       }
     | null
   >(null);
@@ -1366,21 +1375,41 @@ export default function WebsitesPage() {
             // precedence is unambiguous (url wins over index when set).
             // We send `null` (not undefined) when clearing — undefined
             // is dropped by JSON.stringify and the API requires a value.
+            //
+            // The index/url pairs we know about:
+            //   imageIndex  ↔ imageUrl   (most blocks)
+            //   photoIndex  ↔ photoUrl   (team members)
+            //   logoIndex   ↔ logoUrl    (brand logo in nav)
+            const INDEX_TO_URL: Record<string, string> = {
+              imageIndex: 'imageUrl',
+              photoIndex: 'photoUrl',
+              logoIndex: 'logoUrl',
+              secondaryImageIndex: 'secondaryImageUrl',
+            };
+            const URL_TO_INDEX: Record<string, string> = {
+              imageUrl: 'imageIndex',
+              photoUrl: 'photoIndex',
+              logoUrl: 'logoIndex',
+              secondaryImageUrl: 'secondaryImageIndex',
+            };
+
             if (pick.kind === 'library') {
-              handleFieldChange(`${base}.${fieldName}`, pick.index);
-              if (fieldName === 'imageIndex') {
-                handleFieldChange(`${base}.imageUrl`, null);
-              } else if (fieldName === 'photoIndex') {
-                handleFieldChange(`${base}.photoUrl`, null);
-              }
+              // User picked from the gallery — write the index, clear
+              // any corresponding URL override so precedence is clear.
+              const indexField =
+                fieldName in URL_TO_INDEX ? URL_TO_INDEX[fieldName]! : fieldName;
+              handleFieldChange(`${base}.${indexField}`, pick.index);
+              const urlField = INDEX_TO_URL[indexField];
+              if (urlField) handleFieldChange(`${base}.${urlField}`, null);
             } else {
-              const urlField = fieldName === 'photoIndex' ? 'photoUrl' : 'imageUrl';
+              // User pasted / uploaded a direct URL — write it to the
+              // URL field, clear the corresponding index so precedence
+              // is clear.
+              const urlField =
+                fieldName in INDEX_TO_URL ? INDEX_TO_URL[fieldName]! : fieldName;
               handleFieldChange(`${base}.${urlField}`, pick.url);
-              if (urlField === 'imageUrl') {
-                handleFieldChange(`${base}.imageIndex`, null);
-              } else {
-                handleFieldChange(`${base}.photoIndex`, null);
-              }
+              const indexField = URL_TO_INDEX[urlField];
+              if (indexField) handleFieldChange(`${base}.${indexField}`, null);
             }
             setImagePicker(null);
           }}

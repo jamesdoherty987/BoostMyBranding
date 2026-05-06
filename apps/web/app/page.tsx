@@ -3,7 +3,6 @@ import { LaunchHero } from '@/components/LaunchHero';
 import { Features } from '@/components/Features';
 import { Statement } from '@/components/Statement';
 import { Demo } from '@/components/Demo';
-import { WhatYouGet } from '@/components/WhatYouGet';
 import { Comparison } from '@/components/Comparison';
 import { Pricing } from '@/components/Pricing';
 import { FAQ } from '@/components/FAQ';
@@ -104,7 +103,6 @@ export default function HomePage() {
       <Features />
       <Statement />
       <Demo />
-      <WhatYouGet />
       <Comparison />
       <Pricing />
       <FAQ />

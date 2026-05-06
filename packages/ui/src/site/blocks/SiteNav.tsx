@@ -6,6 +6,7 @@ import { Menu, X } from 'lucide-react';
 import type { WebsiteConfig, PageConfig } from '@boost/core';
 import { listPages } from '@boost/core';
 import { useSiteContext } from '../context';
+import { InlineImage } from '../InlineImage';
 
 interface SiteNavProps {
   config: WebsiteConfig;
@@ -113,45 +114,90 @@ export function SiteNav({
         {/* Logo — render the client's uploaded logo if set, otherwise
             fall back to a colored circle with their business initial.
             The logo is constrained to ~32px height so it sits comfortably
-            in the nav chrome even when the source image is large. */}
-        <a
-          href={homeHref}
-          onClick={preventNav}
-          className="flex items-center gap-2"
-          aria-label={`${businessName} home`}
-        >
-          {config.brand.logoUrl ||
-          (typeof config.brand.logoIndex === 'number' &&
-            images[config.brand.logoIndex]) ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={
-                config.brand.logoUrl ??
-                (typeof config.brand.logoIndex === 'number'
-                  ? images[config.brand.logoIndex]
-                  : undefined)
-              }
-              alt={`${businessName} logo`}
-              className="h-8 w-auto max-w-[140px] object-contain"
-            />
-          ) : (
-            <>
+            in the nav chrome even when the source image is large.
+
+            Edit mode branches out of the anchor: an InlineImage is a
+            <button> and the public-mode nav wraps the logo in an <a>.
+            Nesting a button inside an anchor is invalid HTML and trips
+            React hydration warnings, so in edit mode we render a
+            non-anchored clickable logo target. In public mode we keep
+            the anchor so clicking the logo goes home. */}
+        {(() => {
+          const logoSrc =
+            config.brand.logoUrl ??
+            (typeof config.brand.logoIndex === 'number'
+              ? images[config.brand.logoIndex]
+              : undefined);
+
+          if (editMode) {
+            return (
               <span
-                className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-sm font-bold"
-                style={{
-                  background: 'var(--bmb-site-primary)',
-                  color: 'var(--bmb-site-on-primary)',
-                }}
-                aria-hidden
+                className="flex items-center gap-2"
+                aria-label={`${businessName} logo`}
               >
-                {businessName.slice(0, 1).toUpperCase()}
+                <InlineImage
+                  src={logoSrc}
+                  alt={`${businessName} logo`}
+                  path="brand"
+                  fieldName="logoIndex"
+                  editStyle="compact"
+                  className="h-8 w-auto min-w-[2rem] max-w-[140px]"
+                  placeholder={
+                    <span
+                      className="flex h-8 w-8 items-center justify-center rounded-lg text-sm font-bold"
+                      style={{
+                        background: 'var(--bmb-site-primary)',
+                        color: 'var(--bmb-site-on-primary)',
+                      }}
+                      aria-hidden
+                    >
+                      {businessName.slice(0, 1).toUpperCase()}
+                    </span>
+                  }
+                />
+                {!logoSrc ? (
+                  <span className="text-sm font-semibold text-slate-900">
+                    {businessName}
+                  </span>
+                ) : null}
               </span>
-              <span className="text-sm font-semibold text-slate-900">
-                {businessName}
-              </span>
-            </>
-          )}
-        </a>
+            );
+          }
+
+          return (
+            <a
+              href={homeHref}
+              onClick={preventNav}
+              className="flex items-center gap-2"
+              aria-label={`${businessName} home`}
+            >
+              {logoSrc ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={logoSrc}
+                  alt={`${businessName} logo`}
+                  className="h-8 w-auto max-w-[140px] object-contain"
+                />
+              ) : (
+                <>
+                  <span
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-sm font-bold"
+                    style={{
+                      background: 'var(--bmb-site-primary)',
+                      color: 'var(--bmb-site-on-primary)',
+                    }}
+                    aria-hidden
+                  >
+                    {businessName.slice(0, 1).toUpperCase()}
+                  </span>
+                  <span className="text-sm font-semibold text-slate-900">
+                    {businessName}
+                  </span>
+                </>
+              )}
+            </a>
+          );
+        })()}
 
         {/* Desktop nav */}
         <nav className="hidden items-center gap-6 md:flex" aria-label="Primary">

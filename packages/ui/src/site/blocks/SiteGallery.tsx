@@ -7,6 +7,7 @@ import { useSiteContext } from '../context';
 import { brandGradient } from '../theme';
 import { InlineEditable } from '../InlineEditable';
 import { InlineImage } from '../InlineImage';
+import { SectionHeader } from './SectionHeader';
 import { GalleryFocusCards, GalleryParallax, GalleryAppleCarousel, GalleryLayoutGrid, GalleryCompare, GalleryDirectionAware, Gallery3dMarquee } from './gallery';
 
 interface SiteGalleryProps {
@@ -46,24 +47,13 @@ export function SiteGallery({ config, images, businessName }: SiteGalleryProps) 
   return (
     <SectionWrapper immediate={embedded} id="gallery" className="bg-slate-50 py-14 md:py-20 lg:py-28">
       <div className="mx-auto max-w-6xl px-4">
-        <div className="mx-auto max-w-2xl text-center">
-          <InlineEditable
-            path="gallery.eyebrow"
-            value={config.gallery?.eyebrow ?? 'Gallery'}
-            as="p"
-            className="text-xs font-semibold uppercase tracking-[0.25em]"
-            style={{ color: 'var(--bmb-site-primary)' }}
-            placeholder="Section eyebrow…"
-          />
-          <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 md:text-5xl">
-            <InlineEditable
-              path="gallery.heading"
-              value={config.gallery?.heading ?? 'A look around.'}
-              as="span"
-              placeholder="Section heading…"
-            />
-          </h2>
-        </div>
+        <SectionHeader
+          eyebrowPath="gallery.eyebrow"
+          headingPath="gallery.heading"
+          eyebrow={config.gallery?.eyebrow ?? 'Gallery'}
+          heading={config.gallery?.heading ?? 'A look around.'}
+          embedded={embedded}
+        />
 
         <div className="mt-12">
           {variant === 'focus-cards' ? (

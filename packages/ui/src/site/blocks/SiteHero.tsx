@@ -21,7 +21,7 @@
 
 import type { WebsiteConfig, HeroVariant, SiteTemplate } from '@boost/core';
 import { DEFAULT_HERO_VARIANT, HERO_VARIANTS } from '@boost/core';
-import type { ReactElement } from 'react';
+import { useRef, type ReactElement } from 'react';
 import {
   HeroSpotlight,
   HeroBeams,
@@ -44,6 +44,7 @@ import {
   HeroRipple,
 } from './hero';
 import { HeroCutouts } from './hero/HeroCutouts';
+import { HeroIllustrationLayer } from '../illustrations/HeroIllustrationLayer';
 
 interface SiteHeroProps {
   config: WebsiteConfig;
@@ -191,21 +192,78 @@ export function SiteHero({ config, images, businessName, embedded }: SiteHeroPro
   }
 
   const cutouts = config.hero?.cutouts;
-  if (!cutouts || cutouts.length === 0) {
-    // Wrap in a div with id so the dashboard can scroll to the hero. The
-    // variants themselves render their own <section> with various classes,
-    // so we add only the id marker here.
-    return <div id="hero">{variantEl}</div>;
-  }
+  const illustration = config.hero?.illustration;
+  // Use the same wrapper regardless of whether cutouts/illustration are
+  // present — a unified wrapping div that every variant gets. The
+  // wrapping div owns the scroll ref that drives the illustration's
+  // scroll-linked motion so the animation is tied to the hero section's
+  // visible range, not the whole page.
+  const heroRef = useRef<HTMLDivElement>(null);
+  const brandPalette = {
+    primary: config.brand.primaryColor,
+    accent: config.brand.accentColor,
+    pop: config.brand.popColor,
+    dark: config.brand.darkColor,
+  };
 
-  // Wrap the variant so the cutouts can overlay it. The variant itself is
-  // already `position: relative` on its root <section>, so we use a relative
-  // fragment wrapper with cutout layers absolutely positioned inside.
+  // Conflict check. Some variants already render their own big image
+  // tile in the right column; putting the illustration over them creates
+  // a double-image collision. `full-bg-image` fills the entire section
+  // with a photo + overlay, so an illustration on top clashes with both.
+  //
+  // Rule:
+  //   - full-bg-image       → always suppress (photo fills everything).
+  //   - parallax-layers     → suppress only when a heroImage is present
+  //                           AND the illustration would sit on the same
+  //                           side as the image tile (right). If the
+  //                           user puts the illustration on the left,
+  //                           it doesn't collide with the image tile.
+  //   - two-column-image    → same rule as parallax-layers.
+  //   - everything else     → show illustration.
+  //
+  // When suppressed on an image-tile variant without a heroImage, the
+  // illustration takes over the visual tile role the variant would
+  // otherwise leave empty — a better outcome than the branded-initial
+  // fallback the variant renders on its own.
+  const illustrationAllowed = (() => {
+    if (!illustration) return false;
+    if (variant === 'full-bg-image') return false;
+
+    const hasBuiltInImageTile =
+      variant === 'parallax-layers' || variant === 'two-column-image';
+    if (hasBuiltInImageTile && heroImage) {
+      // Both variants put their image tile on the right. Only the right
+      // side collides; a left-positioned illustration is fine.
+      const side = illustration.side ?? 'right';
+      return side === 'left';
+    }
+    return true;
+  })();
+
   return (
-    <div id="hero" className="relative">
-      <HeroCutouts cutouts={cutouts} embedded={embedded} layer={0} />
+    <div id="hero" ref={heroRef} className="relative">
+      {/* Cutouts layer 0 — behind copy */}
+      {cutouts && cutouts.length > 0 ? (
+        <HeroCutouts cutouts={cutouts} embedded={embedded} layer={0} />
+      ) : null}
       {variantEl}
-      <HeroCutouts cutouts={cutouts} embedded={embedded} layer={1} />
+      {/* Cutouts layer 1 — above copy */}
+      {cutouts && cutouts.length > 0 ? (
+        <HeroCutouts cutouts={cutouts} embedded={embedded} layer={1} />
+      ) : null}
+      {/* Scroll-driven hero illustration (rocket-style). Renders nothing
+          when `illustration` is unset or the current variant already
+          shows its own large image tile. Positioned absolutely inside
+          the wrapper so it overlays the variant without displacing its
+          layout. */}
+      {illustrationAllowed && illustration ? (
+        <HeroIllustrationLayer
+          illustration={illustration}
+          brand={brandPalette}
+          embedded={embedded}
+          heroRef={heroRef}
+        />
+      ) : null}
     </div>
   );
 }

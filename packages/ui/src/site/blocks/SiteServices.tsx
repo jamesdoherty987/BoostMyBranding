@@ -6,6 +6,7 @@ import { SectionWrapper } from '../../section-wrapper';
 import { useSiteContext } from '../context';
 import { resolveIcon } from '../icon-map';
 import { InlineEditable } from '../InlineEditable';
+import { SectionHeader } from './SectionHeader';
 import { ServicesBento, ServicesStickyScroll, ServicesWobble, ServicesGlare, Services3dCards, ServicesSpotlight, ServicesExpandable } from './services';
 
 interface SiteServicesProps {
@@ -30,33 +31,15 @@ export function SiteServices({ config }: SiteServicesProps) {
   return (
     <SectionWrapper immediate={embedded} id="services" className="bg-slate-50 py-14 md:py-20 lg:py-28">
       <div className="mx-auto max-w-6xl px-4">
-        <div className="mx-auto max-w-2xl text-center">
-          <InlineEditable
-            path="servicesSection.eyebrow"
-            value={config.servicesSection?.eyebrow ?? 'What we do'}
-            as="p"
-            className="text-xs font-semibold uppercase tracking-[0.25em]"
-            style={{ color: 'var(--bmb-site-primary)' }}
-            placeholder="Section eyebrow…"
-          />
-          <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 md:text-5xl">
-            <InlineEditable
-              path="servicesSection.heading"
-              value={config.servicesSection?.heading ?? 'Every job, done properly.'}
-              as="span"
-              placeholder="Section heading…"
-            />
-          </h2>
-          <p className="mt-4 text-base text-slate-600 md:text-lg">
-            <InlineEditable
-              path="servicesSection.tagline"
-              value={config.servicesSection?.tagline ?? config.brand.tagline}
-              as="span"
-              multiline
-              placeholder="Short tagline for this section…"
-            />
-          </p>
-        </div>
+        <SectionHeader
+          eyebrowPath="servicesSection.eyebrow"
+          headingPath="servicesSection.heading"
+          eyebrow={config.servicesSection?.eyebrow ?? 'What we do'}
+          heading={config.servicesSection?.heading ?? 'Every job, done properly.'}
+          taglinePath="servicesSection.tagline"
+          tagline={config.servicesSection?.tagline ?? config.brand.tagline}
+          embedded={embedded}
+        />
 
         <div className="mt-12">
           {variant === 'bento' ? (
@@ -86,6 +69,10 @@ export function SiteServices({ config }: SiteServicesProps) {
  * Original card-grid layout. Factored out so the dispatcher above can
  * choose it explicitly (the default) or fall back to it for unknown
  * variant values.
+ *
+ * Motion: cards lift on hover (existing), plus a cursor-follow
+ * spotlight that tints the card under the mouse in the brand-accent
+ * colour. Cheap — CSS vars driven from a single pointermove handler.
  */
 function ServicesCards({
   config,
@@ -109,12 +96,29 @@ function ServicesCards({
             animate={embedded ? { opacity: 1, y: 0 } : undefined}
             viewport={{ once: true, margin: '-40px' }}
             transition={{ delay: i * 0.05, duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
+            onPointerMove={(e) => {
+              if (embedded) return;
+              const el = e.currentTarget as HTMLDivElement;
+              const rect = el.getBoundingClientRect();
+              el.style.setProperty('--sx', `${e.clientX - rect.left}px`);
+              el.style.setProperty('--sy', `${e.clientY - rect.top}px`);
+            }}
+            style={{ ['--sx' as string]: '50%', ['--sy' as string]: '50%' }}
             className={`group relative overflow-hidden rounded-3xl border bg-white p-6 transition-all hover:-translate-y-1 hover:shadow-xl ${
               featured
                 ? 'border-[color:var(--bmb-site-primary)] ring-1 ring-[color:var(--bmb-site-primary)]/30 lg:col-span-2 lg:row-span-1'
                 : 'border-slate-200'
             }`}
           >
+            {/* Cursor-follow spotlight — tracks the mouse via CSS vars. */}
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-300 group-hover:opacity-100"
+              style={{
+                background:
+                  'radial-gradient(280px circle at var(--sx) var(--sy), rgba(var(--bmb-site-accent-rgb), 0.22), transparent 65%)',
+              }}
+            />
             <div
               aria-hidden
               className="absolute inset-x-0 top-0 h-1"
@@ -129,12 +133,12 @@ function ServicesCards({
               style={{ background: 'rgba(var(--bmb-site-accent-rgb), 0.35)' }}
             />
             <div
-              className="relative inline-flex h-11 w-11 items-center justify-center rounded-2xl text-white shadow"
+              className="relative inline-flex h-11 w-11 items-center justify-center rounded-2xl text-white shadow transition-transform duration-300 group-hover:scale-110 group-hover:rotate-3"
               style={{ background: 'var(--bmb-site-primary)' }}
             >
               <Icon className="h-5 w-5" />
             </div>
-            <h3 className="mt-5 text-lg font-semibold text-slate-900">
+            <h3 className="relative mt-5 text-lg font-semibold text-slate-900">
               <InlineEditable
                 path={`services.${i}.title`}
                 value={s.title}
@@ -142,7 +146,7 @@ function ServicesCards({
                 placeholder="Service title"
               />
             </h3>
-            <p className="mt-2 text-sm text-slate-600">
+            <p className="relative mt-2 text-sm text-slate-600">
               <InlineEditable
                 path={`services.${i}.description`}
                 value={s.description}

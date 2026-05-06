@@ -237,6 +237,104 @@ export interface HeroCutout {
 }
 
 /**
+ * Built-in hero illustration styles. Each style is a hand-tuned SVG
+ * component shipped with the renderer — not an AI-generated image. They
+ * take the brand palette as CSS variables so they always match the
+ * site's colours without needing a re-generation.
+ *
+ * The style list is intentionally short and industry-keyed. Adding a new
+ * style means:
+ *   1. Build the SVG component under packages/ui/src/site/illustrations/
+ *   2. Register it in ILLUSTRATION_STYLES (packages/core/src/illustrations.ts)
+ *   3. Add the string literal here
+ */
+export type HeroIllustrationStyle =
+  | 'rocket'
+  | 'wrench'
+  | 'coffee-cup'
+  | 'dumbbell'
+  | 'scissors'
+  | 'leaf'
+  | 'house'
+  | 'tooth'
+  | 'pencil'
+  | 'gavel'
+  | 'camera'
+  | 'car'
+  | 'paw'
+  | 'briefcase'
+  | 'shopping-bag';
+
+/**
+ * Motion preset for the hero illustration. Drives which scroll-linked
+ * transforms are applied. Keep the list short — more than a handful
+ * becomes noise; pick the preset that best matches the vibe.
+ *
+ *   launch   — rocket-style upward flight on scroll (big translate-Y
+ *              negative, slight scale pulse), like the marketing site.
+ *   float    — gentle vertical bob, independent of scroll. Safe default.
+ *   drift    — slow diagonal drift on scroll (across + up).
+ *   orbit    — small circular drift looping continuously.
+ *   tilt-3d  — mouse-follow 3D tilt, no scroll translate. Premium feel.
+ *   parallax — moderate scroll-Y translate + slight scale-down
+ *              (behaves like a background layer). The most "website-y".
+ *   none     — static. For users who want a bold image with zero motion.
+ */
+export type HeroIllustrationMotion =
+  | 'launch'
+  | 'float'
+  | 'drift'
+  | 'orbit'
+  | 'tilt-3d'
+  | 'parallax'
+  | 'none';
+
+export interface HeroIllustration {
+  /**
+   * Direct URL to a custom image (SVG preferred for sharpness, PNG with
+   * transparency also works). Takes precedence over `style` when set.
+   * Populated by the editor's upload flow, or pasted manually.
+   */
+  customUrl?: string;
+
+  /**
+   * One of the built-in styles. Used when `customUrl` is not set. The
+   * renderer tints the SVG with the brand palette so it picks up the
+   * site's colours automatically.
+   */
+  style?: HeroIllustrationStyle;
+
+  /**
+   * Scroll / motion behaviour. Defaults to 'parallax' for most styles,
+   * 'launch' for 'rocket'. See type definition for the full list.
+   */
+  motion?: HeroIllustrationMotion;
+
+  /**
+   * Which side of the hero the illustration sits on. Copy takes the
+   * opposite side. Default 'right' for desktop LTR layouts.
+   */
+  side?: 'left' | 'right';
+
+  /**
+   * Size multiplier relative to the default. 1 = default, 1.25 = 25%
+   * larger. Clamped 0.5 – 1.5 in the renderer. Default 1.
+   */
+  scale?: number;
+
+  /**
+   * Optional prompt the agency can supply when asking the AI to
+   * regenerate / rethink this illustration. Stored alongside the
+   * resolved `customUrl` so agencies can tweak it without starting
+   * from scratch. Separate from `hero.aiImagePrompt` (which drives the
+   * background/full-bleed image). This is the illustration-specific
+   * brief: "a stylised espresso cup with steam curling up in our brand
+   * teal", "a 3D isometric wrench with a green gradient", etc.
+   */
+  prompt?: string;
+}
+
+/**
  * A freeform custom section that doesn't fit any prebuilt block. Each
  * section picks one of four layout primitives via its `variant` field,
  * so the renderer stays deterministic while the agency/AI gets broad
@@ -386,6 +484,29 @@ export interface WebsiteConfig {
      * rather than replace the variant.
      */
     cutouts?: Array<HeroCutout>;
+
+    /**
+     * Large scroll-driven parallax illustration — the client-site
+     * equivalent of the rocket on the marketing site. A single big hero
+     * object sitting to the side of the copy that flies, drifts, or
+     * lifts as the user scrolls. Completely independent of the hero
+     * variant (works on any of them) and opt-in: leave `illustration`
+     * unset to keep the legacy image-tile look.
+     *
+     * Three sources, in precedence order:
+     *   1. `customUrl` — any SVG / PNG URL supplied by the agency
+     *      (upload via the editor, or paste a link).
+     *   2. `style` — one of the built-in styles keyed by industry
+     *      (rocket, wrench, coffee-cup, dumbbell, scissors, leaf,
+     *      house, tooth, pencil, gavel, camera, car, paw, briefcase,
+     *      shopping-bag). Styled inline from the brand palette.
+     *   3. Neither — renders nothing (falls back to the variant's
+     *      existing visual).
+     *
+     * `motionPreset` picks the scroll behaviour. All presets run inside
+     * the hero section's scroll scope and respect prefers-reduced-motion.
+     */
+    illustration?: HeroIllustration;
   };
 
   about?: {
@@ -395,6 +516,17 @@ export interface WebsiteConfig {
     body: string;
     bullets?: string[];
     imageIndex?: number | null;
+    /**
+     * Optional secondary accent image — renders as a small decorative
+     * tile in the bottom-right corner of the main about photo. When
+     * unset, the corner falls back to a brand-gradient swatch so the
+     * composition still reads. Editable inline in the dashboard preview
+     * so agencies can drop in a team photo, a workshop shot, or a
+     * product detail as a second visual hook next to the main image.
+     */
+    secondaryImageIndex?: number | null;
+    /** Direct URL for the secondary accent image. Takes precedence over index. */
+    secondaryImageUrl?: string | null;
   };
 
   stats?: Array<{
@@ -840,6 +972,18 @@ export interface WebsiteConfig {
       | 'centered-bold'
       | 'moving-border'
       | 'text-reveal';
+    /**
+     * Per-slot avatar images for the `with-images` variant. When set,
+     * each entry takes precedence over the fallback (which cycles
+     * through the main `images` gallery by index). Supports up to 8
+     * slots. Each slot is editable inline in the dashboard preview.
+     *
+     * For any other CTA variant these values are ignored.
+     */
+    avatars?: Array<{
+      imageIndex?: number;
+      imageUrl?: string;
+    }>;
   };
 
   /**

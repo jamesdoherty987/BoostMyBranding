@@ -997,6 +997,142 @@ export class BoostApi {
       body: JSON.stringify(args),
     });
   }
+
+  // ----- Inspiration-driven generation -----
+
+  /** Public catalog of available image + video models with pricing. */
+  listInspirationModels() {
+    return this.request<
+      Array<{
+        id: string;
+        displayName: string;
+        mediaType: 'image' | 'video';
+        supportsReference: boolean;
+        maxReferenceCount: number;
+        maxDurationSeconds?: number;
+        pricePerUnitCents: number;
+        unit: 'second' | 'image';
+        recommendation: 'quality' | 'speed' | 'price' | null;
+        supportedAspectRatios: Array<'9:16' | '1:1' | '16:9' | '4:5'>;
+        available: boolean;
+        provider: 'fal' | 'gemini' | 'vertex';
+        notes?: string;
+      }>
+    >('/api/v1/inspiration/models');
+  }
+
+  /**
+   * Upload raw inspiration files. These are stored under a short-lived
+   * `inspiration/` prefix and are NOT added to the client's media
+   * library automatically. Returns public URLs the generation flow can
+   * reference.
+   */
+  async uploadInspirationFiles(clientId: string, files: File[]) {
+    const fd = new FormData();
+    fd.append('clientId', clientId);
+    for (const f of files) fd.append('files', f);
+    let res: Response;
+    try {
+      res = await fetch(this.config.baseUrl + '/api/v1/inspiration/upload', {
+        method: 'POST',
+        body: fd,
+        credentials: 'include',
+      });
+    } catch (e) {
+      throw new ApiError((e as Error).message || 'Network error', 0);
+    }
+    const payload = (await res.json().catch(() => ({}))) as ApiResponse<
+      Array<{ url: string; mimeType: string; fileName: string; sizeBytes: number }>
+    >;
+    if (!res.ok || payload.error) {
+      throw new ApiError(payload.error?.message ?? `Upload failed (${res.status})`, res.status, payload.error?.code);
+    }
+    return payload.data ?? [];
+  }
+
+  /** Run Claude Vision on a prepared inspiration set. */
+  analyzeInspiration(args: {
+    items: Array<{ id: string; url: string; mimeType: string; label?: string }>;
+    direction?: string;
+  }) {
+    return this.request<{
+      style: string;
+      mood: string;
+      composition: string;
+      colorPalette: string[];
+      subjectType: string;
+      suggestedOutputTypes: Array<'image' | 'video'>;
+      suggestedPrompt: string;
+      reasoning: string;
+      fromMock: boolean;
+    }>('/api/v1/inspiration/analyze', {
+      method: 'POST',
+      body: JSON.stringify(args),
+    });
+  }
+
+  /** Live cost estimate for a proposed plan. Under 200ms round-trip. */
+  estimateInspirationCost(args: {
+    imageModelId?: string;
+    videoModelId?: string;
+    videoDurationSeconds?: number;
+    outputType?: 'image' | 'video' | 'both';
+  }) {
+    return this.request<{ costCents: number }>('/api/v1/inspiration/estimate', {
+      method: 'POST',
+      body: JSON.stringify(args),
+    });
+  }
+
+  /**
+   * End-to-end generation. Optional analysis → plan → generate → persist.
+   * Times out over a minute for video — show a proper loading state.
+   */
+  generateFromInspiration(args: {
+    clientId: string;
+    inspiration: Array<
+      | { kind: 'library'; id: string }
+      | { kind: 'upload'; url: string; mimeType: string; label?: string }
+    >;
+    runAnalysis: boolean;
+    directBrief?: string;
+    outputType?: 'image' | 'video' | 'both';
+    imageModelId?: string;
+    videoModelId?: string;
+    imageAspectRatio?: '1:1' | '4:5' | '9:16' | '16:9';
+    videoAspectRatio?: '9:16' | '1:1' | '16:9';
+    videoDurationSeconds?: number;
+    useInspirationAsVideoSeed?: boolean;
+  }) {
+    return this.request<{
+      analysis: {
+        style: string;
+        mood: string;
+        composition: string;
+        colorPalette: string[];
+        subjectType: string;
+        suggestedOutputTypes: Array<'image' | 'video'>;
+        suggestedPrompt: string;
+        reasoning: string;
+        fromMock: boolean;
+      } | null;
+      outputs: Array<{
+        assetId: string;
+        mediaType: 'image' | 'video';
+        url: string;
+        modelId: string;
+        modelDisplayName: string;
+        prompt: string;
+        costCents: number;
+        fromMock: boolean;
+      }>;
+      totalCostCents: number;
+      fromMock: boolean;
+    }>('/api/v1/inspiration/generate', {
+      method: 'POST',
+      body: JSON.stringify(args),
+    });
+  }
 }
 
 export function createApi(baseUrl: string) {

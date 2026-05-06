@@ -29,6 +29,7 @@ export function SiteFooter({ config, businessName }: SiteFooterProps) {
 
   return (
     <footer
+      id="footer"
       className="border-t py-10"
       style={{
         background: 'var(--bmb-site-dark)',

@@ -65,6 +65,7 @@ import {
   Heart,
 } from 'lucide-react';
 import { PageHeader } from '@/components/dashboard/PageHeader';
+import { InspirationMode } from '@/components/dashboard/InspirationMode';
 import { api } from '@/lib/dashboard/api';
 
 const PLATFORMS = ['instagram', 'facebook', 'linkedin', 'tiktok', 'x'] as const;
@@ -85,7 +86,7 @@ const PLATFORM_LIMITS: Record<string, { min: number; max: number }> = {
   x: { min: 50, max: 270 },
 };
 
-type Mode = 'captions' | 'ai_video' | 'ai_image' | 'template' | 'upload';
+type Mode = 'captions' | 'inspiration' | 'template' | 'upload';
 
 const MODES: Array<{ key: Mode; label: string; icon: typeof Sparkles; description: string }> = [
   {
@@ -95,16 +96,10 @@ const MODES: Array<{ key: Mode; label: string; icon: typeof Sparkles; descriptio
     description: 'A batch of captions for the month, honest and on-brand.',
   },
   {
-    key: 'ai_video',
-    label: 'AI video',
+    key: 'inspiration',
+    label: 'Inspiration → AI',
     icon: Wand2,
-    description: 'Personalised reel from the client\'s own photos and clips.',
-  },
-  {
-    key: 'ai_image',
-    label: 'AI image',
-    icon: ImageIcon,
-    description: 'One-off generated still, briefed by you.',
+    description: 'Upload references, pick models, generate images or videos.',
   },
   {
     key: 'template',
@@ -194,7 +189,7 @@ export default function GeneratePage() {
               </div>
             </div>
 
-            <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-5">
+            <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
               {MODES.map((m) => {
                 const Icon = m.icon;
                 const active = mode === m.key;
@@ -236,10 +231,8 @@ export default function GeneratePage() {
                 clients={clients}
                 clientsLoading={clientsLoading}
               />
-            ) : mode === 'ai_video' ? (
-              <AIVideoMode clientId={clientId} businessName={selectedClient?.businessName} />
-            ) : mode === 'ai_image' ? (
-              <AIImageMode clientId={clientId} />
+            ) : mode === 'inspiration' ? (
+              <InspirationMode clientId={clientId} businessName={selectedClient?.businessName} />
             ) : mode === 'template' ? (
               <TemplateMode clientId={clientId} businessName={selectedClient?.businessName} />
             ) : (

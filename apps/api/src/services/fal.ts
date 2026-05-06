@@ -15,6 +15,7 @@
 
 import { fal } from '@fal-ai/client';
 import { env, features } from '../env.js';
+import { getModel, type ModelOption } from './modelCatalog.js';
 
 if (features.fal) fal.config({ credentials: env.FAL_KEY });
 
@@ -175,4 +176,202 @@ export async function animateImage(
     }
   }
   throw lastError ?? new Error('All fal.ai image-to-video models failed');
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════ */
+/* Inspiration-driven generation — explicit model selection.           */
+/* ═══════════════════════════════════════════════════════════════════ */
+
+/**
+ * Reference-guided image generation. Accepts one or more reference image
+ * URLs plus a brief, and returns a new image that follows the reference
+ * style/composition.
+ *
+ * Routing:
+ *   - Flux Kontext Max (fal)   → uses the first reference as `image_url`
+ *   - Nano Banana 2 Pro (Gemini) → not yet wired (requires GEMINI_API_KEY)
+ *   - Any other model without reference support → falls back to plain
+ *     `generateImage` with the references ignored; caller is warned.
+ *
+ * Returns the generated image URL.
+ */
+export async function generateImageWithReference(args: {
+  modelId: string;
+  prompt: string;
+  aspectRatio: '1:1' | '4:5' | '9:16' | '16:9';
+  referenceUrls: string[];
+}): Promise<{ imageUrl: string; usedReferences: number; fromMock: boolean }> {
+  const model = getModel(args.modelId);
+  if (!model) throw new Error(`Unknown model: ${args.modelId}`);
+  if (model.mediaType !== 'image') throw new Error(`${model.displayName} is not an image model`);
+
+  if (!features.fal && model.provider === 'fal') {
+    const seed = encodeURIComponent(args.prompt.slice(0, 24).replace(/\s+/g, '-') || 'mock');
+    const [w, h] = aspectSize(args.aspectRatio);
+    return {
+      imageUrl: `https://picsum.photos/seed/${seed}/${w}/${h}`,
+      usedReferences: 0,
+      fromMock: true,
+    };
+  }
+
+  // Gemini / Vertex models aren't wired here yet — mock deterministically.
+  if (model.provider !== 'fal') {
+    const seed = encodeURIComponent(args.prompt.slice(0, 24).replace(/\s+/g, '-') || 'mock');
+    const [w, h] = aspectSize(args.aspectRatio);
+    return {
+      imageUrl: `https://picsum.photos/seed/${seed}-${model.provider}/${w}/${h}`,
+      usedReferences: 0,
+      fromMock: true,
+    };
+  }
+
+  const refs = args.referenceUrls.slice(0, Math.max(1, model.maxReferenceCount));
+
+  // Flux Kontext — single reference + prompt.
+  if (model.id === 'flux-kontext-max') {
+    if (refs.length === 0) {
+      // Kontext needs a reference; caller should have either supplied one or
+      // picked a non-reference model. Fall back to generation without ref.
+      const out = await generateImage(args.prompt, args.aspectRatio);
+      return { imageUrl: out, usedReferences: 0, fromMock: false };
+    }
+    const result = await fal.subscribe(model.endpoint, {
+      input: { prompt: args.prompt, image_url: refs[0]! },
+      logs: false,
+    });
+    const out = (result.data as any)?.images?.[0]?.url;
+    if (!out) throw new Error(`${model.displayName} did not return an image URL`);
+    return { imageUrl: out as string, usedReferences: refs.length, fromMock: false };
+  }
+
+  // Plain Flux models (no reference) — ignore refs, forward prompt.
+  const input = fluxInputFor(model, args.prompt, args.aspectRatio);
+  const result = await fal.subscribe(model.endpoint, { input, logs: false });
+  const out = (result.data as any)?.images?.[0]?.url;
+  if (!out) throw new Error(`${model.displayName} did not return an image URL`);
+  return { imageUrl: out as string, usedReferences: 0, fromMock: false };
+}
+
+function fluxInputFor(model: ModelOption, prompt: string, ar: string): Record<string, unknown> {
+  if (model.id === 'flux-pro-ultra') return { prompt, aspect_ratio: ar };
+  return {
+    prompt,
+    image_size: arToSize(ar),
+    num_inference_steps: model.id === 'flux-schnell' ? 4 : 28,
+  };
+}
+
+/**
+ * Image-to-video with explicit model selection. Unlike the legacy
+ * `animateImage`, this does not cascade through a model list — the
+ * caller has explicitly picked a model and is showing its price to the
+ * user. We just call it.
+ *
+ * Returns the video URL plus the clip duration actually rendered.
+ */
+export async function generateVideoFromImage(args: {
+  modelId: string;
+  imageUrl: string;
+  prompt: string;
+  durationSeconds: number;
+  aspectRatio: '9:16' | '1:1' | '16:9';
+}): Promise<{ videoUrl: string; durationSeconds: number; fromMock: boolean }> {
+  const model = getModel(args.modelId);
+  if (!model) throw new Error(`Unknown model: ${args.modelId}`);
+  if (model.mediaType !== 'video') throw new Error(`${model.displayName} is not a video model`);
+
+  const duration = clampVideoDuration(args.durationSeconds, model);
+
+  if (!features.fal && model.provider === 'fal') {
+    return { videoUrl: args.imageUrl, durationSeconds: duration, fromMock: true };
+  }
+  if (model.provider !== 'fal') {
+    return { videoUrl: args.imageUrl, durationSeconds: duration, fromMock: true };
+  }
+
+  const input = videoInputFor(model, {
+    imageUrl: args.imageUrl,
+    prompt: args.prompt,
+    durationSeconds: duration,
+    aspectRatio: args.aspectRatio,
+  });
+
+  const result = await fal.subscribe(model.endpoint, { input, logs: false });
+  const out =
+    (result.data as any)?.video?.url ??
+    (result.data as any)?.videos?.[0]?.url ??
+    (result.data as any)?.url;
+  if (!out) throw new Error(`${model.displayName} did not return a video URL`);
+  return { videoUrl: out as string, durationSeconds: duration, fromMock: false };
+}
+
+function clampVideoDuration(requested: number, model: ModelOption): number {
+  const cap = model.maxDurationSeconds ?? 10;
+  const clamped = Math.max(2, Math.min(cap, Math.round(requested)));
+  // Some providers only accept discrete durations. Snap to the closest
+  // supported value so we don't send rejected requests.
+  if (model.id.startsWith('kling-')) {
+    // Kling family accepts 5 or 10.
+    return clamped >= 8 ? 10 : 5;
+  }
+  if (model.id === 'hailuo-02-standard') {
+    // Hailuo 02 standard is a fixed 6s.
+    return 6;
+  }
+  if (model.id === 'stable-video') {
+    // SVD returns ~4s regardless of request.
+    return Math.min(4, clamped);
+  }
+  return clamped;
+}
+
+function videoInputFor(
+  model: ModelOption,
+  args: {
+    imageUrl: string;
+    prompt: string;
+    durationSeconds: number;
+    aspectRatio: '9:16' | '1:1' | '16:9';
+  },
+): Record<string, unknown> {
+  // Kling family — all accept the same shape.
+  if (model.id.startsWith('kling-')) {
+    return {
+      prompt: args.prompt,
+      image_url: args.imageUrl,
+      duration: String(args.durationSeconds),
+      aspect_ratio: args.aspectRatio,
+    };
+  }
+  // MiniMax Hailuo 02 — standard tier is fixed at 6 seconds.
+  if (model.id === 'hailuo-02-standard') {
+    return {
+      prompt: args.prompt,
+      image_url: args.imageUrl,
+      prompt_optimizer: true,
+    };
+  }
+  // Seedance Pro — minimal input. The model uses sensible defaults for
+  // resolution and aspect ratio based on the seed image.
+  if (model.id === 'seedance-1-pro') {
+    return {
+      prompt: args.prompt,
+      image_url: args.imageUrl,
+    };
+  }
+  // Stable Video Diffusion — motion bucket driven.
+  if (model.id === 'stable-video') {
+    return {
+      image_url: args.imageUrl,
+      motion_bucket_id: 127,
+      cond_aug: 0.02,
+    };
+  }
+  // Safe default — prompt + image.
+  return {
+    prompt: args.prompt,
+    image_url: args.imageUrl,
+  };
 }

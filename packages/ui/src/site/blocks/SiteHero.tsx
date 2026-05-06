@@ -192,14 +192,17 @@ export function SiteHero({ config, images, businessName, embedded }: SiteHeroPro
 
   const cutouts = config.hero?.cutouts;
   if (!cutouts || cutouts.length === 0) {
-    return variantEl;
+    // Wrap in a div with id so the dashboard can scroll to the hero. The
+    // variants themselves render their own <section> with various classes,
+    // so we add only the id marker here.
+    return <div id="hero">{variantEl}</div>;
   }
 
   // Wrap the variant so the cutouts can overlay it. The variant itself is
   // already `position: relative` on its root <section>, so we use a relative
   // fragment wrapper with cutout layers absolutely positioned inside.
   return (
-    <div className="relative">
+    <div id="hero" className="relative">
       <HeroCutouts cutouts={cutouts} embedded={embedded} layer={0} />
       {variantEl}
       <HeroCutouts cutouts={cutouts} embedded={embedded} layer={1} />

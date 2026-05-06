@@ -42,7 +42,7 @@ export function SiteCta({ config, images = [] }: SiteCtaProps) {
   // strip — masonry-images is a placeholder that falls back cleanly.
 
   return (
-    <SectionWrapper immediate={embedded} className="bg-white py-12 md:py-16">
+    <SectionWrapper immediate={embedded} id="cta" className="bg-white py-12 md:py-16">
       <div className="mx-auto max-w-5xl px-4">
         <div
           className="overflow-hidden rounded-[2rem] px-8 py-10 text-white shadow-xl md:px-14 md:py-12"

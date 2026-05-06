@@ -24,7 +24,7 @@ export function SiteTrustBadges({ config }: SiteTrustBadgesProps) {
   if (!tb || !tb.badges || tb.badges.length === 0) return null;
 
   return (
-    <SectionWrapper immediate={embedded} className="bg-white py-12 md:py-16">
+    <SectionWrapper immediate={embedded} id="trust" className="bg-white py-12 md:py-16">
       <div className="mx-auto max-w-6xl px-4">
         {tb.heading || tb.eyebrow ? (
           <div className="mx-auto mb-8 max-w-2xl text-center">

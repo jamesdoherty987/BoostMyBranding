@@ -129,6 +129,7 @@ function CustomSectionRenderer({
   return (
     <SectionWrapper
       immediate={embedded}
+      id="custom"
       className={`py-14 md:py-20 lg:py-28 ${bgClass}`}
       style={bgStyle}
     >

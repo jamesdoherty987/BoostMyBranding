@@ -86,7 +86,7 @@ export function SiteNewsletter({ config }: SiteNewsletterProps) {
   };
 
   return (
-    <SectionWrapper immediate={ctx.embedded} className="bg-white py-12 md:py-16">
+    <SectionWrapper immediate={ctx.embedded} id="newsletter" className="bg-white py-12 md:py-16">
       <div className="mx-auto max-w-5xl px-4">
         <div
           className="overflow-hidden rounded-[2rem] px-8 py-10 text-white shadow-xl md:px-14 md:py-12"

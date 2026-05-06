@@ -60,7 +60,12 @@ export function PreviewFrame({
 }: PreviewFrameProps) {
   if (device === 'desktop') {
     return (
-      <div className="max-h-[85vh] overflow-y-auto bg-white">{children}</div>
+      <div
+        data-preview-root="1"
+        className="max-h-[85vh] overflow-y-auto bg-white"
+      >
+        {children}
+      </div>
     );
   }
 

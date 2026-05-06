@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type React from 'react';
-import { Reorder } from 'framer-motion';
+import { Reorder, useDragControls } from 'framer-motion';
 import type {
   WebsiteConfig,
   SiteBlockKey,
@@ -62,6 +62,28 @@ import {
   Calendar,
   Code2,
   Download,
+  BarChart3,
+  Phone,
+  Megaphone,
+  MapPin,
+  ShoppingBag,
+  Briefcase,
+  Workflow,
+  Tags,
+  PlaySquare,
+  Mail,
+  ShieldCheck,
+  Building2,
+  MousePointerClick,
+  Eye,
+  Menu as MenuIcon,
+  Rows3,
+  Settings2,
+  AlertTriangle,
+  Info,
+  ChevronUp,
+  ChevronDown,
+  Lightbulb,
 } from 'lucide-react';
 import { api } from '@/lib/dashboard/api';
 import { sanitizeConfig } from '@boost/ui/site';
@@ -103,6 +125,497 @@ const ALL_BLOCKS: SiteBlockKey[] = [
   'products', 'portfolio', 'process', 'pricingTiers', 'logoStrip', 'video',
   'newsletter',
 ];
+
+/* ------------------------------------------------------------------ */
+/* Section metadata — icon, tone, what-it-does copy, content summary   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Visual identity for each section type. Keeps the editor UI consistent:
+ * the same icon/colour combo is used in the section list, the "Add
+ * section" chips, and the variant picker — so the agency can skim a
+ * long layout and instantly see "oh the blue pill is contact, the amber
+ * one is reviews."
+ *
+ * `tone` maps to Tailwind-friendly classes (text/bg) so we can colour
+ * the icon chip without inline styles or stretching the theme palette.
+ * `purpose` is the one-line "why this exists" copy shown under the
+ * section name — critical for agencies who don't live in the config
+ * schema the way the generator does.
+ */
+interface BlockMeta {
+  icon: React.ComponentType<{ className?: string }>;
+  /** Short Tailwind tone key — drives the icon chip colour. */
+  tone:
+    | 'orange'
+    | 'teal'
+    | 'amber'
+    | 'violet'
+    | 'blue'
+    | 'emerald'
+    | 'rose'
+    | 'slate'
+    | 'fuchsia'
+    | 'sky'
+    | 'lime';
+  /** Plain-English "what this section does" — shown under the block name. */
+  purpose: string;
+  /** Which #id to scroll to in the preview when the user clicks the Locate button. */
+  anchorId?: string;
+  /** Whether users can remove this block from the layout. */
+  required?: boolean;
+}
+
+/**
+ * Single source of truth for per-block visuals and copy. Add new blocks
+ * here when they're introduced — the section editor reads everything
+ * from this table so adding a block is one diff instead of five.
+ */
+const BLOCK_META: Record<SiteBlockKey, BlockMeta> = {
+  nav: {
+    icon: MenuIcon,
+    tone: 'slate',
+    purpose: 'Top navigation bar with links and the logo.',
+    required: true,
+  },
+  hero: {
+    icon: Sparkles,
+    tone: 'orange',
+    purpose: 'First thing visitors see: headline, subheading, call-to-action.',
+    anchorId: 'hero',
+  },
+  announcement: {
+    icon: Megaphone,
+    tone: 'amber',
+    purpose: 'Thin bar above the nav for time-sensitive news (holiday hours, sale).',
+  },
+  stats: {
+    icon: BarChart3,
+    tone: 'emerald',
+    purpose: 'Big numbers that build trust (5+ years, 100+ happy customers).',
+    anchorId: 'stats',
+  },
+  services: {
+    icon: Sparkles,
+    tone: 'teal',
+    purpose: 'What the business sells, as tiles or cards.',
+    anchorId: 'services',
+  },
+  about: {
+    icon: Info,
+    tone: 'slate',
+    purpose: 'Who they are, what makes them different, often with a photo.',
+    anchorId: 'about',
+  },
+  gallery: {
+    icon: ImageIcon,
+    tone: 'violet',
+    purpose: 'Photo grid — portfolios, work examples, food, interiors.',
+    anchorId: 'gallery',
+  },
+  reviews: {
+    icon: Star,
+    tone: 'amber',
+    purpose: 'Customer testimonials. The strongest conversion driver.',
+    anchorId: 'reviews',
+  },
+  faq: {
+    icon: HelpCircle,
+    tone: 'sky',
+    purpose: 'Quick answers to questions that might stop a booking.',
+    anchorId: 'faq',
+  },
+  contact: {
+    icon: Phone,
+    tone: 'blue',
+    purpose: 'How to reach them — form, phone, email, map, hours.',
+    anchorId: 'contact',
+  },
+  footer: {
+    icon: Rows3,
+    tone: 'slate',
+    purpose: 'Bottom of every page — copyright, socials, secondary links.',
+    anchorId: 'footer',
+    required: true,
+  },
+  menu: {
+    icon: Coffee,
+    tone: 'rose',
+    purpose: 'Food / drink menu with categories and prices.',
+    anchorId: 'menu',
+  },
+  priceList: {
+    icon: Tags,
+    tone: 'teal',
+    purpose: 'Per-service price list (cut €25, beard trim €15).',
+    anchorId: 'prices',
+  },
+  team: {
+    icon: Users,
+    tone: 'violet',
+    purpose: 'Staff profiles — names, roles, photos, specialties.',
+    anchorId: 'team',
+  },
+  schedule: {
+    icon: Calendar,
+    tone: 'sky',
+    purpose: 'Class / opening-hours grid for this week.',
+    anchorId: 'schedule',
+  },
+  serviceAreas: {
+    icon: MapPin,
+    tone: 'emerald',
+    purpose: 'Towns and regions this business covers. Great for local SEO.',
+    anchorId: 'areas',
+  },
+  beforeAfter: {
+    icon: ImageIcon,
+    tone: 'fuchsia',
+    purpose: 'Before/after image pairs — trades, cleaning, beauty.',
+    anchorId: 'before-after',
+  },
+  trustBadges: {
+    icon: ShieldCheck,
+    tone: 'emerald',
+    purpose: 'Licences, insurance, accreditations — "we\u2019re the real deal".',
+    anchorId: 'trust',
+  },
+  cta: {
+    icon: MousePointerClick,
+    tone: 'teal',
+    purpose: 'A focused "book now" strip — usually mid-page or before the footer.',
+    anchorId: 'cta',
+  },
+  custom: {
+    icon: Settings2,
+    tone: 'slate',
+    purpose: 'Freeform sections — image strip, quote, split layout, icon row.',
+    anchorId: 'custom',
+  },
+  products: {
+    icon: ShoppingBag,
+    tone: 'rose',
+    purpose: 'Retail grid with photos, prices, and buy / order links.',
+    anchorId: 'products',
+  },
+  portfolio: {
+    icon: Briefcase,
+    tone: 'violet',
+    purpose: 'Case studies — project photos, tags, write-up per job.',
+    anchorId: 'portfolio',
+  },
+  process: {
+    icon: Workflow,
+    tone: 'sky',
+    purpose: '"How it works" steps — sets expectations and reduces friction.',
+    anchorId: 'process',
+  },
+  pricingTiers: {
+    icon: Tags,
+    tone: 'lime',
+    purpose: 'Bronze / Silver / Gold package cards for service businesses.',
+    anchorId: 'pricing',
+  },
+  logoStrip: {
+    icon: Building2,
+    tone: 'slate',
+    purpose: 'As-seen-in / partner logos — subtle social proof.',
+    anchorId: 'logo-strip',
+  },
+  video: {
+    icon: PlaySquare,
+    tone: 'rose',
+    purpose: 'Embedded YouTube, Vimeo, or MP4 with a clean 16:9 frame.',
+    anchorId: 'video',
+  },
+  newsletter: {
+    icon: Mail,
+    tone: 'blue',
+    purpose: 'Email capture — waitlist, newsletter, launch notifications.',
+    anchorId: 'newsletter',
+  },
+};
+
+const TONE_CLASSES: Record<BlockMeta['tone'], { bg: string; text: string; ring: string; soft: string; bar: string }> = {
+  orange: { bg: 'bg-orange-100', text: 'text-orange-700', ring: 'ring-orange-200', soft: 'bg-orange-50', bar: 'bg-orange-400' },
+  teal: { bg: 'bg-[#1D9CA1]/10', text: 'text-[#1D9CA1]', ring: 'ring-[#1D9CA1]/30', soft: 'bg-[#1D9CA1]/5', bar: 'bg-[#1D9CA1]' },
+  amber: { bg: 'bg-amber-100', text: 'text-amber-700', ring: 'ring-amber-200', soft: 'bg-amber-50', bar: 'bg-amber-400' },
+  violet: { bg: 'bg-violet-100', text: 'text-violet-700', ring: 'ring-violet-200', soft: 'bg-violet-50', bar: 'bg-violet-400' },
+  blue: { bg: 'bg-blue-100', text: 'text-blue-700', ring: 'ring-blue-200', soft: 'bg-blue-50', bar: 'bg-blue-400' },
+  emerald: { bg: 'bg-emerald-100', text: 'text-emerald-700', ring: 'ring-emerald-200', soft: 'bg-emerald-50', bar: 'bg-emerald-400' },
+  rose: { bg: 'bg-rose-100', text: 'text-rose-700', ring: 'ring-rose-200', soft: 'bg-rose-50', bar: 'bg-rose-400' },
+  slate: { bg: 'bg-slate-100', text: 'text-slate-700', ring: 'ring-slate-200', soft: 'bg-slate-50', bar: 'bg-slate-400' },
+  fuchsia: { bg: 'bg-fuchsia-100', text: 'text-fuchsia-700', ring: 'ring-fuchsia-200', soft: 'bg-fuchsia-50', bar: 'bg-fuchsia-400' },
+  sky: { bg: 'bg-sky-100', text: 'text-sky-700', ring: 'ring-sky-200', soft: 'bg-sky-50', bar: 'bg-sky-400' },
+  lime: { bg: 'bg-lime-100', text: 'text-lime-700', ring: 'ring-lime-200', soft: 'bg-lime-50', bar: 'bg-lime-400' },
+};
+
+/**
+ * Ordered groups of blocks for the Add-Section gallery. Organised by
+ * local-business job-to-be-done so agencies building for a barber or a
+ * mechanic can find the "right" section faster than scanning an
+ * alphabetical list of 26 options.
+ */
+interface SectionGroup {
+  id: string;
+  label: string;
+  tagline: string;
+  blocks: SiteBlockKey[];
+}
+
+const SECTION_GROUPS: SectionGroup[] = [
+  {
+    id: 'essentials',
+    label: 'Essentials',
+    tagline: 'Every small-business site needs these.',
+    blocks: ['hero', 'services', 'about', 'contact'],
+  },
+  {
+    id: 'proof',
+    label: 'Social proof',
+    tagline: 'Why people should trust them.',
+    blocks: ['reviews', 'stats', 'trustBadges', 'logoStrip', 'beforeAfter'],
+  },
+  {
+    id: 'local',
+    label: 'Local info',
+    tagline: 'Signals that tell Google (and customers) "we\u2019re in your area".',
+    blocks: ['serviceAreas', 'schedule', 'team'],
+  },
+  {
+    id: 'commerce',
+    label: 'Commerce & pricing',
+    tagline: 'Show what things cost, what\u2019s on the menu, what you sell.',
+    blocks: ['menu', 'priceList', 'pricingTiers', 'products'],
+  },
+  {
+    id: 'story',
+    label: 'Storytelling',
+    tagline: 'Show off the work and answer questions.',
+    blocks: ['gallery', 'portfolio', 'video', 'process', 'faq'],
+  },
+  {
+    id: 'conversion',
+    label: 'Conversion',
+    tagline: 'Nudges that drive bookings and leads.',
+    blocks: ['cta', 'newsletter', 'announcement'],
+  },
+  {
+    id: 'custom',
+    label: 'Custom',
+    tagline: 'Freeform sections when nothing else fits.',
+    blocks: ['custom'],
+  },
+];
+
+/**
+ * A short, human-readable summary of how much content this block has —
+ * e.g. "4 services", "needs content", "3 members, 2 with photos".
+ *
+ * Returned `tone`:
+ *   'ok'     — the block has enough content to render nicely
+ *   'warn'   — the block is in the layout but will render empty / skimpy
+ *   'info'   — purely informational (counts without a judgement)
+ */
+function blockContentSummary(
+  config: WebsiteConfig,
+  block: SiteBlockKey,
+  images: string[],
+): { text: string; tone: 'ok' | 'warn' | 'info' } {
+  const empty = { text: 'Needs content', tone: 'warn' as const };
+  switch (block) {
+    case 'nav':
+      return { text: `${(config.pages?.length ?? 1)} page${(config.pages?.length ?? 1) === 1 ? '' : 's'}`, tone: 'info' };
+    case 'hero': {
+      const hasHeadline = !!config.hero?.headline?.trim();
+      const hasImg =
+        config.hero?.imageIndex != null || !!config.hero?.aiImageUrl;
+      if (!hasHeadline) return empty;
+      return {
+        text: hasImg ? 'Headline + image ready' : 'Headline set · no image',
+        tone: hasImg ? 'ok' : 'info',
+      };
+    }
+    case 'announcement':
+      return config.announcement?.message
+        ? { text: config.announcement.message.slice(0, 40), tone: 'ok' }
+        : empty;
+    case 'stats':
+      return (config.stats?.length ?? 0) > 0
+        ? { text: `${config.stats!.length} metric${config.stats!.length === 1 ? '' : 's'}`, tone: 'ok' }
+        : empty;
+    case 'services': {
+      const n = config.services?.length ?? 0;
+      if (n === 0) return empty;
+      return { text: `${n} service${n === 1 ? '' : 's'}`, tone: 'ok' };
+    }
+    case 'about':
+      return config.about?.body?.trim()
+        ? { text: 'Copy set', tone: 'ok' }
+        : empty;
+    case 'gallery':
+      return images.length > 0
+        ? { text: `${images.length} photo${images.length === 1 ? '' : 's'} available`, tone: 'ok' }
+        : { text: 'No photos uploaded yet', tone: 'warn' };
+    case 'reviews': {
+      const n = config.reviews?.length ?? 0;
+      if (n === 0) return empty;
+      return { text: `${n} review${n === 1 ? '' : 's'}`, tone: 'ok' };
+    }
+    case 'faq': {
+      const n = config.faq?.length ?? 0;
+      if (n === 0) return empty;
+      return { text: `${n} question${n === 1 ? '' : 's'}`, tone: 'ok' };
+    }
+    case 'contact': {
+      const has =
+        config.contact?.phone || config.contact?.email || config.contact?.address;
+      return has
+        ? { text: 'Contact details set', tone: 'ok' }
+        : { text: 'Add phone / email / address', tone: 'warn' };
+    }
+    case 'footer':
+      return { text: 'Auto-filled from brand', tone: 'info' };
+    case 'menu': {
+      const cats = config.menu?.categories?.length ?? 0;
+      const items =
+        config.menu?.categories?.reduce(
+          (n, c) => n + (c.items?.length ?? 0),
+          0,
+        ) ?? 0;
+      if (cats === 0) return empty;
+      return { text: `${cats} section${cats === 1 ? '' : 's'} · ${items} item${items === 1 ? '' : 's'}`, tone: 'ok' };
+    }
+    case 'priceList': {
+      const n =
+        (config.priceList?.items?.length ?? 0) +
+        (config.priceList?.groups?.reduce(
+          (x, g) => x + (g.items?.length ?? 0),
+          0,
+        ) ?? 0);
+      return n > 0 ? { text: `${n} priced item${n === 1 ? '' : 's'}`, tone: 'ok' } : empty;
+    }
+    case 'team': {
+      const n = config.team?.members?.length ?? 0;
+      if (n === 0) return empty;
+      const withPhoto = (config.team?.members ?? []).filter(
+        (m) => m.photoUrl || m.photoIndex != null,
+      ).length;
+      return {
+        text: `${n} member${n === 1 ? '' : 's'} · ${withPhoto} with photo`,
+        tone: 'ok',
+      };
+    }
+    case 'schedule':
+      return (config.schedule?.entries?.length ?? 0) > 0
+        ? { text: `${config.schedule!.entries!.length} entries`, tone: 'ok' }
+        : empty;
+    case 'serviceAreas':
+      return (config.serviceAreas?.areas?.length ?? 0) > 0
+        ? { text: `${config.serviceAreas!.areas!.length} area${config.serviceAreas!.areas!.length === 1 ? '' : 's'}`, tone: 'ok' }
+        : empty;
+    case 'beforeAfter':
+      return (config.beforeAfter?.pairs?.length ?? 0) > 0
+        ? { text: `${config.beforeAfter!.pairs!.length} pair${config.beforeAfter!.pairs!.length === 1 ? '' : 's'}`, tone: 'ok' }
+        : empty;
+    case 'trustBadges':
+      return (config.trustBadges?.badges?.length ?? 0) > 0
+        ? { text: `${config.trustBadges!.badges!.length} badge${config.trustBadges!.badges!.length === 1 ? '' : 's'}`, tone: 'ok' }
+        : empty;
+    case 'cta':
+      return config.cta?.heading
+        ? { text: config.cta.heading.slice(0, 45), tone: 'ok' }
+        : empty;
+    case 'custom':
+      return (config.customSections?.length ?? 0) > 0
+        ? { text: `${config.customSections!.length} custom section${config.customSections!.length === 1 ? '' : 's'}`, tone: 'ok' }
+        : empty;
+    case 'products':
+      return (config.products?.items?.length ?? 0) > 0
+        ? { text: `${config.products!.items!.length} product${config.products!.items!.length === 1 ? '' : 's'}`, tone: 'ok' }
+        : empty;
+    case 'portfolio':
+      return (config.portfolio?.projects?.length ?? 0) > 0
+        ? { text: `${config.portfolio!.projects!.length} project${config.portfolio!.projects!.length === 1 ? '' : 's'}`, tone: 'ok' }
+        : empty;
+    case 'process':
+      return (config.process?.steps?.length ?? 0) > 0
+        ? { text: `${config.process!.steps!.length} step${config.process!.steps!.length === 1 ? '' : 's'}`, tone: 'ok' }
+        : empty;
+    case 'pricingTiers':
+      return (config.pricingTiers?.tiers?.length ?? 0) > 0
+        ? { text: `${config.pricingTiers!.tiers!.length} tier${config.pricingTiers!.tiers!.length === 1 ? '' : 's'}`, tone: 'ok' }
+        : empty;
+    case 'logoStrip':
+      return (config.logoStrip?.logos?.length ?? 0) > 0
+        ? { text: `${config.logoStrip!.logos!.length} logo${config.logoStrip!.logos!.length === 1 ? '' : 's'}`, tone: 'ok' }
+        : empty;
+    case 'video':
+      return config.video?.url
+        ? { text: 'Video URL set', tone: 'ok' }
+        : empty;
+    case 'newsletter':
+      return config.newsletter?.heading
+        ? { text: 'Copy set', tone: 'ok' }
+        : empty;
+    default:
+      return { text: '', tone: 'info' };
+  }
+}
+
+/**
+ * Scrolls the dashboard preview pane to the given block id. The preview
+ * lives in a scrollable container (PreviewFrame's max-h-[85vh] wrapper);
+ * to find "the scroll parent" we walk up from the located element until
+ * we hit one with `overflow-y` set. Falls back to the element's own
+ * scrollIntoView if no custom scroller is found.
+ *
+ * Flashes a brief ring on the section so the user can see where the
+ * section they clicked lives in the preview — particularly useful for
+ * long sites where the target lands off-screen after scrolling.
+ */
+function scrollPreviewToSection(block: SiteBlockKey) {
+  const anchor = BLOCK_META[block]?.anchorId;
+  if (!anchor) return;
+  // Pick the in-dashboard preview instance only. The published site in
+  // mobile/tablet iframe mode has the same ids but is cross-origin, so
+  // we limit to the desktop-mode preview where the markup is rendered
+  // directly in the host DOM.
+  const root = document.querySelector<HTMLElement>('[data-preview-root="1"]');
+  if (!root) {
+    // Agencies sometimes click Eye while in tablet/mobile preview where
+    // the site lives inside an iframe we can't scroll from here. Tell
+    // them to switch rather than silently failing.
+    toast.info(
+      'Switch to desktop to locate',
+      'Section-jump only works in desktop preview. Mobile / tablet modes show the live site in an iframe.',
+    );
+    return;
+  }
+  const target = root.querySelector<HTMLElement>(`#${CSS.escape(anchor)}`);
+  if (!target) {
+    toast.info(
+      `${BLOCK_LABELS[block]} is not rendering yet`,
+      'Add some content to this section — it only appears on the page once it has items.',
+    );
+    return;
+  }
+
+  // Find the nearest ancestor with vertical scrolling. `overflow-y: auto`
+  // on the PreviewFrame wrapper is what actually scrolls; the target's
+  // `scrollIntoView` uses the closest scroll parent by default.
+  target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  // Flash highlight so the user sees where they landed.
+  target.style.outline = '3px solid rgba(29,156,161,0.6)';
+  target.style.outlineOffset = '4px';
+  target.style.transition = 'outline-color 600ms ease';
+  window.setTimeout(() => {
+    target.style.outline = '';
+    target.style.outlineOffset = '';
+    target.style.transition = '';
+  }, 1400);
+}
 
 /**
  * When the user adds a data-driven block from the Sections tab, seed it
@@ -595,6 +1108,7 @@ export function SiteEditor({
               config={config}
               onChange={onChange}
               activePageSlug={activePageSlug}
+              images={images}
             />
           )}
           {tab === 'hero' && (
@@ -698,10 +1212,12 @@ function SectionManager({
   config,
   onChange,
   activePageSlug,
+  images,
 }: {
   config: WebsiteConfig;
   onChange: (c: WebsiteConfig) => void;
   activePageSlug: string;
+  images: string[];
 }) {
   // In a multipage site, `Sections` edits the active page's layout. In a
   // single-page site, it edits the root `layout`. We keep both code paths
@@ -722,6 +1238,21 @@ function SectionManager({
   const available = ALL_BLOCKS.filter((b) => !layout.includes(b));
 
   const setLayout = (newLayout: SiteBlockKey[]) => {
+    // Enforce structural invariants before committing to state:
+    //   - `nav` lives at index 0 (the first thing on the page)
+    //   - `footer` lives at the last index (the last thing on the page)
+    //
+    // Without these guards the Reorder drag would let a user put
+    // "Navigation" halfway down the page, which the site renderer would
+    // happily obey but every visitor would call weird.
+    let normalised = newLayout.slice();
+    if (normalised.includes('nav')) {
+      normalised = ['nav', ...normalised.filter((b) => b !== 'nav')];
+    }
+    if (normalised.includes('footer')) {
+      normalised = [...normalised.filter((b) => b !== 'footer'), 'footer'];
+    }
+
     // Write to the same field `resolvePage` reads. If there's any page
     // in config.pages (even just the implicit "home"), the renderer
     // sources layout from that page — so we update there too.
@@ -730,19 +1261,27 @@ function SectionManager({
       onChange({
         ...config,
         pages: pages.map((p) =>
-          p.slug === activeSlug ? { ...p, layout: newLayout } : p,
+          p.slug === activeSlug ? { ...p, layout: normalised } : p,
         ),
       });
     } else {
-      onChange({ ...config, layout: newLayout });
+      onChange({ ...config, layout: normalised });
     }
   };
 
-  const removeBlock = (block: SiteBlockKey) => {
+  const removeBlock = async (block: SiteBlockKey) => {
     if (block === 'nav' || block === 'footer') {
       toast.info('Navigation and footer are required');
       return;
     }
+    const confirmed = await confirmDialog({
+      title: `Remove ${BLOCK_LABELS[block]}?`,
+      description:
+        'The section disappears from the site. Content (text, items, photos) stays saved — you can add the section back later.',
+      confirmLabel: 'Remove section',
+      danger: true,
+    });
+    if (!confirmed) return;
     setLayout(layout.filter((b) => b !== block));
   };
 
@@ -811,9 +1350,42 @@ function SectionManager({
         : `${BLOCK_LABELS[block]} added`,
       seededMessage(block, seeded) ?? 'Reorder from the list above.',
     );
+
+    // Give the preview a moment to render the new block, then jump to it
+    // so the user sees what was added without hunting for it.
+    window.setTimeout(() => scrollPreviewToSection(block), 350);
   };
 
-  const resetLayout = () => {
+  /** Move a block one slot up/down in the layout. Keyboard/tap alternative
+   * to drag-reorder for agencies on touch devices or for small nudges. */
+  const moveBlock = (block: SiteBlockKey, direction: -1 | 1) => {
+    const idx = layout.indexOf(block);
+    if (idx < 0) return;
+    const nextIdx = idx + direction;
+    if (nextIdx < 0 || nextIdx >= layout.length) return;
+    const neighbour = layout[nextIdx]!;
+    // nav must stay first, footer must stay last. If swap would violate
+    // either we bail silently — the button is disabled in the UI anyway.
+    if (block === 'nav' || neighbour === 'nav') return;
+    if (block === 'footer' || neighbour === 'footer') return;
+    const next = [...layout];
+    next[idx] = neighbour;
+    next[nextIdx] = block;
+    setLayout(next);
+  };
+
+  const resetLayout = async () => {
+    if (
+      !(await confirmDialog({
+        title: 'Reset sections?',
+        description:
+          'This puts sections back in the template\u2019s default order and drops any you\u2019ve added. Your content (copy, items, photos) stays saved.',
+        confirmLabel: 'Reset layout',
+        danger: true,
+      }))
+    ) {
+      return;
+    }
     setLayout(DEFAULT_LAYOUT[config.template ?? 'service']);
     toast.success('Layout reset to template default');
   };
@@ -822,118 +1394,117 @@ function SectionManager({
   // variant gallery opens so the user can see thumbnails before committing.
   const [pickerBlock, setPickerBlock] = useState<SiteBlockKey | null>(null);
 
+  // Counts for the summary row at the top of the editor — gives agencies
+  // an at-a-glance read of how built-out the current page is.
+  const totalSections = layout.length;
+  const emptySections = layout.filter(
+    (b) => blockContentSummary(config, b, images).tone === 'warn',
+  ).length;
+
   return (
     <div className="space-y-4">
-      {isMultipage && activePage ? (
-        <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
-          Editing sections on <strong className="text-slate-900">{activePage.title}</strong>.
-          Use the page tabs above the preview to switch.
+      {/* Header summary + explanation. Agencies can skim this and know the
+          tab scopes edits to the active page + how much content is missing
+          before clicking in to fix it. */}
+      <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-3">
+        <div className="flex items-start gap-3">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#1D9CA1]/10 text-[#1D9CA1]">
+            <Layers className="h-4 w-4" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-semibold text-slate-900">
+              {totalSections} section{totalSections === 1 ? '' : 's'}
+              {isMultipage && activePage ? (
+                <>
+                  {' '}on <span className="text-[#1D9CA1]">{activePage.title}</span>
+                </>
+              ) : null}
+            </p>
+            <p className="mt-0.5 text-[11px] leading-snug text-slate-500">
+              {emptySections > 0 ? (
+                <>
+                  <AlertTriangle className="mr-0.5 inline h-3 w-3 text-amber-500" />
+                  {emptySections} section{emptySections === 1 ? '' : 's'} need content.
+                  Head to the <strong>Items</strong> tab to add text, or the{' '}
+                  <strong>Content</strong> tab for inline editing.
+                </>
+              ) : (
+                <>
+                  Drag any card to reorder. Click the eye to jump the
+                  preview to that section. Click the paintbrush to swap its style.
+                </>
+              )}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={resetLayout}
+            title="Reset to template default"
+            className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 hover:border-slate-300 hover:text-slate-700"
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+          </button>
         </div>
-      ) : null}
-      <div className="flex items-center justify-between">
-        <p className="text-xs text-slate-500">Drag to reorder. Click × to remove.</p>
-        <button
-          onClick={resetLayout}
-          className="flex items-center gap-1 text-[11px] text-slate-500 hover:text-slate-700"
-        >
-          <RotateCcw className="h-3 w-3" />
-          Reset
-        </button>
       </div>
 
+      {isMultipage && activePage ? (
+        <div className="flex items-start gap-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-[11px] text-sky-900">
+          <Info className="mt-0.5 h-3 w-3 shrink-0" />
+          <span>
+            Editing the <strong>{activePage.title}</strong> page only. Use the
+            page tabs above the preview to switch to another page.
+          </span>
+        </div>
+      ) : null}
+
+      {/* Section cards — one per block in layout order. Drag the grip to
+          reorder; click an action icon for a targeted edit. */}
       <Reorder.Group
         axis="y"
         values={layout}
         onReorder={(newOrder) => setLayout(newOrder as SiteBlockKey[])}
-        className="space-y-1.5"
+        className="space-y-2"
       >
-        {layout.map((block) => {
-          // Surface the currently-active variant (if any) next to the block
-          // name so it's clear what the user is looking at. Variant is
-          // sourced from the block's config (e.g. `hero.variant`) via the
-          // registry lookup.
-          const currentVariantId = (() => {
-            if (block === 'hero') return config.hero?.variant;
-            const entry = config[block as keyof WebsiteConfig] as
-              | { variant?: string }
-              | undefined;
-            return entry?.variant;
-          })();
-          const currentVariant = findVariant(block, currentVariantId);
-          const canSwapVariant = hasVariants(block);
-          return (
-            <Reorder.Item
-              key={block}
-              value={block}
-              className="flex cursor-grab items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 active:cursor-grabbing active:shadow-md"
-            >
-              <GripVertical className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-              <div className="flex-1 min-w-0">
-                <span className="text-sm font-medium text-slate-900">
-                  {BLOCK_LABELS[block]}
-                </span>
-                {currentVariant ? (
-                  <span className="ml-2 text-[10px] font-medium text-slate-500">
-                    · {currentVariant.label}
-                  </span>
-                ) : null}
-              </div>
-              {canSwapVariant ? (
-                <button
-                  onClick={() => setPickerBlock(block)}
-                  title="Change variant"
-                  className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-[#1D9CA1]"
-                >
-                  <Layers className="h-3.5 w-3.5" />
-                </button>
-              ) : null}
-              {block !== 'nav' && block !== 'footer' && (
-                <button
-                  onClick={() => removeBlock(block)}
-                  className="rounded-lg p-1 text-slate-400 hover:bg-red-50 hover:text-red-500"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              )}
-            </Reorder.Item>
-          );
-        })}
+        {layout.map((block, i) => (
+          <SectionCard
+            key={block}
+            block={block}
+            index={i}
+            total={layout.length}
+            config={config}
+            images={images}
+            onOpenPicker={() => setPickerBlock(block)}
+            onRemove={() => removeBlock(block)}
+            onMoveUp={() => moveBlock(block, -1)}
+            onMoveDown={() => moveBlock(block, 1)}
+          />
+        ))}
       </Reorder.Group>
 
-      {available.length > 0 && (
-        <div>
-          <p className="mb-2 text-xs font-medium text-slate-500">Add section</p>
-          <div className="flex flex-wrap gap-1.5">
-            {available.map((block) => (
-              <button
-                key={block}
-                onClick={() => {
-                  // Variant-capable blocks open the picker so the user can
-                  // preview before committing. Blocks without variants add
-                  // immediately with their default layout.
-                  if (hasVariants(block)) {
-                    setPickerBlock(block);
-                  } else {
-                    addBlock(block);
-                  }
-                }}
-                className="flex items-center gap-1 rounded-lg border border-dashed border-slate-300 px-2.5 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:border-[#1D9CA1] hover:text-[#1D9CA1]"
-              >
-                <Plus className="h-3 w-3" />
-                {BLOCK_LABELS[block]}
-                {hasVariants(block) ? (
-                  <span className="ml-0.5 text-[9px] text-slate-400">
-                    {getVariantsFor(block).length} styles
-                  </span>
-                ) : null}
-              </button>
-            ))}
-          </div>
+      {/* Add section — grouped by job-to-be-done so local-business
+          agencies find what they need fast. */}
+      {available.length > 0 ? (
+        <AddSectionGallery
+          available={available}
+          onPick={(block) => {
+            // Variant-capable blocks open the picker so the user can
+            // preview before committing. Blocks without variants add
+            // immediately with their default layout.
+            if (hasVariants(block)) {
+              setPickerBlock(block);
+            } else {
+              addBlock(block);
+            }
+          }}
+        />
+      ) : (
+        <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 py-4 text-center text-[11px] text-slate-500">
+          Every available section is already on this page.
         </div>
       )}
 
       {/* Variant picker overlay — visible when the user clicks Add on a
-          variant-capable block or the Layers icon on an existing block.
+          variant-capable block or the paintbrush on an existing block.
           Shows a gallery of thumbnails + descriptions. Picking one adds
           the block if it wasn't already in the layout, or swaps the
           variant in place if it was. */}
@@ -967,6 +1538,9 @@ function SectionManager({
                 `${BLOCK_LABELS[pickerBlock]} style changed`,
                 findVariant(pickerBlock, variantId)?.label,
               );
+              // Scroll to the section that just changed so the user sees
+              // the new style in context.
+              window.setTimeout(() => scrollPreviewToSection(pickerBlock), 150);
             } else {
               // Not yet in layout — add it with the chosen variant.
               addBlock(pickerBlock, variantId);
@@ -975,6 +1549,351 @@ function SectionManager({
           }}
         />
       ) : null}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* SectionCard — one row per block in the Sections tab                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Visual row for a single block in the layout. Shows:
+ *   - colour-coded icon so the block type reads at a glance
+ *   - block name + sequence number (1/7, 2/7, ...)
+ *   - one-line "what this section does" copy so non-technical agencies
+ *     don't have to guess what "pricing tiers" means
+ *   - current variant badge (when applicable) so style changes are
+ *     visible without opening the picker
+ *   - inline content summary ("4 services", "needs content")
+ *   - compact row of action icons on the right: locate (scroll the
+ *     preview to this section), change style, move up/down, remove
+ *
+ * `nav` and `footer` can't be removed — the buttons simply disable.
+ * `index === 0` disables the move-up arrow; `index === total-1` disables
+ * move-down. The layout is pinned so nav stays first and footer stays
+ * last even when the user drag-reorders around them.
+ */
+function SectionCard({
+  block,
+  index,
+  total,
+  config,
+  images,
+  onOpenPicker,
+  onRemove,
+  onMoveUp,
+  onMoveDown,
+}: {
+  block: SiteBlockKey;
+  index: number;
+  total: number;
+  config: WebsiteConfig;
+  images: string[];
+  onOpenPicker: () => void;
+  onRemove: () => void;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+}) {
+  const meta = BLOCK_META[block];
+  const Icon = meta.icon;
+  const toneClasses = TONE_CLASSES[meta.tone];
+
+  // Explicit drag controls — only the grip handle starts a drag. This
+  // stops clicks on the action buttons (Eye, Palette, Trash, etc.) from
+  // accidentally initiating a reorder, which is a subtle but frustrating
+  // issue when `Reorder.Item` uses the whole row as the drag surface.
+  const dragControls = useDragControls();
+
+  const currentVariantId = (() => {
+    if (block === 'hero') return config.hero?.variant;
+    const entry = config[block as keyof WebsiteConfig] as
+      | { variant?: string }
+      | undefined;
+    return entry?.variant;
+  })();
+  const currentVariant = findVariant(block, currentVariantId);
+  const canSwapVariant = hasVariants(block);
+  const isRequired = !!meta.required;
+  const summary = blockContentSummary(config, block, images);
+  const canLocate = !!meta.anchorId;
+
+  // Move arrows are disabled when they'd push nav below a non-nav block
+  // or pull footer above one, since those two are layout-pinned.
+  const canMoveUp = !isRequired && index > 1; // index 0 is nav
+  const canMoveDown = !isRequired && index < total - 2; // last index is footer
+
+  return (
+    <Reorder.Item
+      value={block}
+      dragListener={false}
+      dragControls={dragControls}
+      className={`group relative flex items-stretch gap-0 overflow-hidden rounded-2xl border bg-white transition-shadow hover:shadow-sm ${
+        summary.tone === 'warn' ? 'border-amber-200' : 'border-slate-200'
+      }`}
+    >
+      {/* Tone bar — a coloured edge matching the block's tone. Gives the
+          section a visual "where does it sit?" cue. Strength is bumped
+          vs the icon chip so the edge reads at a quick scan. */}
+      <div className={`w-1 shrink-0 ${toneClasses.bar}`} aria-hidden />
+
+      <div className="flex flex-1 items-start gap-2.5 p-2.5">
+        {/* Grip — the dedicated drag handle. Only this surface initiates
+            drag; the rest of the row is clickable. Hidden on required
+            blocks (nav, footer) since they're pinned — trying to drag
+            them is a silent no-op which feels broken. */}
+        {!isRequired ? (
+          <button
+            type="button"
+            aria-label="Drag to reorder"
+            onPointerDown={(e) => {
+              // Ignore non-primary buttons to leave right-click free for
+              // the browser's context menu.
+              if (e.button !== 0 && e.pointerType === 'mouse') return;
+              dragControls.start(e);
+            }}
+            className="flex shrink-0 cursor-grab touch-none items-start pt-1 text-slate-300 active:cursor-grabbing group-hover:text-slate-500"
+          >
+            <GripVertical className="h-3.5 w-3.5" />
+          </button>
+        ) : (
+          // Spacer keeps the icon chip aligned with draggable rows.
+          <div className="w-3.5 shrink-0" aria-hidden />
+        )}
+
+        {/* Icon chip */}
+        <div
+          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${toneClasses.bg} ${toneClasses.text}`}
+        >
+          <Icon className="h-4 w-4" />
+        </div>
+
+        {/* Identity + summary */}
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[10px] font-bold tabular-nums text-slate-400">
+              {String(index + 1).padStart(2, '0')}
+            </span>
+            <span className="text-sm font-semibold text-slate-900">
+              {BLOCK_LABELS[block]}
+            </span>
+            {isRequired ? (
+              <span
+                className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-slate-500"
+                title="This section is always on"
+              >
+                Required
+              </span>
+            ) : null}
+            {currentVariant ? (
+              <span
+                className={`rounded-full px-1.5 py-0.5 text-[9px] font-semibold ${toneClasses.text} ${toneClasses.soft}`}
+                title={currentVariant.description}
+              >
+                {currentVariant.label}
+              </span>
+            ) : null}
+          </div>
+          <p className="mt-0.5 line-clamp-1 text-[11px] leading-snug text-slate-500">
+            {meta.purpose}
+          </p>
+          <p
+            className={`mt-1 inline-flex items-center gap-1 text-[10px] font-medium ${
+              summary.tone === 'warn'
+                ? 'text-amber-700'
+                : summary.tone === 'ok'
+                  ? 'text-emerald-700'
+                  : 'text-slate-500'
+            }`}
+          >
+            {summary.tone === 'warn' ? (
+              <AlertTriangle className="h-2.5 w-2.5" />
+            ) : summary.tone === 'ok' ? (
+              <Check className="h-2.5 w-2.5" />
+            ) : (
+              <Info className="h-2.5 w-2.5" />
+            )}
+            {summary.text}
+          </p>
+        </div>
+
+        {/* Action cluster — icon-only to keep the row compact, with
+            descriptive titles for screen readers and hover tooltips. */}
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <div className="flex items-center gap-0.5">
+            {canLocate ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  scrollPreviewToSection(block);
+                }}
+                title="Find this section in the preview"
+                className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-[#1D9CA1]"
+              >
+                <Eye className="h-3.5 w-3.5" />
+              </button>
+            ) : null}
+            {canSwapVariant ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpenPicker();
+                }}
+                title="Change the style of this section"
+                className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-[#1D9CA1]"
+              >
+                <Palette className="h-3.5 w-3.5" />
+              </button>
+            ) : null}
+            {!isRequired ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRemove();
+                }}
+                title="Remove this section"
+                className="rounded-md p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-500"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            ) : null}
+          </div>
+          <div className="flex items-center gap-0.5">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onMoveUp();
+              }}
+              disabled={!canMoveUp}
+              title="Move up"
+              className="rounded-md p-0.5 text-slate-300 hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-slate-300"
+            >
+              <ChevronUp className="h-3 w-3" />
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onMoveDown();
+              }}
+              disabled={!canMoveDown}
+              title="Move down"
+              className="rounded-md p-0.5 text-slate-300 hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-slate-300"
+            >
+              <ChevronDown className="h-3 w-3" />
+            </button>
+          </div>
+        </div>
+      </div>
+    </Reorder.Item>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* AddSectionGallery — grouped picker below the active layout          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Categorised gallery of sections the agency can add. Groups are
+ * curated for the target user (small-business agency) so the most
+ * common "I need X" options are always one click away. Unused groups
+ * collapse automatically — if everything in "Commerce" is already on
+ * the page, the whole group disappears.
+ */
+function AddSectionGallery({
+  available,
+  onPick,
+}: {
+  available: SiteBlockKey[];
+  onPick: (block: SiteBlockKey) => void;
+}) {
+  const availableSet = new Set(available);
+  // Blocks that didn't fit any named group end up in "Other" at the
+  // bottom so we never silently hide an addable option from the user.
+  const claimedIds = new Set<string>();
+  const groups = SECTION_GROUPS.map((g) => ({
+    ...g,
+    blocks: g.blocks.filter((b) => {
+      if (!availableSet.has(b)) return false;
+      claimedIds.add(b);
+      return true;
+    }),
+  })).filter((g) => g.blocks.length > 0);
+
+  const leftovers = available.filter((b) => !claimedIds.has(b));
+  if (leftovers.length > 0) {
+    groups.push({
+      id: 'other',
+      label: 'Other',
+      tagline: 'Uncategorised sections.',
+      blocks: leftovers,
+    });
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2 border-t border-slate-100 pt-3">
+        <Plus className="h-3.5 w-3.5 text-slate-400" />
+        <p className="text-xs font-semibold text-slate-700">Add a section</p>
+        <span className="text-[10px] text-slate-400">
+          {available.length} available
+        </span>
+      </div>
+      <div className="space-y-2.5">
+        {groups.map((group) => (
+          <div key={group.id}>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+              {group.label}
+            </p>
+            <p className="mb-1.5 text-[10px] text-slate-400">{group.tagline}</p>
+            <div className="grid grid-cols-2 gap-1.5">
+              {group.blocks.map((block) => {
+                const meta = BLOCK_META[block];
+                const Icon = meta.icon;
+                const toneClasses = TONE_CLASSES[meta.tone];
+                return (
+                  <button
+                    key={block}
+                    type="button"
+                    onClick={() => onPick(block)}
+                    className="group flex items-start gap-2 rounded-xl border border-slate-200 bg-white p-2 text-left transition-all hover:-translate-y-0.5 hover:border-[#1D9CA1]/60 hover:shadow-sm"
+                  >
+                    <div
+                      className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${toneClasses.bg} ${toneClasses.text}`}
+                    >
+                      <Icon className="h-3.5 w-3.5" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1">
+                        <span className="truncate text-[11px] font-semibold text-slate-900 group-hover:text-[#1D9CA1]">
+                          {BLOCK_LABELS[block]}
+                        </span>
+                        {hasVariants(block) ? (
+                          <span className="rounded bg-slate-100 px-1 py-[1px] text-[8px] font-semibold text-slate-500">
+                            {getVariantsFor(block).length}
+                          </span>
+                        ) : null}
+                      </div>
+                      <p className="line-clamp-2 text-[10px] leading-snug text-slate-500">
+                        {meta.purpose}
+                      </p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+      <p className="pt-1 text-[10px] text-slate-400">
+        <Lightbulb className="mr-0.5 inline h-3 w-3" />
+        Tip: sections with a number badge have style variants. Click the
+        paintbrush on any added section to swap its style anytime.
+      </p>
     </div>
   );
 }

@@ -110,16 +110,21 @@ function FeatureCard({ feature, index }: { feature: Feature; index: number }) {
   const cardRef = useRef<HTMLElement>(null);
 
   /*
-   * CSS-powered 3D tilt. Sets CSS custom properties on mousemove.
-   * The actual rotation is handled by a CSS transition on the element,
-   * which the browser composites on the GPU. No JS animation loop.
+   * CSS-powered 3D tilt + cursor-follow spotlight.
+   * Sets CSS custom properties on mousemove: --mx/--my (cursor position)
+   * drive a radial-gradient spotlight that tracks the cursor, and the
+   * transform itself handles the tilt. No JS animation loop.
    */
   const handleMouse = useCallback((e: React.MouseEvent<HTMLElement>) => {
     const el = cardRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
-    const px = (e.clientX - rect.left) / rect.width - 0.5;
-    const py = (e.clientY - rect.top) / rect.height - 0.5;
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const px = mx / rect.width - 0.5;
+    const py = my / rect.height - 0.5;
+    el.style.setProperty('--mx', `${mx}px`);
+    el.style.setProperty('--my', `${my}px`);
     el.style.transform = `perspective(800px) rotateX(${py * -8}deg) rotateY(${px * 8}deg)`;
   }, []);
 
@@ -142,6 +147,13 @@ function FeatureCard({ feature, index }: { feature: Feature; index: number }) {
     mix: 'radial-gradient(70% 60% at 30% 0%, rgba(29,156,161,0.18), transparent 60%), radial-gradient(60% 50% at 80% 100%, rgba(255,236,61,0.22), transparent 70%)',
   }[feature.accent];
 
+  const accentSolid = {
+    teal: '#1D9CA1',
+    green: '#48D886',
+    yellow: '#FFEC3D',
+    mix: '#48D886',
+  }[feature.accent];
+
   return (
     <motion.article
       ref={cardRef}
@@ -152,11 +164,25 @@ function FeatureCard({ feature, index }: { feature: Feature; index: number }) {
       onMouseMove={handleMouse}
       onMouseLeave={handleLeave}
       whileTap={{ scale: 0.97 }}
-      style={{ willChange: 'transform', transition: 'transform 0.15s ease-out' }}
+      style={{
+        willChange: 'transform',
+        transition: 'transform 0.15s ease-out',
+        ['--mx' as string]: '50%',
+        ['--my' as string]: '50%',
+      }}
       className={`group relative flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm hover:shadow-xl md:rounded-3xl ${
         feature.span === 'lg' ? 'col-span-2 md:col-span-2' : ''
       }`}
     >
+      {/* Cursor-follow spotlight: tracks mouse, uses accent color */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 z-[5] opacity-0 transition-opacity duration-300 group-hover:opacity-100"
+        style={{
+          background: `radial-gradient(300px circle at var(--mx) var(--my), ${accentSolid}22, transparent 60%)`,
+        }}
+      />
+
       {/* Accent bar, top edge */}
       <div
         aria-hidden

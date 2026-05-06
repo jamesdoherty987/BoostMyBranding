@@ -31,7 +31,7 @@ export function SiteVideo({ config }: SiteVideoProps) {
   if (!v?.url || source.kind === 'unknown') return null;
 
   return (
-    <SectionWrapper immediate={embedded} className="bg-white py-16 md:py-24">
+    <SectionWrapper immediate={embedded} id="video" className="bg-white py-16 md:py-24">
       <div className="mx-auto max-w-5xl px-4">
         {v.eyebrow || v.heading ? (
           <div className="mx-auto mb-8 max-w-2xl text-center">

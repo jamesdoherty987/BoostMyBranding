@@ -105,7 +105,7 @@ export function LaunchHero() {
           style={reduced ? undefined : { opacity: copyOpacity, y: copyY }}
         >
           <h1 className="mx-auto max-w-5xl text-balance text-[28px] font-bold leading-[1.05] tracking-tight text-slate-900 sm:text-5xl md:text-7xl lg:text-[92px] lg:leading-[0.95]">
-            Social media,
+            Boost your brand,
             <br />
             <span className="relative inline-block">
               <span
@@ -115,7 +115,7 @@ export function LaunchHero() {
                     'linear-gradient(90deg, #1D9CA1 0%, #48D886 50%, #FFEC3D 100%)',
                 }}
               >
-                handled beautifully.
+                watch it fly.
               </span>
               {!reduced ? (
                 <motion.span

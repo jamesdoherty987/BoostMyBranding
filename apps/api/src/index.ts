@@ -31,6 +31,7 @@ import { leadsRouter } from './routes/leads.js';
 import { videosRouter } from './routes/videos.js';
 import { canvaRouter } from './routes/canva.js';
 import { domainsRouter } from './routes/domains.js';
+import { inspirationRouter } from './routes/inspiration.js';
 import { startScheduler } from './services/scheduler.js';
 import { localUploadDir } from './services/r2.js';
 
@@ -126,6 +127,7 @@ app.use('/api/v1/leads', leadsRouter);
 app.use('/api/v1/videos', videosRouter);
 app.use('/api/v1/canva', canvaRouter);
 app.use('/api/v1/domains', domainsRouter);
+app.use('/api/v1/inspiration', inspirationRouter);
 
 app.use((_req, res) => {
   res.status(404).json({ error: { message: 'Route not found', code: 'NOT_FOUND' } });

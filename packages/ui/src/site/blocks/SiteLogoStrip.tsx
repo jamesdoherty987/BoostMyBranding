@@ -67,7 +67,7 @@ export function SiteLogoStrip({ config, images }: SiteLogoStripProps) {
   };
 
   return (
-    <SectionWrapper immediate={embedded} className="bg-white py-12 md:py-16">
+    <SectionWrapper immediate={embedded} id="logo-strip" className="bg-white py-12 md:py-16">
       <div className="mx-auto max-w-6xl px-4">
         {ls.eyebrow || ls.heading ? (
           <div className="mb-8 text-center">

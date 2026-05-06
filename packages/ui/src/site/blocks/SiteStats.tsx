@@ -30,7 +30,7 @@ export function SiteStats({ config }: SiteStatsProps) {
   const showHeading = Boolean(section?.eyebrow || section?.heading) || editMode;
 
   return (
-    <SectionWrapper immediate={embedded} className="bg-white py-16 md:py-20">
+    <SectionWrapper immediate={embedded} id="stats" className="bg-white py-16 md:py-20">
       <div className="mx-auto max-w-6xl px-4">
         {showHeading ? (
           <div className="mx-auto mb-8 max-w-2xl text-center">

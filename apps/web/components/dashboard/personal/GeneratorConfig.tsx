@@ -11,10 +11,10 @@
  *      auto-pick sensible defaults.
  */
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import useSWR from 'swr';
 import { Save, Sparkles, Info, Zap } from 'lucide-react';
-import { Button, Card, CardContent, Input, Textarea, Spinner, toast, Badge } from '@boost/ui';
+import { Button, Card, CardContent, Input, Textarea, Spinner, toast } from '@boost/ui';
 import type {
   PersonalAccount,
   PersonalAccountStyleBible,
@@ -527,7 +527,7 @@ function CustomAudioCard({
 }) {
   const [busy, setBusy] = useState(false);
   const [attribution, setAttribution] = useState(account.customAudioAttribution ?? '');
-  const inputRef = (typeof document !== 'undefined') ? { current: null } as { current: HTMLInputElement | null } : null;
+  const inputRef = useRef<HTMLInputElement | null>(null);
 
   async function upload(file: File) {
     setBusy(true);
@@ -558,13 +558,15 @@ function CustomAudioCard({
     if (!confirm('Remove the custom audio for this account?')) return;
     setBusy(true);
     try {
-      await api.updatePersonalAccount(account.id, {});
-      // Separate DELETE endpoint via direct fetch:
       const base = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000').replace(/\/$/, '');
-      await fetch(`${base}/api/v1/personal/accounts/${account.id}/audio`, {
+      const res = await fetch(`${base}/api/v1/personal/accounts/${account.id}/audio`, {
         method: 'DELETE',
         credentials: 'include',
       });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
+        throw new Error(body.error?.message ?? `Remove failed (${res.status})`);
+      }
       toast.success('Custom audio removed');
       onChanged();
     } catch (e) {
@@ -613,7 +615,7 @@ function CustomAudioCard({
             placeholder='e.g. "Song name · Artist — licensed"'
           />
           <input
-            ref={(r) => { if (inputRef) inputRef.current = r; }}
+            ref={inputRef}
             type="file"
             accept="audio/mpeg,audio/wav,audio/mp4,audio/m4a,audio/x-m4a"
             className="hidden"
@@ -626,7 +628,7 @@ function CustomAudioCard({
           <Button
             variant="secondary"
             disabled={busy}
-            onClick={() => inputRef?.current?.click()}
+            onClick={() => inputRef.current?.click()}
           >
             {busy ? <Spinner className="h-4 w-4" /> : <Save className="h-4 w-4" />}
             {account.customAudioUrl ? 'Replace audio' : 'Upload audio'}

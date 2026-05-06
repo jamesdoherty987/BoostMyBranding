@@ -14,8 +14,8 @@
  *   3. posts grid for that account
  */
 
-import { useEffect, useMemo, useState } from 'react';
-import useSWR, { mutate as swrMutate } from 'swr';
+import { useEffect, useState } from 'react';
+import useSWR from 'swr';
 import { motion } from 'framer-motion';
 import {
   Plus,
@@ -25,14 +25,8 @@ import {
   Pause,
   Trash2,
   Save,
-  RefreshCcw,
-  CheckCircle2,
-  Loader2,
   AlertTriangle,
   Clock,
-  Hash,
-  Copy,
-  ExternalLink,
   Music2,
   Mic,
   Eye,
@@ -52,7 +46,7 @@ import { CharacterStudio } from '@/components/dashboard/personal/CharacterStudio
 import { GeneratorConfigPanel } from '@/components/dashboard/personal/GeneratorConfig';
 
 const PLATFORMS: PersonalPlatform[] = [
-  'instagram', 'tiktok', 'facebook', 'x', 'linkedin', 'pinterest', 'bluesky',
+  'instagram', 'tiktok', 'facebook', 'youtube', 'x', 'linkedin', 'pinterest', 'bluesky', 'google_business',
 ];
 
 /* ═══════════════════════════════════════════════════════════════════ */
@@ -286,8 +280,11 @@ function CreateAccountForm({
                   <div className="text-sm font-semibold text-slate-900">{t.name}</div>
                   <div className="mt-0.5 text-[12px] text-slate-500">{t.tagline}</div>
                   <div className="mt-2 flex flex-wrap gap-1">
-                    {t.preferredPlatforms.slice(0, 3).map((p) => (
-                      <span key={p} className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600">
+                    {Array.from(new Set(t.preferredPlatforms)).slice(0, 3).map((p, i) => (
+                      <span
+                        key={`${t.id}-plat-${i}-${p}`}
+                        className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600"
+                      >
                         {p}
                       </span>
                     ))}

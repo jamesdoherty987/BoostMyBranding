@@ -532,9 +532,9 @@ function MediaCard({
             </div>
             {item.tags.length > 0 ? (
               <div className="mt-1 flex flex-wrap gap-1">
-                {item.tags.slice(0, 3).map((t) => (
+                {item.tags.slice(0, 3).map((t, ti) => (
                   <span
-                    key={t}
+                    key={`${item.id}-tag-${ti}-${t}`}
                     className="rounded-md bg-slate-100 px-1 py-0.5 text-[10px] text-slate-600"
                   >
                     {t}

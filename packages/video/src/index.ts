@@ -6,6 +6,9 @@
 export type { VideoProps, BrandPalette, MediaClip, VideoOptions } from './types';
 export { DEFAULT_BRAND, VIDEO_CONFIG, FONTS } from './types';
 
+export type { ViralShortExtras, PersonalBeat } from './templates/ViralShort';
+export type { SlideshowExtras, SlideshowBeat } from './templates/Slideshow';
+
 export type { TemplateDef, TemplateMeta } from './templates';
 export { TEMPLATES, getTemplate, listTemplates } from './templates';
 

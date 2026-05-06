@@ -1463,6 +1463,226 @@ export class BoostApi {
       body: JSON.stringify(args),
     });
   }
+
+  /* ─── Personal content automation ────────────────────────────── */
+
+  personalThemes() {
+    return this.request<PersonalThemeSummary[]>('/api/v1/personal/themes');
+  }
+
+  personalFeatures() {
+    return this.request<{
+      db: boolean;
+      claude: boolean;
+      contentStudio: boolean;
+      fal: boolean;
+      scrapers: {
+        pexels: boolean;
+        unsplash: boolean;
+        pixabay: boolean;
+        wikipedia: boolean;
+        googleNews: boolean;
+      };
+      voice: { elevenlabs: boolean; openai: boolean };
+    }>('/api/v1/personal/features');
+  }
+
+  listPersonalAccounts() {
+    return this.request<PersonalAccount[]>('/api/v1/personal/accounts');
+  }
+
+  getPersonalAccount(id: string) {
+    return this.request<PersonalAccount>(`/api/v1/personal/accounts/${id}`);
+  }
+
+  createPersonalAccount(body: CreatePersonalAccountBody) {
+    return this.request<PersonalAccount>('/api/v1/personal/accounts', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  updatePersonalAccount(id: string, patch: UpdatePersonalAccountBody) {
+    return this.request<PersonalAccount>(`/api/v1/personal/accounts/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    });
+  }
+
+  deletePersonalAccount(id: string) {
+    return this.request<{ ok: true }>(`/api/v1/personal/accounts/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  generatePersonalPost(
+    id: string,
+    args: { topic?: string; autoSchedule?: boolean; scheduledAt?: string; dryRun?: boolean } = {},
+  ) {
+    return this.request<{
+      kicked: boolean;
+      pending?: boolean;
+      postId?: string;
+      videoUrl?: string | null;
+      status?: string;
+      durationSeconds?: number;
+      costCents?: number;
+    }>(`/api/v1/personal/accounts/${id}/generate`, {
+      method: 'POST',
+      body: JSON.stringify(args),
+    });
+  }
+
+  listPersonalPosts(id: string) {
+    return this.request<PersonalPost[]>(`/api/v1/personal/accounts/${id}/posts`);
+  }
+
+  /* ─── Personal account media library ─────────────────────── */
+
+  listPersonalMedia(
+    accountId: string,
+    opts: { role?: string; characterId?: string } = {},
+  ) {
+    const q = new URLSearchParams();
+    if (opts.role) q.set('role', opts.role);
+    if (opts.characterId) q.set('characterId', opts.characterId);
+    const qs = q.toString();
+    return this.request<PersonalAccountMediaItem[]>(
+      `/api/v1/personal/accounts/${accountId}/media${qs ? `?${qs}` : ''}`,
+    );
+  }
+
+  uploadPersonalMedia(
+    accountId: string,
+    files: File[],
+    meta: {
+      role: string;
+      description?: string;
+      tags?: string[];
+      characterId?: string;
+      pinned?: boolean;
+    },
+    onProgress?: (pct: number) => void,
+  ): Promise<PersonalAccountMediaItem[]> {
+    const form = new FormData();
+    form.append('role', meta.role);
+    if (meta.description) form.append('description', meta.description);
+    if (meta.tags) form.append('tags', meta.tags.join(','));
+    if (meta.characterId) form.append('characterId', meta.characterId);
+    if (meta.pinned) form.append('pinned', 'true');
+    files.forEach((f) => form.append('files', f));
+
+    return new Promise<PersonalAccountMediaItem[]>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${this.config.baseUrl}/api/v1/personal/accounts/${accountId}/media`);
+      xhr.withCredentials = true;
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && onProgress)
+          onProgress(Math.min(99, Math.round((e.loaded / e.total) * 100)));
+      };
+      xhr.onload = () => {
+        try {
+          const payload = JSON.parse(xhr.responseText || '{}') as ApiResponse<
+            PersonalAccountMediaItem[]
+          >;
+          if (xhr.status >= 200 && xhr.status < 300 && !payload.error) {
+            onProgress?.(100);
+            resolve(payload.data ?? []);
+          } else {
+            reject(
+              new ApiError(
+                payload.error?.message ?? `Upload failed (${xhr.status})`,
+                xhr.status,
+                payload.error?.code,
+              ),
+            );
+          }
+        } catch (e) {
+          reject(new ApiError('Invalid server response', xhr.status));
+        }
+      };
+      xhr.onerror = () => reject(new ApiError('Network error', 0));
+      xhr.send(form);
+    });
+  }
+
+  updatePersonalMedia(
+    mediaId: string,
+    patch: Partial<{
+      description: string | null;
+      tags: string[];
+      role: string;
+      characterId: string | null;
+      isPinned: boolean;
+      isArchived: boolean;
+    }>,
+  ) {
+    return this.request<PersonalAccountMediaItem>(
+      `/api/v1/personal/media/${mediaId}`,
+      { method: 'PATCH', body: JSON.stringify(patch) },
+    );
+  }
+
+  deletePersonalMedia(mediaId: string) {
+    return this.request<{ ok: true }>(`/api/v1/personal/media/${mediaId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  /* ─── AI-influencer characters ───────────────────────────── */
+
+  listCharacters() {
+    return this.request<PersonalCharacter[]>('/api/v1/personal/characters');
+  }
+  getCharacter(id: string) {
+    return this.request<PersonalCharacter>(`/api/v1/personal/characters/${id}`);
+  }
+  createCharacter(body: {
+    name: string;
+    tagline?: string;
+    backstory?: string;
+    voiceId?: string;
+    locale?: string;
+  }) {
+    return this.request<PersonalCharacter>('/api/v1/personal/characters', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+  updateCharacter(
+    id: string,
+    patch: Partial<{
+      name: string;
+      tagline: string | null;
+      backstory: string | null;
+      promptFragment: string | null;
+      negativePrompt: string | null;
+      voiceId: string | null;
+      locale: string | null;
+    }>,
+  ) {
+    return this.request<PersonalCharacter>(`/api/v1/personal/characters/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    });
+  }
+  deleteCharacter(id: string) {
+    return this.request<{ ok: true }>(`/api/v1/personal/characters/${id}`, {
+      method: 'DELETE',
+    });
+  }
+  analyzeCharacter(id: string) {
+    return this.request<PersonalCharacter>(
+      `/api/v1/personal/characters/${id}/analyze`,
+      { method: 'POST', body: JSON.stringify({}) },
+    );
+  }
+
+  /* ─── AI model catalog ───────────────────────────────────── */
+
+  listPersonalModels() {
+    return this.request<PersonalAiModel[]>('/api/v1/personal/models');
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════════ */
@@ -1548,4 +1768,253 @@ export interface Product {
 
 export function createApi(baseUrl: string) {
   return new BoostApi({ baseUrl });
+}
+
+/* ═══════════════════════════════════════════════════════════════════ */
+/* Personal content automation types                                   */
+/* ═══════════════════════════════════════════════════════════════════ */
+
+export interface PersonalThemeSummary {
+  id: string;
+  name: string;
+  tagline: string;
+  description: string;
+  emoji: string;
+  accentColor: string;
+  viralityScore: number;
+  cpmTier: 'low' | 'medium' | 'high' | 'premium';
+  preferredPlatforms: string[];
+  template: string;
+  targetDurationSeconds: number;
+  defaultHashtags: string[];
+  useVoiceover: boolean;
+  useMusic: boolean;
+  mediaSources: string[];
+  topicSeedExamples: string[];
+}
+
+export type PersonalPlatform =
+  | 'instagram'
+  | 'facebook'
+  | 'linkedin'
+  | 'tiktok'
+  | 'x'
+  | 'pinterest'
+  | 'bluesky'
+  | 'youtube'
+  | 'google_business';
+
+export interface PersonalAccount {
+  id: string;
+  userId: string;
+  accountName: string;
+  platform: PersonalPlatform;
+  handle: string | null;
+  contentStudioWorkspaceId: string | null;
+  themeId: string;
+  themeName: string;
+  themeEmoji: string;
+  customDirection: string | null;
+  topicSeeds: string[];
+  topicBlacklist: string[];
+  language: string;
+  voiceId: string | null;
+  locale: string | null;
+  postsPerDay: number;
+  postingHourUtc: number;
+  postingMinuteUtc: number;
+  postSpacingMinutes: number;
+  autoApprove: boolean;
+  autoSchedule: boolean;
+  accentColor: string | null;
+  logoUrl: string | null;
+  watermarkHandle: string | null;
+  status: 'active' | 'paused' | 'archived';
+  lastGeneratedAt: string | null;
+  nextRunAt: string | null;
+  totalPosts: number;
+  styleBible: PersonalAccountStyleBible | null;
+  generatorConfig: PersonalGeneratorConfig | null;
+  characterId: string | null;
+  formatKind: 'video' | 'slideshow' | 'static_image';
+  customAudioUrl: string | null;
+  customAudioAttribution: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreatePersonalAccountBody {
+  accountName: string;
+  platform: PersonalPlatform;
+  themeId: string;
+  handle?: string;
+  contentStudioWorkspaceId?: string;
+  customDirection?: string;
+  topicSeeds?: string[];
+  topicBlacklist?: string[];
+  language?: string;
+  voiceId?: string;
+  locale?: string;
+  postsPerDay?: number;
+  postingHourUtc?: number;
+  postingMinuteUtc?: number;
+  postSpacingMinutes?: number;
+  autoApprove?: boolean;
+  autoSchedule?: boolean;
+  accentColor?: string;
+  logoUrl?: string;
+  watermarkHandle?: string;
+  characterId?: string | null;
+  styleBible?: PersonalAccountStyleBible;
+  generatorConfig?: PersonalGeneratorConfig;
+  formatKind?: 'video' | 'slideshow' | 'static_image';
+  customAudioUrl?: string | null;
+  customAudioAttribution?: string | null;
+}
+
+export type UpdatePersonalAccountBody = Partial<CreatePersonalAccountBody> & {
+  status?: 'active' | 'paused' | 'archived';
+};
+
+export interface PersonalPost {
+  id: string;
+  accountId: string;
+  templateId: string;
+  topic: string;
+  title: string;
+  hook: string;
+  videoUrl: string | null;
+  voiceoverUrl: string | null;
+  musicUrl: string | null;
+  caption: string | null;
+  hashtags: string[];
+  durationSeconds: number | null;
+  qualityScore: number | null;
+  status: string;
+  errorMessage: string | null;
+  scheduledAt: string | null;
+  publishedAt: string | null;
+  publishUrl: string | null;
+  mediaAssets: Array<{
+    url: string;
+    kind: 'image' | 'video';
+    source: string;
+    attribution?: string;
+    creditUrl?: string;
+  }>;
+  costCents: number;
+  createdAt: string;
+}
+
+/* ─── Account media library ──────────────────────────────── */
+
+export type PersonalMediaRole =
+  | 'style_reference'
+  | 'avatar_reference'
+  | 'brand_asset'
+  | 'broll'
+  | 'voice_sample'
+  | 'music'
+  | 'inspiration'
+  | 'location'
+  | 'product';
+
+export interface PersonalAccountMediaItem {
+  id: string;
+  accountId: string;
+  fileUrl: string;
+  fileName: string | null;
+  mimeType: string | null;
+  kind: string;
+  role: PersonalMediaRole;
+  description: string | null;
+  tags: string[];
+  aiDescription: string | null;
+  isPinned: boolean;
+  isArchived: boolean;
+  characterId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/* ─── AI influencer characters ───────────────────────────── */
+
+export interface PersonalCharacter {
+  id: string;
+  userId: string;
+  name: string;
+  tagline: string | null;
+  backstory: string | null;
+  characterSheet: Record<string, unknown> | null;
+  promptFragment: string | null;
+  negativePrompt: string | null;
+  voiceId: string | null;
+  locale: string | null;
+  status: 'draft' | 'analyzing' | 'ready' | 'failed';
+  error: string | null;
+  referenceImageCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/* ─── AI model catalog ───────────────────────────────────── */
+
+export interface PersonalAiModel {
+  id: string;
+  displayName: string;
+  provider: 'fal' | 'openai' | 'google' | 'runway' | 'replicate';
+  kind: 'image' | 'video';
+  qualityTier: 'max' | 'balanced' | 'budget';
+  supportsReference: boolean;
+  maxReferenceImages: number;
+  maxDurationSeconds?: number;
+  supportedAspectRatios: Array<'9:16' | '1:1' | '16:9' | '4:5'>;
+  pricePerUnitCents: number;
+  available: boolean;
+  notes: string;
+}
+
+/* ─── Extended account payload ───────────────────────────── */
+
+export interface PersonalAccountStyleBible {
+  vibe?: string;
+  dos?: string[];
+  donts?: string[];
+  palette?: string[];
+  typography?: string;
+  motifs?: string[];
+  copySamples?: string[];
+  bannedPhrases?: string[];
+}
+
+export interface PersonalGeneratorConfig {
+  imageModelId?: string;
+  videoModelId?: string;
+  ttsProvider?: 'elevenlabs' | 'openai' | 'cartesia' | 'none';
+  ttsVoiceId?: string;
+  useVoiceover?: boolean;
+  useMusic?: boolean;
+  useSubtitles?: boolean;
+  useAiVideo?: boolean;
+  useAiImages?: boolean;
+  useScrapedMedia?: boolean;
+  useCharacter?: boolean;
+  qualityTier?: 'max' | 'balanced' | 'budget';
+  aspectRatio?: '9:16' | '1:1' | '16:9' | '4:5';
+  clipMinSeconds?: number;
+  clipMaxSeconds?: number;
+  minQualityScore?: number;
+  allowWebResearch?: boolean;
+  scriptModel?: 'sonnet' | 'opus';
+  useDirector?: boolean;
+  colourGrade?:
+    | 'natural'
+    | 'warm'
+    | 'cool'
+    | 'teal_orange'
+    | 'film'
+    | 'bw'
+    | 'high_contrast';
+  letterbox?: boolean;
+  filmGrain?: boolean;
 }

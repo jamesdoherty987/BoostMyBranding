@@ -36,6 +36,7 @@ import { inspirationProfilesRouter } from './routes/inspirationProfiles.js';
 import { tonePairsRouter } from './routes/tonePairs.js';
 import { productsRouter } from './routes/products.js';
 import { talkingHeadRouter } from './routes/talkingHead.js';
+import { personalRouter } from './routes/personal.js';
 import { startScheduler } from './services/scheduler.js';
 import { localUploadDir } from './services/r2.js';
 
@@ -137,6 +138,7 @@ app.use('/api/v1/clients/:clientId/inspiration-profiles', inspirationProfilesRou
 app.use('/api/v1/clients/:clientId/tone-pairs', tonePairsRouter);
 app.use('/api/v1/clients/:clientId/products', productsRouter);
 app.use('/api/v1/talking-head', talkingHeadRouter);
+app.use('/api/v1/personal', personalRouter);
 
 app.use((_req, res) => {
   res.status(404).json({ error: { message: 'Route not found', code: 'NOT_FOUND' } });
@@ -160,6 +162,17 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
 const server = app.listen(env.API_PORT, () => {
   console.log(`🚀 BoostMyBranding API → http://localhost:${env.API_PORT}`);
   startScheduler();
+});
+
+// Dev-safety net: keep the server up when a background task (cron, fire-
+// and-forget, SSE heartbeat) rejects without a handler. In prod these
+// still get logged via the real error monitor; locally they used to kill
+// the process and force a turbo restart.
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err);
 });
 
 // Graceful shutdown so in-flight requests finish cleanly.

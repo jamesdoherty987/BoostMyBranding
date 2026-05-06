@@ -1,0 +1,653 @@
+/**
+ * Personal content automation — routes.
+ *
+ * Secret-ish surface for the authenticated user's own social accounts.
+ * Everything is scoped to `req.user.id` — users can only see and act on
+ * their own personal accounts and posts.
+ *
+ *   GET    /api/v1/personal/themes
+ *   GET    /api/v1/personal/accounts
+ *   POST   /api/v1/personal/accounts
+ *   GET    /api/v1/personal/accounts/:id
+ *   PATCH  /api/v1/personal/accounts/:id
+ *   DELETE /api/v1/personal/accounts/:id
+ *   POST   /api/v1/personal/accounts/:id/generate
+ *   GET    /api/v1/personal/accounts/:id/posts
+ *   GET    /api/v1/personal/features
+ */
+
+import { Router } from 'express';
+import multer from 'multer';
+import { z } from 'zod';
+import { requireAuth } from '../services/auth.js';
+import { listThemes, themeSummary, getTheme } from '../services/personalThemes.js';
+import {
+  createAccount,
+  listAccounts,
+  getAccount,
+  updateAccount,
+  deleteAccount,
+  listPosts,
+} from '../services/personalAccounts.js';
+import { generateForAccount } from '../services/personalPipeline.js';
+import { scraperFeatures } from '../services/personalScraper.js';
+import { voiceFeatures } from '../services/personalVoice.js';
+import {
+  listAiModels,
+  getAiModel,
+} from '../services/personalAiModels.js';
+import {
+  createCharacter,
+  listCharacters,
+  getCharacter,
+  updateCharacter,
+  deleteCharacter,
+  analyzeCharacterRefs,
+} from '../services/personalCharacters.js';
+import {
+  uploadAccountMedia,
+  listAccountMedia,
+  getAccountMedia,
+  updateAccountMedia,
+  deleteAccountMedia,
+} from '../services/personalAccountMedia.js';
+import { uploadLimiter } from '../middleware/rateLimit.js';
+import { features } from '../env.js';
+
+export const personalRouter = Router();
+
+const PLATFORMS = [
+  'instagram',
+  'facebook',
+  'linkedin',
+  'tiktok',
+  'x',
+  'pinterest',
+  'bluesky',
+] as const;
+
+/* ─── Themes ─────────────────────────────────────────────────────── */
+
+personalRouter.get('/themes', requireAuth, (_req, res) => {
+  res.json({ data: listThemes().map(themeSummary) });
+});
+
+/* ─── Features snapshot ─────────────────────────────────────────── */
+
+personalRouter.get('/features', requireAuth, (_req, res) => {
+  res.json({
+    data: {
+      db: features.db,
+      claude: features.claude,
+      contentStudio: features.contentStudio,
+      fal: features.fal,
+      scrapers: {
+        pexels: scraperFeatures.pexels,
+        unsplash: scraperFeatures.unsplash,
+        pixabay: scraperFeatures.pixabay,
+        wikipedia: scraperFeatures.wikipedia,
+        googleNews: scraperFeatures.googleNews,
+      },
+      voice: {
+        elevenlabs: voiceFeatures.elevenlabs,
+        openai: voiceFeatures.openai,
+      },
+    },
+  });
+});
+
+/* ─── Accounts CRUD ─────────────────────────────────────────────── */
+
+const createSchema = z.object({
+  accountName: z.string().min(1).max(200),
+  platform: z.enum(PLATFORMS),
+  themeId: z.string().min(1).max(100),
+  handle: z.string().max(100).optional(),
+  contentStudioWorkspaceId: z.string().max(200).optional(),
+  customDirection: z.string().max(2000).optional(),
+  topicSeeds: z.array(z.string().max(200)).max(50).optional(),
+  topicBlacklist: z.array(z.string().max(200)).max(50).optional(),
+  language: z.string().length(2).optional(),
+  voiceId: z.string().max(100).optional(),
+  locale: z.string().max(10).optional(),
+  postsPerDay: z.number().int().min(1).max(4).optional(),
+  postingHourUtc: z.number().int().min(0).max(23).optional(),
+  postingMinuteUtc: z.number().int().min(0).max(59).optional(),
+  postSpacingMinutes: z.number().int().min(30).max(720).optional(),
+  autoApprove: z.boolean().optional(),
+  autoSchedule: z.boolean().optional(),
+  accentColor: z.string().max(20).optional(),
+  logoUrl: z.string().url().max(1000).optional(),
+  watermarkHandle: z.string().max(100).optional(),
+  characterId: z.string().uuid().nullable().optional(),
+  formatKind: z.enum(['video', 'slideshow', 'static_image']).optional(),
+  customAudioUrl: z.string().url().max(1000).nullable().optional(),
+  customAudioAttribution: z.string().max(200).nullable().optional(),
+  styleBible: z
+    .object({
+      vibe: z.string().max(4000).optional(),
+      dos: z.array(z.string().max(200)).max(40).optional(),
+      donts: z.array(z.string().max(200)).max(40).optional(),
+      palette: z.array(z.string().max(20)).max(12).optional(),
+      typography: z.string().max(500).optional(),
+      motifs: z.array(z.string().max(200)).max(20).optional(),
+      copySamples: z.array(z.string().max(1000)).max(20).optional(),
+      bannedPhrases: z.array(z.string().max(200)).max(60).optional(),
+    })
+    .optional(),
+  generatorConfig: z
+    .object({
+      imageModelId: z.string().max(100).optional(),
+      videoModelId: z.string().max(100).optional(),
+      ttsProvider: z.enum(['elevenlabs', 'openai', 'cartesia', 'none']).optional(),
+      ttsVoiceId: z.string().max(100).optional(),
+      useVoiceover: z.boolean().optional(),
+      useMusic: z.boolean().optional(),
+      useSubtitles: z.boolean().optional(),
+      useAiVideo: z.boolean().optional(),
+      useAiImages: z.boolean().optional(),
+      useScrapedMedia: z.boolean().optional(),
+      useCharacter: z.boolean().optional(),
+      qualityTier: z.enum(['max', 'balanced', 'budget']).optional(),
+      aspectRatio: z.enum(['9:16', '1:1', '16:9', '4:5']).optional(),
+      clipMinSeconds: z.number().min(1).max(20).optional(),
+      clipMaxSeconds: z.number().min(1).max(30).optional(),
+      minQualityScore: z.number().min(0).max(100).optional(),
+      allowWebResearch: z.boolean().optional(),
+      scriptModel: z.enum(['sonnet', 'opus']).optional(),
+      useDirector: z.boolean().optional(),
+      colourGrade: z
+        .enum(['natural', 'warm', 'cool', 'teal_orange', 'film', 'bw', 'high_contrast'])
+        .optional(),
+      letterbox: z.boolean().optional(),
+      filmGrain: z.boolean().optional(),
+    })
+    .optional(),
+});
+
+personalRouter.post('/accounts', requireAuth, async (req, res, next) => {
+  try {
+    const user = (req as any).user as { id: string };
+    const body = createSchema.parse(req.body);
+    if (!getTheme(body.themeId)) {
+      return res
+        .status(400)
+        .json({ error: { message: 'Unknown theme', code: 'BAD_THEME' } });
+    }
+    const row = await createAccount({ userId: user.id, ...body });
+    res.status(201).json({ data: row });
+  } catch (e) {
+    next(e);
+  }
+});
+
+personalRouter.get('/accounts', requireAuth, async (req, res, next) => {
+  try {
+    const user = (req as any).user as { id: string };
+    res.json({ data: await listAccounts(user.id) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+personalRouter.get('/accounts/:id', requireAuth, async (req, res, next) => {
+  try {
+    const user = (req as any).user as { id: string };
+    const row = await getAccount(user.id, String(req.params.id));
+    if (!row) {
+      return res
+        .status(404)
+        .json({ error: { message: 'Not found', code: 'NOT_FOUND' } });
+    }
+    res.json({ data: row });
+  } catch (e) {
+    next(e);
+  }
+});
+
+const patchSchema = createSchema.partial().extend({
+  status: z.enum(['active', 'paused', 'archived']).optional(),
+});
+
+personalRouter.patch('/accounts/:id', requireAuth, async (req, res, next) => {
+  try {
+    const user = (req as any).user as { id: string };
+    const body = patchSchema.parse(req.body);
+    const row = await updateAccount(user.id, String(req.params.id), body);
+    if (!row) {
+      return res
+        .status(404)
+        .json({ error: { message: 'Not found', code: 'NOT_FOUND' } });
+    }
+    res.json({ data: row });
+  } catch (e) {
+    next(e);
+  }
+});
+
+personalRouter.delete('/accounts/:id', requireAuth, async (req, res, next) => {
+  try {
+    const user = (req as any).user as { id: string };
+    const ok = await deleteAccount(user.id, String(req.params.id));
+    if (!ok) {
+      return res
+        .status(404)
+        .json({ error: { message: 'Not found', code: 'NOT_FOUND' } });
+    }
+    res.json({ data: { ok: true } });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/* ─── Generate now ──────────────────────────────────────────────── */
+
+const generateSchema = z.object({
+  topic: z.string().max(500).optional(),
+  autoSchedule: z.boolean().optional(),
+  scheduledAt: z.string().datetime().optional(),
+  dryRun: z.boolean().optional(),
+});
+
+personalRouter.post('/accounts/:id/generate', requireAuth, async (req, res, next) => {
+  try {
+    const user = (req as any).user as { id: string };
+    const account = await getAccount(user.id, String(req.params.id));
+    if (!account) {
+      return res
+        .status(404)
+        .json({ error: { message: 'Not found', code: 'NOT_FOUND' } });
+    }
+    const body = generateSchema.parse(req.body ?? {});
+    // Do not await the full pipeline — it can take 60s+. Kick it off
+    // and return immediately with the post id so the UI can poll.
+    const promise = generateForAccount({
+      accountId: account.id,
+      topic: body.topic,
+      autoSchedule: body.autoSchedule,
+      scheduledAt: body.scheduledAt,
+      dryRun: body.dryRun,
+    });
+    // Pre-wait a short bit so we can catch synchronous failures (like
+    // "no theme") before returning — but don't block on the render.
+    const race = await Promise.race([
+      promise.then((r) => ({ ok: true as const, result: r })),
+      new Promise<{ ok: false; timedOut: true }>((resolve) =>
+        setTimeout(() => resolve({ ok: false, timedOut: true }), 1500),
+      ),
+    ]);
+    if (race && 'ok' in race && race.ok) {
+      res.json({ data: { ...race.result, kicked: true } });
+      return;
+    }
+    // Still running — swallow the rejection so we don't crash the
+    // process; the row's status will reflect failure and the UI polls.
+    promise.catch((e) =>
+      console.warn('[personal.generate] background failure:', (e as Error).message),
+    );
+    res.json({ data: { kicked: true, pending: true } });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/* ─── Posts ─────────────────────────────────────────────────────── */
+
+personalRouter.get('/accounts/:id/posts', requireAuth, async (req, res, next) => {
+  try {
+    const user = (req as any).user as { id: string };
+    const account = await getAccount(user.id, String(req.params.id));
+    if (!account) {
+      return res
+        .status(404)
+        .json({ error: { message: 'Not found', code: 'NOT_FOUND' } });
+    }
+    const posts = await listPosts(account.id);
+    res.json({ data: posts });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/* ═══════════════════════════════════════════════════════════════════ */
+/* Account media library                                                */
+/* ═══════════════════════════════════════════════════════════════════ */
+
+const MAX_MEDIA_BYTES = 50 * 1024 * 1024;
+const MEDIA_MIMES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/gif',
+  'video/mp4',
+  'video/quicktime',
+  'video/webm',
+  'audio/mpeg',
+  'audio/wav',
+  'audio/m4a',
+]);
+const mediaUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_MEDIA_BYTES, files: 10 },
+  fileFilter: (_req, file, cb) => {
+    if (MEDIA_MIMES.has(file.mimetype)) cb(null, true);
+    else cb(new Error(`Unsupported mime: ${file.mimetype}`));
+  },
+});
+
+const ROLES = [
+  'style_reference',
+  'avatar_reference',
+  'brand_asset',
+  'broll',
+  'voice_sample',
+  'music',
+  'inspiration',
+  'location',
+  'product',
+] as const;
+
+personalRouter.post(
+  '/accounts/:id/media',
+  requireAuth,
+  uploadLimiter,
+  mediaUpload.array('files', 10),
+  async (req, res, next) => {
+    try {
+      const user = (req as any).user as { id: string };
+      const files = (req.files as Express.Multer.File[]) ?? [];
+      if (files.length === 0) {
+        return res
+          .status(400)
+          .json({ error: { message: 'No files', code: 'NO_FILES' } });
+      }
+      const role = (req.body.role ?? 'inspiration') as (typeof ROLES)[number];
+      if (!ROLES.includes(role)) {
+        return res
+          .status(400)
+          .json({ error: { message: 'Unknown role', code: 'BAD_ROLE' } });
+      }
+      const description = String(req.body.description ?? '').slice(0, 4000) || undefined;
+      const tags = (req.body.tags ? String(req.body.tags).split(',') : [])
+        .map((s: string) => s.trim())
+        .filter(Boolean);
+      const characterId = req.body.characterId ? String(req.body.characterId) : undefined;
+      const pinned = req.body.pinned === 'true';
+
+      const results = [];
+      for (const file of files) {
+        const payload = await uploadAccountMedia({
+          userId: user.id,
+          accountId: String(req.params.id),
+          buffer: file.buffer,
+          fileName: file.originalname,
+          mimeType: file.mimetype,
+          role,
+          description,
+          tags,
+          characterId,
+          pinned,
+        });
+        results.push(payload);
+      }
+      res.status(201).json({ data: results });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+personalRouter.get('/accounts/:id/media', requireAuth, async (req, res, next) => {
+  try {
+    const user = (req as any).user as { id: string };
+    const role = req.query.role ? String(req.query.role) : undefined;
+    const characterId = req.query.characterId ? String(req.query.characterId) : undefined;
+    const items = await listAccountMedia(user.id, String(req.params.id), {
+      role: role as any,
+      characterId,
+    });
+    res.json({ data: items });
+  } catch (e) {
+    next(e);
+  }
+});
+
+const mediaPatchSchema = z.object({
+  description: z.string().max(4000).nullable().optional(),
+  tags: z.array(z.string().max(60)).max(40).optional(),
+  role: z.enum(ROLES).optional(),
+  characterId: z.string().uuid().nullable().optional(),
+  isPinned: z.boolean().optional(),
+  isArchived: z.boolean().optional(),
+});
+
+personalRouter.patch('/media/:mediaId', requireAuth, async (req, res, next) => {
+  try {
+    const user = (req as any).user as { id: string };
+    const body = mediaPatchSchema.parse(req.body);
+    const row = await updateAccountMedia(user.id, String(req.params.mediaId), body);
+    if (!row) {
+      return res
+        .status(404)
+        .json({ error: { message: 'Not found', code: 'NOT_FOUND' } });
+    }
+    res.json({ data: row });
+  } catch (e) {
+    next(e);
+  }
+});
+
+personalRouter.delete('/media/:mediaId', requireAuth, async (req, res, next) => {
+  try {
+    const user = (req as any).user as { id: string };
+    const ok = await deleteAccountMedia(user.id, String(req.params.mediaId));
+    if (!ok) {
+      return res
+        .status(404)
+        .json({ error: { message: 'Not found', code: 'NOT_FOUND' } });
+    }
+    res.json({ data: { ok: true } });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/* ═══════════════════════════════════════════════════════════════════ */
+/* Characters (AI influencers)                                          */
+/* ═══════════════════════════════════════════════════════════════════ */
+
+const characterCreateSchema = z.object({
+  name: z.string().min(1).max(120),
+  tagline: z.string().max(200).optional(),
+  backstory: z.string().max(4000).optional(),
+  voiceId: z.string().max(100).optional(),
+  locale: z.string().max(10).optional(),
+});
+
+personalRouter.post('/characters', requireAuth, async (req, res, next) => {
+  try {
+    const user = (req as any).user as { id: string };
+    const body = characterCreateSchema.parse(req.body);
+    const row = await createCharacter({ userId: user.id, ...body });
+    res.status(201).json({ data: row });
+  } catch (e) {
+    next(e);
+  }
+});
+
+personalRouter.get('/characters', requireAuth, async (req, res, next) => {
+  try {
+    const user = (req as any).user as { id: string };
+    res.json({ data: await listCharacters(user.id) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+personalRouter.get('/characters/:id', requireAuth, async (req, res, next) => {
+  try {
+    const user = (req as any).user as { id: string };
+    const row = await getCharacter(user.id, String(req.params.id));
+    if (!row)
+      return res.status(404).json({ error: { message: 'Not found', code: 'NOT_FOUND' } });
+    res.json({ data: row });
+  } catch (e) {
+    next(e);
+  }
+});
+
+const characterPatchSchema = z.object({
+  name: z.string().min(1).max(120).optional(),
+  tagline: z.string().max(200).nullable().optional(),
+  backstory: z.string().max(4000).nullable().optional(),
+  promptFragment: z.string().max(2000).nullable().optional(),
+  negativePrompt: z.string().max(1000).nullable().optional(),
+  voiceId: z.string().max(100).nullable().optional(),
+  locale: z.string().max(10).nullable().optional(),
+});
+
+personalRouter.patch('/characters/:id', requireAuth, async (req, res, next) => {
+  try {
+    const user = (req as any).user as { id: string };
+    const body = characterPatchSchema.parse(req.body);
+    const row = await updateCharacter(user.id, String(req.params.id), body);
+    if (!row)
+      return res.status(404).json({ error: { message: 'Not found', code: 'NOT_FOUND' } });
+    res.json({ data: row });
+  } catch (e) {
+    next(e);
+  }
+});
+
+personalRouter.delete('/characters/:id', requireAuth, async (req, res, next) => {
+  try {
+    const user = (req as any).user as { id: string };
+    const ok = await deleteCharacter(user.id, String(req.params.id));
+    if (!ok) return res.status(404).json({ error: { message: 'Not found', code: 'NOT_FOUND' } });
+    res.json({ data: { ok: true } });
+  } catch (e) {
+    next(e);
+  }
+});
+
+personalRouter.post('/characters/:id/analyze', requireAuth, async (req, res, next) => {
+  try {
+    const user = (req as any).user as { id: string };
+    const existing = await getCharacter(user.id, String(req.params.id));
+    if (!existing)
+      return res.status(404).json({ error: { message: 'Not found', code: 'NOT_FOUND' } });
+    const row = await analyzeCharacterRefs(existing.id);
+    res.json({ data: row });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/* ═══════════════════════════════════════════════════════════════════ */
+/* AI models catalog                                                    */
+/* ═══════════════════════════════════════════════════════════════════ */
+
+personalRouter.get('/models', requireAuth, (_req, res) => {
+  res.json({ data: listAiModels() });
+});
+
+personalRouter.get('/models/:id', requireAuth, (req, res) => {
+  const model = getAiModel(String(req.params.id));
+  if (!model)
+    return res.status(404).json({ error: { message: 'Not found', code: 'NOT_FOUND' } });
+  res.json({ data: model });
+});
+
+/* ═══════════════════════════════════════════════════════════════════ */
+/* Custom audio upload per account                                      */
+/* ═══════════════════════════════════════════════════════════════════ */
+
+const audioUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 25 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    const ok = ['audio/mpeg', 'audio/wav', 'audio/mp4', 'audio/m4a', 'audio/x-m4a'].includes(
+      file.mimetype,
+    );
+    if (ok) cb(null, true);
+    else cb(new Error('Audio must be mp3/wav/m4a'));
+  },
+});
+
+personalRouter.post(
+  '/accounts/:id/audio',
+  requireAuth,
+  uploadLimiter,
+  audioUpload.single('file'),
+  async (req, res, next) => {
+    try {
+      const user = (req as any).user as { id: string };
+      const account = await getAccount(user.id, String(req.params.id));
+      if (!account) {
+        return res
+          .status(404)
+          .json({ error: { message: 'Not found', code: 'NOT_FOUND' } });
+      }
+      const file = req.file;
+      if (!file) {
+        return res
+          .status(400)
+          .json({ error: { message: 'No file', code: 'NO_FILE' } });
+      }
+      // Reuse the r2 uploadFile helper via a small import.
+      const { uploadFile } = await import('../services/r2.js');
+      const { url } = await uploadFile(
+        `personal/${account.id}/audio`,
+        file.buffer,
+        file.originalname,
+        file.mimetype,
+      );
+      const attribution = String(req.body.attribution ?? '').slice(0, 200) || undefined;
+      const updated = await updateAccount(user.id, account.id, {
+        customAudioUrl: url,
+        customAudioAttribution: attribution ?? null,
+      });
+      res.json({ data: { url, account: updated } });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+personalRouter.delete('/accounts/:id/audio', requireAuth, async (req, res, next) => {
+  try {
+    const user = (req as any).user as { id: string };
+    const updated = await updateAccount(user.id, String(req.params.id), {
+      customAudioUrl: null,
+      customAudioAttribution: null,
+    });
+    if (!updated) {
+      return res
+        .status(404)
+        .json({ error: { message: 'Not found', code: 'NOT_FOUND' } });
+    }
+    res.json({ data: updated });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/* ═══════════════════════════════════════════════════════════════════ */
+/* ContentStudio connected accounts (read-only)                         */
+/* ═══════════════════════════════════════════════════════════════════ */
+
+personalRouter.get('/contentstudio/accounts', requireAuth, async (req, res, next) => {
+  try {
+    const { listConnectedAccounts } = await import('../services/contentStudio.js');
+    const workspaceId = req.query.workspaceId ? String(req.query.workspaceId) : undefined;
+    const accounts = await listConnectedAccounts(workspaceId);
+    res.json({
+      data: {
+        configured: Boolean(features.contentStudio),
+        accounts,
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+});

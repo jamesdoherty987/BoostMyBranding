@@ -12,7 +12,9 @@ export type Platform =
   | 'tiktok'
   | 'x'
   | 'pinterest'
-  | 'bluesky';
+  | 'bluesky'
+  | 'youtube'
+  | 'google_business';
 
 export type PostStatus =
   | 'draft'

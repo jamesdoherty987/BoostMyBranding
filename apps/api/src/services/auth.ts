@@ -266,12 +266,23 @@ export function getSessionToken(req: Request) {
 
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   const token = getSessionToken(req) ?? req.headers.authorization?.replace(/^Bearer /, '');
-  const user = await resolveSession(token);
-  if (!user) {
-    return res.status(401).json({ error: { message: 'Not signed in', code: 'UNAUTHORIZED' } });
+  try {
+    const user = await resolveSession(token);
+    if (!user) {
+      return res.status(401).json({ error: { message: 'Not signed in', code: 'UNAUTHORIZED' } });
+    }
+    (req as any).user = user;
+    next();
+  } catch (e) {
+    // A DB hiccup (Neon idle timeout, transient TLS ETIMEDOUT, etc.) used to
+    // bubble out and crash the whole process because async middleware
+    // rejections aren't caught by Express. Surface it as 503 instead so the
+    // server stays up and the client can retry.
+    console.warn('[auth] session lookup failed:', (e as Error).message);
+    return res
+      .status(503)
+      .json({ error: { message: 'Auth temporarily unavailable', code: 'AUTH_UNAVAILABLE' } });
   }
-  (req as any).user = user;
-  next();
 }
 
 export function requireRole(...roles: string[]) {

@@ -105,7 +105,11 @@ export async function generateVideo(args: GenerateVideoArgs): Promise<GenerateVi
       templateId: args.templateId,
       templateName: template.meta.name,
       durationSeconds: template.meta.durationFrames / 30,
-      fromMock: !features.r2,
+      // We always render a real MP4 here — either the local fallback served
+      // at /uploads or the uploaded R2 object. `fromMock` only makes sense
+      // for the personalized pipeline, which can degrade when Claude/Fal
+      // are missing. Hardcode to false so the dashboard shows the player.
+      fromMock: false,
     };
   } finally {
     // Clean up temp file

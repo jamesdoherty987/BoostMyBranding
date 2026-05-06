@@ -11,7 +11,7 @@
  */
 
 import cron from 'node-cron';
-import { and, eq, gte, isNull, lt } from 'drizzle-orm';
+import { and, eq, gte, isNull, lt, lte } from 'drizzle-orm';
 import {
   getDb,
   isDbConfigured,
@@ -20,6 +20,7 @@ import {
   clientImages,
   clients,
   contentBatches,
+  personalAccounts,
 } from '@boost/database';
 import { schedulePost } from './contentStudio.js';
 import { analyzeImage } from './claude.js';
@@ -28,6 +29,8 @@ import { imageAnalysisPrompt } from './prompts.js';
 import { runMonthlyGeneration } from './automation.js';
 import { notifyAgencyBatchReady } from './notifications.js';
 import { withRetry } from './retry.js';
+import { generateForAccount } from './personalPipeline.js';
+import { computeNextRunAt } from './personalAccounts.js';
 
 export function startScheduler() {
   if (!isDbConfigured()) {
@@ -38,8 +41,9 @@ export function startScheduler() {
   cron.schedule('* * * * *', () => { publishDue().catch((e) => console.error('[cron publishDue]', e)); }, { timezone: 'UTC' });
   cron.schedule('*/2 * * * *', () => { analyzePendingImages(10).catch((e) => console.error('[cron analyze]', e)); }, { timezone: 'UTC' });
   cron.schedule('0 9 1 * *', () => { generateMonthlyBatches().catch((e) => console.error('[cron monthly]', e)); }, { timezone: 'UTC' });
+  cron.schedule('*/5 * * * *', () => { runDuePersonalAccounts().catch((e) => console.error('[cron personal]', e)); }, { timezone: 'UTC' });
 
-  console.log('⏱  Scheduler started (publish=1m · analyze=2m · monthly=day-1 09:00)');
+  console.log('⏱  Scheduler started (publish=1m · analyze=2m · personal=5m · monthly=day-1 09:00)');
 }
 
 // ---------------------------------------------------------------------------
@@ -244,4 +248,124 @@ export async function generateMonthlyBatches() {
   }
 
   return { month, processed: results.length, results };
+}
+
+// ---------------------------------------------------------------------------
+// Personal content — iterate every due personal account and kick off a post
+//
+// Runs every 5 minutes. Selects active personal accounts whose `nextRunAt` is
+// in the past, generates a post for each (limited concurrency), then rolls
+// `nextRunAt` forward based on postsPerDay + postSpacingMinutes.
+//
+// One generation can take 30-120 seconds, so we process accounts in parallel
+// with a small cap so we don't stampede Remotion/Claude quotas.
+// ---------------------------------------------------------------------------
+
+export async function runDuePersonalAccounts(): Promise<{
+  processed: number;
+  results: Array<{ accountId: string; ok: boolean; postId?: string; error?: string }>;
+}> {
+  if (!isDbConfigured()) return { processed: 0, results: [] };
+  const db = getDb();
+  const [run] = await db
+    .insert(cronRuns)
+    .values({ jobName: 'personal_generate', status: 'running' })
+    .returning();
+
+  const now = new Date();
+  const due = await db
+    .select()
+    .from(personalAccounts)
+    .where(
+      and(
+        eq(personalAccounts.status, 'active'),
+        lte(personalAccounts.nextRunAt, now),
+      ),
+    )
+    .limit(8);
+
+  const results: Array<{
+    accountId: string;
+    ok: boolean;
+    postId?: string;
+    error?: string;
+  }> = [];
+
+  // Process with concurrency = 2 so we don't hit API rate limits.
+  const CONCURRENCY = 2;
+  for (let i = 0; i < due.length; i += CONCURRENCY) {
+    const batch = due.slice(i, i + CONCURRENCY);
+    const outs = await Promise.all(
+      batch.map(async (acc) => {
+        try {
+          const result = await generateForAccount({ accountId: acc.id });
+          // Roll nextRunAt forward.
+          const nextRun = rollNextRunAt(acc, new Date());
+          await db
+            .update(personalAccounts)
+            .set({ nextRunAt: nextRun, updatedAt: new Date() })
+            .where(eq(personalAccounts.id, acc.id));
+          return {
+            accountId: acc.id,
+            ok: true,
+            postId: result.postId,
+          };
+        } catch (e) {
+          // Still roll nextRunAt forward on failure so a broken account
+          // doesn't re-fire every 5 minutes. Delay by 1 hour.
+          const delayed = new Date(Date.now() + 60 * 60 * 1000);
+          await db
+            .update(personalAccounts)
+            .set({ nextRunAt: delayed, updatedAt: new Date() })
+            .where(eq(personalAccounts.id, acc.id));
+          return {
+            accountId: acc.id,
+            ok: false,
+            error: (e as Error).message,
+          };
+        }
+      }),
+    );
+    results.push(...outs);
+  }
+
+  if (run) {
+    await db
+      .update(cronRuns)
+      .set({
+        finishedAt: new Date(),
+        status: 'ok',
+        details: { processed: results.length, results },
+      })
+      .where(eq(cronRuns.id, run.id));
+  }
+
+  return { processed: results.length, results };
+}
+
+/**
+ * Compute the next run time based on postsPerDay / postSpacingMinutes.
+ * If we've already generated all daily posts, advance to tomorrow's
+ * posting window.
+ */
+function rollNextRunAt(
+  acc: typeof personalAccounts.$inferSelect,
+  now: Date,
+): Date {
+  const spacing = acc.postSpacingMinutes * 60 * 1000;
+  const next = new Date(now.getTime() + spacing);
+  // Clamp to tomorrow's posting window if past today's final slot.
+  const todayFirstSlot = new Date(now);
+  todayFirstSlot.setUTCHours(acc.postingHourUtc, acc.postingMinuteUtc, 0, 0);
+  const todayLastSlot = new Date(
+    todayFirstSlot.getTime() + (acc.postsPerDay - 1) * spacing,
+  );
+  if (next.getTime() > todayLastSlot.getTime()) {
+    return computeNextRunAt({
+      now: new Date(todayLastSlot.getTime() + 24 * 60 * 60 * 1000),
+      postingHourUtc: acc.postingHourUtc,
+      postingMinuteUtc: acc.postingMinuteUtc,
+    });
+  }
+  return next;
 }

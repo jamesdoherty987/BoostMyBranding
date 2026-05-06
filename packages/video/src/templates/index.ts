@@ -12,6 +12,18 @@ import {
   MEDIA_STORY_PRESETS,
   computeMediaStoryDuration,
 } from './MediaStory';
+import {
+  ViralShort,
+  ViralShortMeta,
+  VIRAL_SHORT_PRESETS,
+  computeViralShortDuration,
+} from './ViralShort';
+import {
+  Slideshow,
+  SlideshowMeta,
+  SLIDESHOW_PRESETS,
+  computeSlideshowDuration,
+} from './Slideshow';
 
 export interface TemplateMeta {
   id: string;
@@ -67,6 +79,16 @@ export const TEMPLATES: Record<string, TemplateDef> = {
     Component: MediaStory,
     computeDuration: computeMediaStoryDuration,
   },
+  'viral-short': {
+    meta: { ...ViralShortMeta, availablePresets: VIRAL_SHORT_PRESETS },
+    Component: ViralShort,
+    computeDuration: computeViralShortDuration,
+  },
+  'slideshow': {
+    meta: { ...SlideshowMeta, availablePresets: SLIDESHOW_PRESETS },
+    Component: Slideshow,
+    computeDuration: computeSlideshowDuration,
+  },
 };
 
 export function getTemplate(id: string): TemplateDef | undefined {
@@ -92,4 +114,4 @@ export function getTemplatePreset(
   return preset ?? null;
 }
 
-export { LiquidBlob, ProductShowcase, Aurora, GlitchArt, HoloFoil, MediaStory };
+export { LiquidBlob, ProductShowcase, Aurora, GlitchArt, HoloFoil, MediaStory, ViralShort, Slideshow };

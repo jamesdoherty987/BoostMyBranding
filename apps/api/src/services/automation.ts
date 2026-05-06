@@ -32,6 +32,9 @@ import { notifyAgencyBatchReady } from './notifications.js';
 import { withRetry } from './retry.js';
 import { broadcast } from './realtime.js';
 import { buildBrandContext, brandContextToFactsBlock, brandContextToImageStyle } from './brandContext.js';
+import { profilesToPromptBlock } from './inspirationProfiles.js';
+import { tonePairsToPromptBlock } from './tonePairs.js';
+import type { BrandContext } from './brandContext.js';
 
 interface GenerateArgs {
   clientId: string;
@@ -194,7 +197,14 @@ export async function runMonthlyGeneration(args: GenerateArgs) {
   // 5. Generate the calendar
   const platforms = args.platforms ?? ['instagram', 'facebook', 'linkedin', 'tiktok'];
   const ctx = await buildBrandContext(client.id);
+  // `knownFacts` includes products, past hashtags, contact, etc.
+  // `brandVoiceBlock` layers on the free-text voice guide + tone-pair
+  // few-shots + inspiration-profile style. Feeding both lets Claude
+  // use structured facts AND structured voice guidance in one pass.
   const knownFacts = ctx ? brandContextToFactsBlock(ctx) : buildKnownFactsBlock(client);
+  const brandVoiceBlock = ctx
+    ? buildVoiceBlockFromContext(ctx, brandVoice)
+    : brandVoice || 'Plain, factual, no embellishment.';
   const calendar = await stage('generate_calendar', async () => {
     const imageDescs = enhancedImages
       .map((i, idx) => `[${idx}] ${i.aiDescription ?? i.fileName ?? 'photo'}`)
@@ -203,7 +213,7 @@ export async function runMonthlyGeneration(args: GenerateArgs) {
     const prompt = contentCalendarPrompt({
       businessName: client.businessName,
       industry: client.industry ?? 'Local Business',
-      brandVoice: brandVoice || 'Plain, factual, no embellishment.',
+      brandVoice: brandVoiceBlock,
       imageDescriptions: imageDescs,
       knownFacts,
       month: monthName(Number(mm)),
@@ -251,7 +261,12 @@ export async function runMonthlyGeneration(args: GenerateArgs) {
   const costCents = await stage('persist_posts', async () => {
     const [year, mm] = args.month.split('-').map(Number) as [number, number];
     const { runQualityGate } = await import('./qualityGate.js');
-    const gateBrandVoice = brandVoice || 'Plain and factual, no embellishment.';
+    // Reuse the enriched voice block built for generation so the quality
+    // gate checks posts against the SAME voice guidance Claude was given
+    // to write them — avoids the gate rejecting on-brand posts written
+    // with tone-pair guidance because the gate only knew the free-text
+    // voice guide.
+    const gateBrandVoice = brandVoiceBlock;
 
     for (const cp of kept) {
       const chosen = enhancedImages[cp.imageIndex!]!;
@@ -409,6 +424,40 @@ function buildKnownFactsBlock(client: typeof clients.$inferSelect): string {
   return lines.join('\n');
 }
 
+/**
+ * Layer the brand-voice guide with structured extras from the brand
+ * context. This is what Claude actually uses to calibrate tone:
+ *
+ *   1. Free-text voice guide (client.brandVoice) — the big-picture
+ *      description, if the agency wrote one.
+ *   2. Tone-of-voice pairs — concrete good/bad examples. Few-shot
+ *      examples are more steering signal than any prose description.
+ *   3. Inspiration profiles — style notes from brands the client
+ *      admires (with trademark safety guardrails already baked in).
+ *
+ * Industry research finds ~5 good/bad pairs produces the most
+ * consistent brand-voice output, so we let the caller decide which
+ * category of pairs to include but cap at 8 here.
+ */
+function buildVoiceBlockFromContext(ctx: BrandContext, freeTextGuide: string): string {
+  const sections: string[] = [];
+
+  const guide = (ctx.brandVoiceGuide ?? freeTextGuide).trim();
+  if (guide) {
+    sections.push(`VOICE GUIDE:\n${guide.slice(0, 2000)}`);
+  } else {
+    sections.push('VOICE GUIDE: plain, factual, no embellishment.');
+  }
+
+  const pairBlock = tonePairsToPromptBlock(ctx.tonePairs, { max: 8 });
+  if (pairBlock) sections.push(pairBlock);
+
+  const profileBlock = profilesToPromptBlock(ctx.inspirationProfiles);
+  if (profileBlock) sections.push(profileBlock);
+
+  return sections.join('\n\n');
+}
+
 function runMockPipeline(args: GenerateArgs) {
   const steps = [
     'scrape_site',
@@ -493,11 +542,14 @@ export async function regenerateSinglePost(args: {
 
   const brandCtx = await buildBrandContext(client.id);
   const knownFacts = brandCtx ? brandContextToFactsBlock(brandCtx) : buildKnownFactsBlock(client);
+  const brandVoiceForRegen = brandCtx
+    ? buildVoiceBlockFromContext(brandCtx, client.brandVoice ?? '')
+    : client.brandVoice ?? 'Plain and factual, no embellishment.';
   const { regeneratePostPrompt } = await import('./prompts.js');
   const prompt = regeneratePostPrompt({
     businessName: client.businessName,
     industry: client.industry ?? 'Local Business',
-    brandVoice: client.brandVoice ?? 'Plain and factual, no embellishment.',
+    brandVoice: brandVoiceForRegen,
     currentCaption: post.caption,
     currentHashtags: (post.hashtags as string[]) ?? [],
     platform: post.platform,

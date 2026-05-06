@@ -250,6 +250,39 @@ export const MODEL_CATALOG: ModelOption[] = [
     available: false, // requires Vertex AI credentials — not wired in this app yet
     notes: 'Highest realism + native audio. Requires Vertex AI credentials.',
   },
+  // ── TALKING-HEAD / AI UGC ─────────────────────────────────────────
+  {
+    id: 'veed-avatar-text',
+    displayName: 'Veed Avatars (Talking Head)',
+    provider: 'fal',
+    endpoint: 'veed/avatars/text-to-video',
+    mediaType: 'video',
+    supportsReference: false,
+    maxReferenceCount: 0,
+    maxDurationSeconds: 90,
+    pricePerUnitCents: 30,
+    unit: 'second',
+    recommendation: null,
+    supportedAspectRatios: ['9:16', '1:1', '16:9'],
+    available: features.fal,
+    notes: 'Pre-built avatar reads your script to camera — perfect for TikTok/Reels UGC.',
+  },
+  {
+    id: 'veed-lipsync',
+    displayName: 'Veed Lipsync (Your Own Video)',
+    provider: 'fal',
+    endpoint: 'veed/lipsync',
+    mediaType: 'video',
+    supportsReference: true,
+    maxReferenceCount: 1,
+    maxDurationSeconds: 60,
+    pricePerUnitCents: 25,
+    unit: 'second',
+    recommendation: null,
+    supportedAspectRatios: ['9:16', '1:1', '16:9'],
+    available: features.fal,
+    notes: 'Upload your own on-camera footage; the model re-lipsyncs it to new audio. Use for real-person UGC.',
+  },
 ];
 
 /**
@@ -283,6 +316,8 @@ export function snapVideoDuration(requested: number, model: ModelOption): number
   if (model.id.startsWith('kling-')) return clamped >= 8 ? 10 : 5;
   if (model.id === 'hailuo-02-standard') return 6; // only discrete option ≤ 6s
   if (model.id === 'stable-video') return Math.min(4, clamped);
+  // Avatar models bill per second of output; any integer in [5, 90] works.
+  if (model.id.startsWith('veed-')) return Math.max(5, Math.min(90, clamped));
   return clamped;
 }
 

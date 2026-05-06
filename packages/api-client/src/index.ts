@@ -188,6 +188,9 @@ export class BoostApi {
         aiDescription?: string | null;
         qualityScore?: number | null;
       }>;
+      inspirationProfiles?: InspirationProfile[];
+      tonePairs?: TonePair[];
+      products?: Product[];
       completeness: {
         hasVoice: boolean;
         hasPalette: boolean;
@@ -196,6 +199,9 @@ export class BoostApi {
         hasServices: boolean;
         hasTeam: boolean;
         hasMedia: boolean;
+        hasInspiration?: boolean;
+        hasTonePairs?: boolean;
+        hasProducts?: boolean;
         score: number;
       };
     }>(`/api/v1/clients/${id}/brand-context`);
@@ -1103,6 +1109,7 @@ export class BoostApi {
     videoAspectRatio?: '9:16' | '1:1' | '16:9';
     videoDurationSeconds?: number;
     useInspirationAsVideoSeed?: boolean;
+    inspirationProfileIds?: string[];
   }) {
     return this.request<{
       analysis: {
@@ -1133,6 +1140,365 @@ export class BoostApi {
       body: JSON.stringify(args),
     });
   }
+
+  /* ─── Inspiration profiles (brand intelligence) ──────────────── */
+
+  listInspirationProfiles(clientId: string) {
+    return this.request<InspirationProfile[]>(
+      `/api/v1/clients/${clientId}/inspiration-profiles`,
+    );
+  }
+
+  createInspirationProfile(
+    clientId: string,
+    body: { name: string; referenceUrl?: string; description?: string },
+  ) {
+    return this.request<InspirationProfile>(
+      `/api/v1/clients/${clientId}/inspiration-profiles`,
+      { method: 'POST', body: JSON.stringify(body) },
+    );
+  }
+
+  updateInspirationProfile(
+    clientId: string,
+    profileId: string,
+    patch: {
+      name?: string;
+      description?: string;
+      referenceUrl?: string | null;
+      isEnabled?: boolean;
+    },
+  ) {
+    return this.request<InspirationProfile>(
+      `/api/v1/clients/${clientId}/inspiration-profiles/${profileId}`,
+      { method: 'PATCH', body: JSON.stringify(patch) },
+    );
+  }
+
+  deleteInspirationProfile(clientId: string, profileId: string) {
+    return this.request<{ ok: true }>(
+      `/api/v1/clients/${clientId}/inspiration-profiles/${profileId}`,
+      { method: 'DELETE' },
+    );
+  }
+
+  /**
+   * Kick off a scrape of the profile's reference URL. Synchronous —
+   * the response carries the fully populated profile when done, or a
+   * `failed` status with `scrapeError` when something went wrong.
+   */
+  scrapeInspirationProfile(clientId: string, profileId: string) {
+    return this.request<InspirationProfile>(
+      `/api/v1/clients/${clientId}/inspiration-profiles/${profileId}/scrape`,
+      { method: 'POST' },
+    );
+  }
+
+  /** Upload one or more reference files to a profile. */
+  uploadInspirationProfileMedia(
+    clientId: string,
+    profileId: string,
+    files: File[],
+  ): Promise<Array<{ id: string; url: string; mimeType: string; fileName: string }>> {
+    const form = new FormData();
+    for (const f of files) form.append('files', f);
+    return fetch(
+      `${this.config.baseUrl}/api/v1/clients/${clientId}/inspiration-profiles/${profileId}/media`,
+      { method: 'POST', body: form, credentials: 'include' },
+    )
+      .then(async (res) => {
+        const payload = (await res.json().catch(() => ({}))) as ApiResponse<any>;
+        if (!res.ok || payload.error) {
+          throw new ApiError(
+            payload.error?.message ?? `Upload failed (${res.status})`,
+            res.status,
+            payload.error?.code,
+          );
+        }
+        return payload.data;
+      });
+  }
+
+  deleteInspirationProfileMedia(
+    clientId: string,
+    profileId: string,
+    mediaId: string,
+  ) {
+    return this.request<{ ok: true }>(
+      `/api/v1/clients/${clientId}/inspiration-profiles/${profileId}/media/${mediaId}`,
+      { method: 'DELETE' },
+    );
+  }
+
+  /* ─── Tone-of-voice pairs ───────────────────────────────────── */
+
+  listTonePairs(clientId: string) {
+    return this.request<TonePair[]>(`/api/v1/clients/${clientId}/tone-pairs`);
+  }
+
+  createTonePair(
+    clientId: string,
+    body: {
+      category?: string;
+      goodExample: string;
+      badExample?: string;
+      explanation?: string;
+    },
+  ) {
+    return this.request<TonePair>(`/api/v1/clients/${clientId}/tone-pairs`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  updateTonePair(
+    clientId: string,
+    pairId: string,
+    patch: {
+      category?: string | null;
+      goodExample?: string;
+      badExample?: string | null;
+      explanation?: string | null;
+      isEnabled?: boolean;
+    },
+  ) {
+    return this.request<TonePair>(
+      `/api/v1/clients/${clientId}/tone-pairs/${pairId}`,
+      { method: 'PATCH', body: JSON.stringify(patch) },
+    );
+  }
+
+  deleteTonePair(clientId: string, pairId: string) {
+    return this.request<{ ok: true }>(
+      `/api/v1/clients/${clientId}/tone-pairs/${pairId}`,
+      { method: 'DELETE' },
+    );
+  }
+
+  /* ─── Products ──────────────────────────────────────────────── */
+
+  listProducts(clientId: string, status?: 'draft' | 'active' | 'archived') {
+    const qs = status ? `?status=${encodeURIComponent(status)}` : '';
+    return this.request<Product[]>(`/api/v1/clients/${clientId}/products${qs}`);
+  }
+
+  createProduct(
+    clientId: string,
+    body: {
+      name: string;
+      description?: string;
+      sku?: string;
+      priceCents?: number;
+      currency?: string;
+      tags?: string[];
+      status?: 'draft' | 'active' | 'archived';
+      primaryImageUrl?: string;
+      metadata?: Record<string, unknown>;
+    },
+  ) {
+    return this.request<Product>(`/api/v1/clients/${clientId}/products`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  updateProduct(
+    clientId: string,
+    productId: string,
+    patch: Partial<{
+      name: string;
+      description: string | null;
+      sku: string | null;
+      priceCents: number | null;
+      currency: string;
+      tags: string[];
+      status: 'draft' | 'active' | 'archived';
+      primaryImageUrl: string | null;
+      metadata: Record<string, unknown> | null;
+    }>,
+  ) {
+    return this.request<Product>(
+      `/api/v1/clients/${clientId}/products/${productId}`,
+      { method: 'PATCH', body: JSON.stringify(patch) },
+    );
+  }
+
+  deleteProduct(clientId: string, productId: string) {
+    return this.request<{ ok: true }>(
+      `/api/v1/clients/${clientId}/products/${productId}`,
+      { method: 'DELETE' },
+    );
+  }
+
+  linkMediaToProduct(clientId: string, productId: string, imageId: string) {
+    return this.request<{ ok: true }>(
+      `/api/v1/clients/${clientId}/products/${productId}/media/${imageId}`,
+      { method: 'POST' },
+    );
+  }
+
+  unlinkMediaFromProduct(clientId: string, productId: string, imageId: string) {
+    return this.request<{ ok: true }>(
+      `/api/v1/clients/${clientId}/products/${productId}/media/${imageId}`,
+      { method: 'DELETE' },
+    );
+  }
+
+  /* ─── Talking-head video ────────────────────────────────────── */
+
+  talkingHeadOptions() {
+    return this.request<{
+      avatars: Array<{
+        id: string;
+        displayName: string;
+        gender: string;
+        ageRange: string;
+        vibe: string;
+        aspectRatio: '9:16' | '16:9';
+        thumbnailUrl?: string;
+      }>;
+      voices: Array<{
+        id: string;
+        displayName: string;
+        gender: string;
+        accent: string;
+      }>;
+      models: Array<{
+        id: string;
+        displayName: string;
+        pricePerSecondCents: number;
+        maxDurationSeconds?: number;
+        supportedAspectRatios: string[];
+        available: boolean;
+        notes?: string;
+      }>;
+    }>('/api/v1/talking-head/options');
+  }
+
+  generateTalkingHeadScript(args: {
+    clientId: string;
+    brief: string;
+    platform?: 'tiktok' | 'instagram_reels' | 'youtube_shorts' | 'generic';
+    durationSeconds?: number;
+    productId?: string;
+    inspirationProfileIds?: string[];
+  }) {
+    return this.request<{
+      script: string;
+      estimatedDurationSeconds: number;
+      fromMock: boolean;
+    }>('/api/v1/talking-head/script', {
+      method: 'POST',
+      body: JSON.stringify(args),
+    });
+  }
+
+  renderTalkingHead(args: {
+    clientId: string;
+    modelId: string;
+    avatarId: string;
+    voiceId?: string;
+    script: string;
+    aspectRatio?: '9:16' | '1:1' | '16:9';
+    backgroundUrl?: string;
+    persist?: boolean;
+  }) {
+    return this.request<{
+      assetId: string | null;
+      videoUrl: string;
+      durationSeconds: number;
+      modelId: string;
+      modelDisplayName: string;
+      avatarId: string;
+      voiceId: string | null;
+      costCents: number;
+      fromMock: boolean;
+    }>('/api/v1/talking-head/render', {
+      method: 'POST',
+      body: JSON.stringify(args),
+    });
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════ */
+/* Brand-intelligence type exports                                      */
+/* ═══════════════════════════════════════════════════════════════════ */
+
+export interface VisualAnalysis {
+  style: string;
+  mood: string;
+  composition: string;
+  typographyNotes: string;
+  visualMotifs: string[];
+}
+
+export interface CopyVoice {
+  toneDescriptors: string[];
+  sentenceShape: string;
+  vocabulary: string[];
+  thingsToDo: string[];
+  thingsToAvoid: string[];
+}
+
+export interface InspirationProfile {
+  id: string;
+  clientId: string;
+  name: string;
+  referenceUrl: string | null;
+  logoUrl: string | null;
+  description: string | null;
+  isEnabled: boolean;
+  visualAnalysis: VisualAnalysis | null;
+  copyVoice: CopyVoice | null;
+  colorPalette: string[] | null;
+  copySamples: string[] | null;
+  status: 'idle' | 'scraping' | 'ready' | 'failed';
+  scrapeError: string | null;
+  lastScrapedAt: string | null;
+  media: Array<{
+    id: string;
+    fileUrl: string;
+    fileName: string | null;
+    mimeType: string | null;
+    source: string;
+    aiDescription: string | null;
+  }>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TonePair {
+  id: string;
+  clientId: string;
+  category: string | null;
+  goodExample: string;
+  badExample: string | null;
+  explanation: string | null;
+  isEnabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Product {
+  id: string;
+  clientId: string;
+  name: string;
+  description: string | null;
+  sku: string | null;
+  priceCents: number | null;
+  currency: string | null;
+  primaryImageUrl: string | null;
+  tags: string[];
+  status: 'draft' | 'active' | 'archived';
+  metadata: Record<string, unknown> | null;
+  media: Array<{
+    id: string;
+    fileUrl: string;
+    mimeType: string | null;
+    status: string;
+  }>;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export function createApi(baseUrl: string) {

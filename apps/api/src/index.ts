@@ -32,6 +32,10 @@ import { videosRouter } from './routes/videos.js';
 import { canvaRouter } from './routes/canva.js';
 import { domainsRouter } from './routes/domains.js';
 import { inspirationRouter } from './routes/inspiration.js';
+import { inspirationProfilesRouter } from './routes/inspirationProfiles.js';
+import { tonePairsRouter } from './routes/tonePairs.js';
+import { productsRouter } from './routes/products.js';
+import { talkingHeadRouter } from './routes/talkingHead.js';
 import { startScheduler } from './services/scheduler.js';
 import { localUploadDir } from './services/r2.js';
 
@@ -128,6 +132,11 @@ app.use('/api/v1/videos', videosRouter);
 app.use('/api/v1/canva', canvaRouter);
 app.use('/api/v1/domains', domainsRouter);
 app.use('/api/v1/inspiration', inspirationRouter);
+// Nested brand-intel routes scoped per client.
+app.use('/api/v1/clients/:clientId/inspiration-profiles', inspirationProfilesRouter);
+app.use('/api/v1/clients/:clientId/tone-pairs', tonePairsRouter);
+app.use('/api/v1/clients/:clientId/products', productsRouter);
+app.use('/api/v1/talking-head', talkingHeadRouter);
 
 app.use((_req, res) => {
   res.status(404).json({ error: { message: 'Route not found', code: 'NOT_FOUND' } });

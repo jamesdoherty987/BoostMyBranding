@@ -26,20 +26,26 @@ import {
   Sparkles,
   LayoutGrid,
   Loader2,
+  Target,
+  Mic,
 } from 'lucide-react';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { MediaLibrary } from '@/components/dashboard/content-hub/MediaLibrary';
 import { PostsPanel } from '@/components/dashboard/content-hub/PostsPanel';
 import { VideosPanel } from '@/components/dashboard/content-hub/VideosPanel';
+import { BrandIntelTab } from '@/components/dashboard/brand-intel/BrandIntelTab';
+import { TalkingHeadTab } from '@/components/dashboard/brand-intel/TalkingHeadTab';
 import { api } from '@/lib/dashboard/api';
 
-type Tab = 'overview' | 'posts' | 'media' | 'videos' | 'messages';
+type Tab = 'overview' | 'posts' | 'media' | 'videos' | 'messages' | 'brand-intel' | 'ugc';
 
 const TABS: Array<{ id: Tab; label: string; icon: typeof LayoutGrid }> = [
   { id: 'overview', label: 'Overview', icon: LayoutGrid },
   { id: 'posts', label: 'Posts', icon: Sparkles },
   { id: 'media', label: 'Media', icon: ImageIcon },
   { id: 'videos', label: 'Videos', icon: Video },
+  { id: 'brand-intel', label: 'Brand Intel', icon: Target },
+  { id: 'ugc', label: 'AI UGC', icon: Mic },
   { id: 'messages', label: 'Messages', icon: MessageSquare },
 ];
 
@@ -268,6 +274,8 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
             ) : null}
             {tab === 'media' ? <MediaLibrary clientId={client.id} /> : null}
             {tab === 'videos' ? <VideosPanel clientId={client.id} client={client} /> : null}
+            {tab === 'brand-intel' ? <BrandIntelTab clientId={client.id} /> : null}
+            {tab === 'ugc' ? <TalkingHeadTab clientId={client.id} /> : null}
             {tab === 'messages' ? <MessagesTab messages={messages} /> : null}
           </section>
         </div>

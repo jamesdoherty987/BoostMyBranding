@@ -112,3 +112,59 @@ function isPrivateIp(ip: string) {
   }
   return false;
 }
+
+
+/**
+ * Best-effort fetch of a site's Open Graph image. Used by the
+ * inspiration-profile scraper to give the profile card a hero
+ * thumbnail and (more importantly) feed one real visual to the
+ * image generation model as a reference.
+ *
+ * Applies the same SSRF defense as `scrapeWebsite` — URL must be
+ * http/https and the host must not resolve to a private IP range.
+ * Returns null on any error so callers can fall back cleanly.
+ */
+export async function fetchOgImage(url: string): Promise<string | null> {
+  if (!url) return null;
+  const safe = await sanitizeUrl(url);
+  if (!safe) return null;
+
+  try {
+    const res = await fetchWithTimeout(safe, {
+      headers: { 'User-Agent': 'BoostMyBranding/1.0' },
+    });
+    if (!res.ok) return null;
+    const html = (await res.text()).slice(0, 100_000);
+
+    // Try og:image first, twitter:image second. Both are case-
+    // insensitive and attribute order varies, so we run two regexes.
+    const ogMatch =
+      html.match(
+        /<meta[^>]+property=["']og:image(?::secure_url)?["'][^>]+content=["']([^"']+)["']/i,
+      ) ??
+      html.match(
+        /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image(?::secure_url)?["']/i,
+      ) ??
+      html.match(
+        /<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i,
+      ) ??
+      html.match(
+        /<meta[^>]+content=["']([^"']+)["'][^>]+name=["']twitter:image["']/i,
+      );
+
+    if (!ogMatch || !ogMatch[1]) return null;
+
+    // Resolve relative URLs against the base.
+    try {
+      const resolved = new URL(ogMatch[1], safe).toString();
+      // Re-run SSRF guard on resolved URL in case the site redirected
+      // us via a relative path pointing at something odd.
+      const resolvedSafe = await sanitizeUrl(resolved);
+      return resolvedSafe;
+    } catch {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+}

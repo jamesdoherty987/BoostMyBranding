@@ -24,6 +24,9 @@ import { videoScriptPrompt } from './prompts.js';
 import { withRetry } from './retry.js';
 import { broadcast } from './realtime.js';
 import { buildBrandContext, brandContextToFactsBlock, brandContextToImageStyle } from './brandContext.js';
+import type { BrandContext } from './brandContext.js';
+import { profilesToPromptBlock } from './inspirationProfiles.js';
+import { tonePairsToPromptBlock } from './tonePairs.js';
 
 export interface GenerateVideoArgs {
   templateId: string;
@@ -242,10 +245,22 @@ export async function generatePersonalizedVideo(
   const knownFacts = brandCtx
     ? brandContextToFactsBlock(brandCtx)
     : buildKnownFactsBlockForClient(client);
-  const scriptPrompt = videoScriptPrompt({
+  // Layer voice guide + tone pairs + inspiration profiles into one
+  // block so the reel sounds on-brand — same pattern the content
+  // calendar uses.
+  const scriptVoiceBlock = brandCtx
+    ? [
+        ((brandCtx.brandVoiceGuide ?? client.brandVoice ?? '').trim() ||
+          'Plain and factual, no embellishment.'),
+        tonePairsToPromptBlock(brandCtx.tonePairs, { max: 6 }),
+        profilesToPromptBlock(brandCtx.inspirationProfiles),
+      ]
+        .filter(Boolean)
+        .join('\n\n')
+    : client.brandVoice ?? 'Plain and factual, no embellishment.';  const scriptPrompt = videoScriptPrompt({
     businessName: client.businessName,
     industry: client.industry ?? 'Local Business',
-    brandVoice: client.brandVoice ?? 'Plain and factual, no embellishment.',
+    brandVoice: scriptVoiceBlock,
     mediaDescriptions,
     knownFacts,
     videoIntent: args.intent ?? 'brand_story',

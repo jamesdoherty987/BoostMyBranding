@@ -19,6 +19,9 @@
 
 import { eq, desc, and, ne } from 'drizzle-orm';
 import { getDb, isDbConfigured, clients, clientImages, posts } from '@boost/database';
+import { listProfiles, profilesToPromptBlock, type InspirationProfilePayload } from './inspirationProfiles.js';
+import { listTonePairs, tonePairsToPromptBlock, type TonePairPayload } from './tonePairs.js';
+import { listProducts, productsToPromptBlock, type ProductPayload } from './products.js';
 
 export interface BrandContext {
   /** Always present — the client row itself. */
@@ -83,6 +86,24 @@ export interface BrandContext {
     qualityScore?: number | null;
   }>;
 
+  /**
+   * Enabled inspiration profiles ("brands I admire"). Feeds style into
+   * image/video/copy generation without copying trademarks.
+   */
+  inspirationProfiles: InspirationProfilePayload[];
+
+  /**
+   * Enabled tone-of-voice pairs. Few-shot good/bad examples that steer
+   * Claude's copy output far more reliably than a prose voice guide.
+   */
+  tonePairs: TonePairPayload[];
+
+  /**
+   * Active products. Each is targetable for ad/post generation and
+   * gives Claude a ground-truth catalog to cite.
+   */
+  products: ProductPayload[];
+
   /** Tally of what we have vs. what's missing — drives the UI. */
   completeness: {
     hasVoice: boolean;
@@ -92,6 +113,9 @@ export interface BrandContext {
     hasServices: boolean;
     hasTeam: boolean;
     hasMedia: boolean;
+    hasInspiration: boolean;
+    hasTonePairs: boolean;
+    hasProducts: boolean;
     score: number; // 0-100, how ready they are for good generation
   };
 }
@@ -114,6 +138,9 @@ export async function buildBrandContext(clientId: string): Promise<BrandContext 
       credentials: [],
       pastHashtags: [],
       topMedia: [],
+      inspirationProfiles: [],
+      tonePairs: [],
+      products: [],
       completeness: {
         hasVoice: false,
         hasPalette: false,
@@ -122,6 +149,9 @@ export async function buildBrandContext(clientId: string): Promise<BrandContext 
         hasServices: false,
         hasTeam: false,
         hasMedia: false,
+        hasInspiration: false,
+        hasTonePairs: false,
+        hasProducts: false,
         score: 0,
       },
     };
@@ -238,6 +268,18 @@ export async function buildBrandContext(clientId: string): Promise<BrandContext 
     .orderBy(desc(clientImages.qualityScore), desc(clientImages.uploadedAt))
     .limit(12);
 
+  // Pull the brand-intelligence extensions in parallel. Each defaults
+  // to an empty array on failure so a missing table can't break caption
+  // generation for the rest of the client.
+  const [inspirationProfilesList, tonePairsList, productsList] = await Promise.all([
+    listProfiles(clientId).catch(() => [] as InspirationProfilePayload[]),
+    listTonePairs(clientId).catch(() => [] as TonePairPayload[]),
+    listProducts(clientId, { status: 'active' }).catch(() => [] as ProductPayload[]),
+  ]);
+
+  const enabledProfiles = inspirationProfilesList.filter((p) => p.isEnabled);
+  const enabledTonePairs = tonePairsList.filter((p) => p.isEnabled);
+
   const has = {
     hasVoice: !!client.brandVoice && client.brandVoice.length > 20,
     hasPalette: !!(palette.primary && palette.accent),
@@ -246,15 +288,21 @@ export async function buildBrandContext(clientId: string): Promise<BrandContext 
     hasServices: services.length > 0,
     hasTeam: teamMembers.length > 0,
     hasMedia: topMedia.length > 0,
+    hasInspiration: enabledProfiles.length > 0,
+    hasTonePairs: enabledTonePairs.length > 0,
+    hasProducts: productsList.length > 0,
   };
   const scoreBase = [
-    has.hasVoice ? 20 : 0,
-    has.hasPalette ? 10 : 0,
-    has.hasLogo ? 10 : 0,
-    has.hasContact ? 15 : 0,
-    has.hasServices ? 15 : 0,
-    has.hasTeam ? 10 : 0,
-    has.hasMedia ? 20 : 0,
+    has.hasVoice ? 15 : 0,
+    has.hasPalette ? 8 : 0,
+    has.hasLogo ? 7 : 0,
+    has.hasContact ? 10 : 0,
+    has.hasServices ? 10 : 0,
+    has.hasTeam ? 7 : 0,
+    has.hasMedia ? 15 : 0,
+    has.hasInspiration ? 10 : 0,
+    has.hasTonePairs ? 10 : 0,
+    has.hasProducts ? 8 : 0,
   ].reduce((a, b) => a + b, 0);
 
   return {
@@ -278,6 +326,9 @@ export async function buildBrandContext(clientId: string): Promise<BrandContext 
       aiDescription: m.aiDescription,
       qualityScore: m.qualityScore,
     })),
+    inspirationProfiles: inspirationProfilesList,
+    tonePairs: tonePairsList,
+    products: productsList,
     completeness: { ...has, score: scoreBase },
   };
 }
@@ -334,6 +385,16 @@ export function brandContextToFactsBlock(ctx: BrandContext): string {
     lines.push(`Hashtags this brand has used repeatedly: ${ctx.pastHashtags.join(' ')}`);
   }
 
+  const activeProducts = ctx.products.filter((p) => p.status === 'active');
+  if (activeProducts.length) {
+    lines.push(
+      `Active products (use these exact names, do NOT invent): ${activeProducts
+        .slice(0, 20)
+        .map((p) => p.name)
+        .join(' · ')}`,
+    );
+  }
+
   return lines.join('\n');
 }
 
@@ -353,5 +414,67 @@ export function brandContextToImageStyle(ctx: BrandContext): string {
   if (ctx.industry) parts.push(`${ctx.industry.toLowerCase()} aesthetic`);
   parts.push('editorial photography feel, natural light, uncluttered composition');
   parts.push('no visible logos, no text overlays, no watermarks');
+
+  // Inspiration-style hint — only from enabled profiles, only visual bits.
+  const profileBits: string[] = [];
+  for (const profile of ctx.inspirationProfiles.filter((p) => p.isEnabled && p.visualAnalysis).slice(0, 2)) {
+    const v = profile.visualAnalysis!;
+    const pieces = [v.style, v.mood].filter(Boolean).map((s) => s.toLowerCase());
+    if (pieces.length) profileBits.push(pieces.join(', '));
+  }
+  if (profileBits.length) {
+    parts.push(`visual language inspired by: ${profileBits.join(' / ')}`);
+    parts.push('do not reproduce any reference-brand names, logos, or trademarks');
+  }
   return parts.join(', ');
+}
+
+/**
+ * Produce a full brand-aware prompt block combining known facts, tone
+ * pairs, inspiration profiles, and product catalog — the single block
+ * to append to any Claude copy-generation system prompt.
+ *
+ * Use this instead of hand-wiring `brandContextToFactsBlock` in new
+ * prompt templates. Sections are only emitted when populated.
+ */
+export function brandContextToFullPromptBlock(
+  ctx: BrandContext,
+  opts: { tonePairCategory?: string; includeProducts?: boolean } = {},
+): string {
+  const blocks: string[] = [];
+  blocks.push(brandContextToFactsBlock(ctx));
+
+  // Voice guide (free-text) first if present.
+  if (ctx.brandVoiceGuide && ctx.brandVoiceGuide.trim()) {
+    blocks.push('');
+    blocks.push('Brand voice guide:');
+    blocks.push(ctx.brandVoiceGuide.trim().slice(0, 2000));
+  }
+
+  // Tone pairs (few-shot).
+  const pairBlock = tonePairsToPromptBlock(ctx.tonePairs, {
+    category: opts.tonePairCategory,
+  });
+  if (pairBlock) {
+    blocks.push('');
+    blocks.push(pairBlock);
+  }
+
+  // Inspiration profiles.
+  const profileBlock = profilesToPromptBlock(ctx.inspirationProfiles);
+  if (profileBlock) {
+    blocks.push('');
+    blocks.push(profileBlock);
+  }
+
+  // Products — opt-in because not every prompt needs them.
+  if (opts.includeProducts !== false) {
+    const productBlock = productsToPromptBlock(ctx.products);
+    if (productBlock) {
+      blocks.push('');
+      blocks.push(productBlock);
+    }
+  }
+
+  return blocks.filter(Boolean).join('\n');
 }

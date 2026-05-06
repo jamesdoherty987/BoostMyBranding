@@ -19,6 +19,12 @@ import { getModel, estimateCostCents } from './modelCatalog.js';
 import { withRetry } from './retry.js';
 import { broadcast } from './realtime.js';
 import { buildBrandContext, brandContextToImageStyle } from './brandContext.js';
+import {
+  listProfiles,
+  profilesToImageStyleHint,
+  profilesToPromptBlock,
+  type InspirationProfilePayload,
+} from './inspirationProfiles.js';
 
 /* ═══════════════════════════════════════════════════════════════════ */
 /* Types                                                                */
@@ -64,6 +70,13 @@ export interface InspirationGenerateArgs {
    * video generation.
    */
   useInspirationAsVideoSeed?: boolean;
+
+  /**
+   * Saved inspiration profile ids from the client's library. When
+   * supplied, their visual + copy analyses are factored into the
+   * generation prompt alongside any per-run inspiration items.
+   */
+  inspirationProfileIds?: string[];
 }
 
 export interface InspirationGenerationRecord {
@@ -128,12 +141,46 @@ export async function generateFromInspiration(
 
   const brandCtx = await buildBrandContext(args.clientId).catch(() => null);
   const brandStyle = brandCtx ? brandContextToImageStyle(brandCtx) : '';
-  const basePrompt = buildPrompt({ analysis, directBrief: args.directBrief, brandStyle });
+
+  // Resolve selected inspiration profiles. If the caller didn't pick
+  // specific ones, include the full set of enabled profiles on the
+  // client (Holo-style — the profile library is the brand's permanent
+  // inspiration inventory).
+  const allProfiles = await listProfiles(args.clientId).catch(
+    () => [] as InspirationProfilePayload[],
+  );
+  const selectedProfiles =
+    args.inspirationProfileIds && args.inspirationProfileIds.length > 0
+      ? allProfiles.filter((p) => args.inspirationProfileIds!.includes(p.id))
+      : allProfiles.filter((p) => p.isEnabled);
+
+  const profileStyleHint = profilesToImageStyleHint(selectedProfiles);
+
+  const basePrompt = buildPrompt({
+    analysis,
+    directBrief: args.directBrief,
+    brandStyle,
+    profileStyleHint,
+  });
 
   /* ── 5. Execute generation(s) ────────────────────────────────── */
 
   const outputs: InspirationGenerationRecord[] = [];
+  // Primary reference: a per-run upload, if the user attached one.
   const primaryReferenceImage = resolved.find((r) => !r.mimeType.startsWith('video/'));
+
+  // Secondary references: images attached to enabled profiles. These
+  // let the image model see examples of the style the user wants,
+  // not just read text descriptions. Capped by the image model's
+  // maxReferenceCount downstream.
+  const profileReferenceUrls: string[] = [];
+  for (const profile of selectedProfiles) {
+    for (const m of profile.media) {
+      if (m.mimeType && !m.mimeType.startsWith('image/')) continue;
+      profileReferenceUrls.push(m.fileUrl);
+    }
+  }
+
   let anyMock = false;
 
   if (outputType === 'image' || outputType === 'both') {
@@ -141,12 +188,19 @@ export async function generateFromInspiration(
       throw new Error('Image model is required for the chosen output type.');
     }
     broadcast({ type: 'inspiration:phase', payload: { clientId: args.clientId, phase: 'generating_image' } });
+    // Assemble reference set: per-run upload first, then profile
+    // reference images. The image runner will truncate to the model's
+    // maxReferenceCount.
+    const combinedReferences = [
+      ...(primaryReferenceImage ? [primaryReferenceImage.url] : []),
+      ...profileReferenceUrls,
+    ];
     const record = await runImageGeneration({
       clientId: args.clientId,
       modelId: args.imageModelId,
       prompt: basePrompt,
       aspectRatio: args.imageAspectRatio ?? '4:5',
-      referenceUrls: primaryReferenceImage ? [primaryReferenceImage.url] : [],
+      referenceUrls: combinedReferences,
       analysis,
       directBrief: args.directBrief,
       inspirationItemIds: inspirationIds(args.inspiration),
@@ -289,6 +343,7 @@ function buildPrompt(args: {
   analysis: InspirationAnalysis | null;
   directBrief?: string;
   brandStyle: string;
+  profileStyleHint?: string;
 }): string {
   const parts: string[] = [];
   if (args.analysis) {
@@ -299,6 +354,9 @@ function buildPrompt(args: {
   }
   if (args.brandStyle) {
     parts.push(args.brandStyle);
+  }
+  if (args.profileStyleHint && args.profileStyleHint.trim().length > 0) {
+    parts.push(args.profileStyleHint);
   }
   parts.push('No fabricated text, no invented logos, no face generation of real people.');
   return parts.join(' ');

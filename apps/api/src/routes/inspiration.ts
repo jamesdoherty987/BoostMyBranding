@@ -201,6 +201,8 @@ const generateSchema = z.object({
   videoAspectRatio: z.enum(['9:16', '1:1', '16:9']).optional(),
   videoDurationSeconds: z.number().int().min(2).max(20).optional(),
   useInspirationAsVideoSeed: z.boolean().optional(),
+  /** Saved inspiration profile ids to factor into the generation prompt. */
+  inspirationProfileIds: z.array(z.string().uuid()).max(10).optional(),
 });
 
 inspirationRouter.post(

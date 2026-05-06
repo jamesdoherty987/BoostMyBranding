@@ -246,9 +246,23 @@ export const clientImages = pgTable(
     qualityScore: integer('quality_score'),
     enhancedUrl: text('enhanced_url'),
     status: imageStatusEnum('status').default('pending').notNull(),
+    /**
+     * Optional link to a product this media depicts. When set, the media
+     * is shown in the product's gallery and AI generations targeting
+     * that product prefer this media as a reference. Nullable — media
+     * doesn't have to belong to a product.
+     *
+     * Foreign key declared without a `references()` here to avoid a
+     * forward-reference cycle with the `products` table (declared later
+     * in this file). The constraint is added via migration SQL.
+     */
+    productId: uuid('product_id'),
     uploadedAt: timestamp('uploaded_at').defaultNow().notNull(),
   },
-  (table) => ({ clientIdx: index('client_images_client_idx').on(table.clientId) }),
+  (table) => ({
+    clientIdx: index('client_images_client_idx').on(table.clientId),
+    productIdx: index('client_images_product_idx').on(table.productId),
+  }),
 );
 
 // ----- Content batches -----
@@ -413,5 +427,212 @@ export const clientCanvaConnections = pgTable(
   },
   (table) => ({
     clientIdx: uniqueIndex('client_canva_connections_client_idx').on(table.clientId),
+  }),
+);
+
+
+/* ═══════════════════════════════════════════════════════════════════ */
+/* Brand intelligence — inspiration profiles, tone-of-voice pairs,     */
+/* and first-class products catalog.                                   */
+/* ═══════════════════════════════════════════════════════════════════ */
+
+/**
+ * Lifecycle of an inspiration profile scrape.
+ *
+ *   idle       — created manually, no scrape run yet.
+ *   scraping   — currently fetching + analysing the reference URL.
+ *   ready      — scrape complete, profile populated.
+ *   failed     — scrape errored; see `scrapeError`.
+ */
+export const inspirationProfileStatusEnum = pgEnum('inspiration_profile_status', [
+  'idle',
+  'scraping',
+  'ready',
+  'failed',
+]);
+
+/**
+ * Per-client "brands I admire" library. Each row is one named
+ * inspiration profile (e.g. "Starbucks", "Patagonia voice", "Apple
+ * product photography"). The AI factors selected profiles into every
+ * generation so outputs inherit the visual and copy style of the
+ * reference — without copying trademarked assets verbatim.
+ *
+ * A single client can have many profiles. Profiles are created from a
+ * reference URL (the scraper pulls copy samples + imagery) or manually.
+ */
+export const inspirationProfiles = pgTable(
+  'inspiration_profiles',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    clientId: uuid('client_id')
+      .references(() => clients.id, { onDelete: 'cascade' })
+      .notNull(),
+
+    /** Human label shown in pickers. */
+    name: text('name').notNull(),
+    /** The reference site we scrape. Nullable for manual-only profiles. */
+    referenceUrl: text('reference_url'),
+    /** Optional logo URL pulled from the reference (display-only). */
+    logoUrl: text('logo_url'),
+    /** Free-form note from the user explaining why they picked this. */
+    description: text('description'),
+
+    /** Whether this profile should be factored into generations by default. */
+    isEnabled: boolean('is_enabled').default(true).notNull(),
+
+    /**
+     * Structured visual analysis produced by Claude Vision after scraping.
+     * Shape:
+     *   { style, mood, composition, typographyNotes, visualMotifs: string[] }
+     * Kept as jsonb so the shape can evolve without migrations.
+     */
+    visualAnalysis: jsonb('visual_analysis'),
+
+    /**
+     * Structured copy-voice analysis produced by Claude.
+     * Shape:
+     *   { toneDescriptors: string[], sentenceShape, vocabulary: string[],
+     *     thingsToDo: string[], thingsToAvoid: string[] }
+     */
+    copyVoice: jsonb('copy_voice'),
+
+    /** Extracted palette — list of hex colours, most prominent first. */
+    colorPalette: jsonb('color_palette').$type<string[]>(),
+
+    /** Snippets of copy lifted verbatim from the reference site, for prompt
+     *  injection as "copy in this voice looks like…". */
+    copySamples: jsonb('copy_samples').$type<string[]>(),
+
+    status: inspirationProfileStatusEnum('status').default('idle').notNull(),
+    scrapeError: text('scrape_error'),
+    lastScrapedAt: timestamp('last_scraped_at'),
+
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => ({
+    clientIdx: index('inspiration_profiles_client_idx').on(table.clientId),
+  }),
+);
+
+/**
+ * Media attached to an inspiration profile — reference images/videos
+ * the AI will use as visual guidance. These live on R2 under
+ * `{clientId}/inspiration-profiles/{profileId}/…` so cleanup is simple.
+ *
+ * `source`:
+ *   - `scrape` — pulled automatically from the reference URL (og:image,
+ *     hero images, gallery thumbnails).
+ *   - `upload` — the user hand-picked and uploaded.
+ */
+export const inspirationProfileMedia = pgTable(
+  'inspiration_profile_media',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    profileId: uuid('profile_id')
+      .references(() => inspirationProfiles.id, { onDelete: 'cascade' })
+      .notNull(),
+    fileUrl: text('file_url').notNull(),
+    fileName: text('file_name'),
+    mimeType: text('mime_type'),
+    source: text('source').notNull(), // 'upload' | 'scrape'
+    /** Per-item AI description — lets the generator cite specific refs. */
+    aiDescription: text('ai_description'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => ({
+    profileIdx: index('inspiration_profile_media_profile_idx').on(table.profileId),
+  }),
+);
+
+/**
+ * Tone-of-voice pair training. Each row is a matched "good copy" /
+ * "bad copy" example with an optional category and rationale. The AI
+ * consumes these as few-shot examples so the voice guide isn't just
+ * "friendly and professional" prose — it's grounded in actual strings.
+ *
+ *   category — free-form tag (e.g. "product_description", "ig_caption",
+ *              "ad_headline"). Nullable for global pairs.
+ *   goodExample  — a string the brand is happy with.
+ *   badExample   — a string the brand would reject. Nullable if the user
+ *                  wants to provide only good examples (still useful).
+ *   explanation  — human note explaining *why* one is good and the other
+ *                  isn't; injected into the Claude prompt.
+ */
+export const toneOfVoicePairs = pgTable(
+  'tone_of_voice_pairs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    clientId: uuid('client_id')
+      .references(() => clients.id, { onDelete: 'cascade' })
+      .notNull(),
+    category: text('category'),
+    goodExample: text('good_example').notNull(),
+    badExample: text('bad_example'),
+    explanation: text('explanation'),
+    isEnabled: boolean('is_enabled').default(true).notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => ({
+    clientIdx: index('tone_of_voice_pairs_client_idx').on(table.clientId),
+  }),
+);
+
+/**
+ * Product catalog status.
+ *
+ *   draft    — work-in-progress, not shown in generation pickers.
+ *   active   — live, available as a target for ad/post generation.
+ *   archived — retained for history, not shown in pickers.
+ */
+export const productStatusEnum = pgEnum('product_status', [
+  'draft',
+  'active',
+  'archived',
+]);
+
+/**
+ * First-class product / service / feature object. Each product is a unit
+ * the AI can target for ad or post generation — "make a Reel for product
+ * X" — so outputs stay faithful to the actual SKU name, description, and
+ * media. Previously this lived as a free-form array inside
+ * `websiteConfig.products`; promoting it to a real table lets us:
+ *
+ *   - query and filter in the UI
+ *   - link media (clientImages.productId) so "media of this product"
+ *     is a one-query lookup
+ *   - track per-product generation history
+ */
+export const products = pgTable(
+  'products',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    clientId: uuid('client_id')
+      .references(() => clients.id, { onDelete: 'cascade' })
+      .notNull(),
+    name: text('name').notNull(),
+    description: text('description'),
+    /** Optional SKU or reference code. */
+    sku: text('sku'),
+    /** Price in the smallest unit (cents for EUR/USD/GBP). Nullable for
+     *  services or "contact for pricing" items. */
+    priceCents: integer('price_cents'),
+    currency: text('currency').default('EUR'),
+    /** Primary hero image URL — duplicated from clientImages for fast list
+     *  rendering without a join. */
+    primaryImageUrl: text('primary_image_url'),
+    /** Arbitrary tags: category, theme, campaign. */
+    tags: text('tags').array().default([] as unknown as string[]),
+    status: productStatusEnum('status').default('draft').notNull(),
+    /** Free-form metadata: dimensions, materials, features, etc. */
+    metadata: jsonb('metadata'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => ({
+    clientIdx: index('products_client_idx').on(table.clientId),
+    statusIdx: index('products_status_idx').on(table.status),
   }),
 );

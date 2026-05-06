@@ -35,6 +35,49 @@ export interface VideoOptions {
   showBrandMark?: boolean;
   /** Show/hide the CTA button. */
   showCta?: boolean;
+  /**
+   * Background preset id (template-specific). Each template declares
+   * `availablePresets` in its meta; the renderer looks up the preset
+   * and applies it to the scene. Falls back to the template's default
+   * when omitted or unknown.
+   *
+   * Examples for `liquid-blob`: 'default', 'sunset', 'midnight',
+   * 'ocean', 'rose', 'forest', 'neon', 'mono', 'gold-dust',
+   * 'champagne'. See each template file for its full roster.
+   */
+  presetId?: string;
+}
+
+/**
+ * A preset is a named bundle of visual overrides for a template — think
+ * of it as "Liquid Blob in Sunset colors" or "Holo Foil in Champagne".
+ * The template picker in the dashboard iterates `availablePresets` so
+ * the agency sees real thumbnails for every look before rendering.
+ */
+export interface TemplatePreset {
+  /** Stable id used as `options.presetId`. */
+  id: string;
+  /** Human label shown in the picker. */
+  name: string;
+  /** One-line description. */
+  description?: string;
+  /**
+   * Optional palette override. When set, the renderer merges this on top
+   * of the client brand palette so presets can completely change the
+   * look without throwing the brand out. Partial: only fill the keys
+   * this preset actually wants to override.
+   */
+  palette?: Partial<BrandPalette>;
+  /**
+   * Optional VideoOptions override (excluding presetId to avoid loops).
+   * Lets a preset ship its own mood, intensity, accent style, etc.
+   */
+  options?: Omit<VideoOptions, 'presetId'>;
+  /**
+   * Thumbnail seed — appended to a placeholder URL in the picker until
+   * we wire real thumbnails into the build. Keep it short and unique.
+   */
+  thumbnailSeed?: string;
 }
 
 /**

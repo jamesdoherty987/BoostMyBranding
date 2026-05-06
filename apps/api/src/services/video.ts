@@ -14,7 +14,7 @@ import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { eq, desc } from 'drizzle-orm';
 import { renderVideo, listTemplates, getTemplate, DEFAULT_BRAND } from '@boost/video';
-import type { VideoProps, BrandPalette, MediaClip } from '@boost/video';
+import type { VideoProps, BrandPalette, MediaClip, VideoOptions } from '@boost/video';
 import { getDb, isDbConfigured, clients, clientImages } from '@boost/database';
 import { uploadFile } from './r2.js';
 import { features } from '../env.js';
@@ -46,6 +46,13 @@ export interface GenerateVideoArgs {
    * using these clips verbatim.
    */
   mediaClips?: MediaClip[];
+  /**
+   * Per-template visual overrides — preset id, mood, accent style, etc.
+   * See `VideoOptions` in @boost/video. Each template picks up the
+   * knobs it understands and ignores the rest. Use this to render the
+   * same template in 10 different looks without editing client brand.
+   */
+  options?: VideoOptions;
 }
 
 export interface GenerateVideoResult {
@@ -71,6 +78,7 @@ export async function generateVideo(args: GenerateVideoArgs): Promise<GenerateVi
     brand: { ...DEFAULT_BRAND, ...args.brand },
     imageUrl: args.imageUrl,
     mediaClips: args.mediaClips,
+    options: args.options,
   };
 
   // Render to a temp file

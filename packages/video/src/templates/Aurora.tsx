@@ -18,7 +18,8 @@ import {
   Easing,
 } from 'remotion';
 import { FONTS, moodSpeed } from '../types';
-import type { VideoProps } from '../types';
+import type { VideoProps, TemplatePreset } from '../types';
+import { applyPreset } from '../presets';
 import { Rise, SceneFade, BrandMark } from '../components/helpers';
 
 const AuroraLayer: React.FC<{
@@ -64,11 +65,13 @@ const Scene: React.FC<VideoProps> = ({
 }) => {
   const f = useCurrentFrame();
 
-  const headlineSize = options?.headlineSize ?? 170;
-  const speed = moodSpeed(options?.mood);
-  const intensity = options?.intensity ?? 1;
-  const showBrandMark = options?.showBrandMark ?? true;
-  const showCta = options?.showCta ?? true;
+  const { palette, options: merged } = applyPreset(brand, options, AURORA_PRESETS);
+
+  const headlineSize = merged.headlineSize ?? 170;
+  const speed = moodSpeed(merged.mood);
+  const intensity = merged.intensity ?? 1;
+  const showBrandMark = merged.showBrandMark ?? true;
+  const showCta = merged.showCta ?? true;
 
   const words = headline.split(' ');
 
@@ -83,18 +86,18 @@ const Scene: React.FC<VideoProps> = ({
       {/* Deep space background */}
       <AbsoluteFill
         style={{
-          background: `radial-gradient(ellipse at 50% 120%, ${brand.dark}, #000 80%)`,
+          background: `radial-gradient(ellipse at 50% 120%, ${palette.dark}, #000 80%)`,
         }}
       />
 
       {/* Camera zoom wrapper */}
       <AbsoluteFill style={{ transform: `scale(${zoom})` }}>
         {/* Four aurora layers for richer depth */}
-        <AuroraLayer color={brand.primary} speed={1 * speed} seed={0} opacity={0.7 * intensity} />
-        <AuroraLayer color={brand.accent} speed={-0.8 * speed} seed={5} opacity={0.6 * intensity} />
-        <AuroraLayer color={brand.pop} speed={0.6 * speed} seed={12} opacity={0.4 * intensity} />
+        <AuroraLayer color={palette.primary} speed={1 * speed} seed={0} opacity={0.7 * intensity} />
+        <AuroraLayer color={palette.accent} speed={-0.8 * speed} seed={5} opacity={0.6 * intensity} />
+        <AuroraLayer color={palette.pop} speed={0.6 * speed} seed={12} opacity={0.4 * intensity} />
         <AuroraLayer
-          color={brand.primary}
+          color={palette.primary}
           speed={-0.4 * speed}
           seed={20}
           opacity={0.3 * intensity}
@@ -111,7 +114,7 @@ const Scene: React.FC<VideoProps> = ({
           right: 0,
           bottom: 0,
           height: 400,
-          background: `linear-gradient(0deg, ${brand.accent}30, transparent)`,
+          background: `linear-gradient(0deg, ${palette.accent}30, transparent)`,
           mixBlendMode: 'screen',
           filter: 'blur(40px)',
         }}
@@ -214,7 +217,7 @@ const Scene: React.FC<VideoProps> = ({
 
         {showBrandMark && (
           <Rise delay={words.length * 8 + 40} style={{ marginTop: 70 }}>
-            <BrandMark businessName={businessName} color="#fff" size={44} markColor={brand.accent} />
+            <BrandMark businessName={businessName} color="#fff" size={44} markColor={palette.accent} />
           </Rise>
         )}
 
@@ -276,3 +279,143 @@ export const AuroraMeta = {
   usesImage: false,
   bestFor: ['brand-story', 'announcement', 'premium-launch'] as const,
 };
+
+/**
+ * Aurora preset roster. Each preset reshapes the colour of the four
+ * light layers + the horizon glow without touching motion or timing.
+ */
+export const AURORA_PRESETS: readonly TemplatePreset[] = [
+  {
+    id: 'default',
+    name: 'Brand default',
+    description: 'Uses the client brand palette directly — no overrides.',
+    thumbnailSeed: 'aurora-default',
+  },
+  {
+    id: 'borealis',
+    name: 'Borealis',
+    description: 'Classic northern-lights greens and cyans on deep navy.',
+    palette: {
+      primary: '#10B981',
+      accent: '#22D3EE',
+      pop: '#A3E635',
+      dark: '#050A1F',
+    },
+    thumbnailSeed: 'aurora-borealis',
+  },
+  {
+    id: 'ember',
+    name: 'Ember',
+    description: 'Warm reds and burnt orange with a gold horizon. Autumnal.',
+    palette: {
+      primary: '#DC2626',
+      accent: '#F97316',
+      pop: '#FACC15',
+      dark: '#140505',
+    },
+    options: { mood: 'calm' },
+    thumbnailSeed: 'aurora-ember',
+  },
+  {
+    id: 'abyss',
+    name: 'Abyss',
+    description: 'Deep ocean blues with a cyan horizon. Meditative, aquatic.',
+    palette: {
+      primary: '#1E3A8A',
+      accent: '#0EA5E9',
+      pop: '#67E8F9',
+      dark: '#01061A',
+    },
+    options: { mood: 'calm' },
+    thumbnailSeed: 'aurora-abyss',
+  },
+  {
+    id: 'violet-storm',
+    name: 'Violet storm',
+    description: 'Rich purples and magentas on obsidian. Premium launch vibes.',
+    palette: {
+      primary: '#7C3AED',
+      accent: '#D946EF',
+      pop: '#F472B6',
+      dark: '#0A0516',
+    },
+    thumbnailSeed: 'aurora-violet',
+  },
+  {
+    id: 'desert',
+    name: 'Desert',
+    description: 'Sand, terracotta, dusk pink. Warm, arid, editorial.',
+    palette: {
+      primary: '#D97706',
+      accent: '#EF4444',
+      pop: '#FDE68A',
+      dark: '#1F1008',
+    },
+    options: { mood: 'calm' },
+    thumbnailSeed: 'aurora-desert',
+  },
+  {
+    id: 'mint',
+    name: 'Mint',
+    description: 'Fresh mint and lime with a pale pop. Wellness, health, fresh.',
+    palette: {
+      primary: '#34D399',
+      accent: '#A7F3D0',
+      pop: '#FEF08A',
+      dark: '#052017',
+    },
+    options: { mood: 'calm' },
+    thumbnailSeed: 'aurora-mint',
+  },
+  {
+    id: 'royal',
+    name: 'Royal',
+    description: 'Sapphire blue + gold on near-black. Jewellery, fine dining.',
+    palette: {
+      primary: '#1D4ED8',
+      accent: '#FBBF24',
+      pop: '#FDE68A',
+      dark: '#0A0818',
+    },
+    thumbnailSeed: 'aurora-royal',
+  },
+  {
+    id: 'noir',
+    name: 'Noir',
+    description: 'Cool greys and white pop on pure black. Editorial luxury.',
+    palette: {
+      primary: '#64748B',
+      accent: '#CBD5E1',
+      pop: '#F8FAFC',
+      dark: '#000000',
+    },
+    options: { mood: 'calm' },
+    thumbnailSeed: 'aurora-noir',
+  },
+  {
+    id: 'spring',
+    name: 'Spring',
+    description: 'Soft pinks, peach, cream. Salons, floristry, wedding.',
+    palette: {
+      primary: '#F472B6',
+      accent: '#FBBF77',
+      pop: '#FEF3C7',
+      dark: '#1F0E1A',
+    },
+    options: { mood: 'calm', headlineSize: 150 },
+    thumbnailSeed: 'aurora-spring',
+  },
+  {
+    id: 'cyberpunk',
+    name: 'Cyberpunk',
+    description: 'Hot pink + electric cyan on pitch black. Nightlife, esports.',
+    palette: {
+      primary: '#EC4899',
+      accent: '#06B6D4',
+      pop: '#A3E635',
+      dark: '#000010',
+    },
+    options: { mood: 'energetic', intensity: 1.2 },
+    thumbnailSeed: 'aurora-cyber',
+  },
+] as const;

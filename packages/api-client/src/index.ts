@@ -6,6 +6,24 @@
 import type { ApiResponse, Client, Post, Message, ClientImage } from '@boost/core';
 import type { WebsiteConfig, SiteTemplate } from '@boost/core';
 
+/**
+ * Per-template overrides the renderer understands. Mirrors
+ * `VideoOptions` in @boost/video so the dashboard doesn't need a
+ * direct dependency on the video package.
+ */
+export interface VideoRenderOptions {
+  /** Preset id from the template's `availablePresets` list. */
+  presetId?: string;
+  headlineSize?: number;
+  headlineFont?: 'serif' | 'display';
+  duration?: number;
+  intensity?: number;
+  accentStyle?: 'underline' | 'dot' | 'bar' | 'ring' | 'none';
+  mood?: 'calm' | 'balanced' | 'energetic';
+  showBrandMark?: boolean;
+  showCta?: boolean;
+}
+
 export interface ApiConfig {
   baseUrl: string;
 }
@@ -791,6 +809,26 @@ export class BoostApi {
         durationFrames: number;
         usesImage: boolean;
         bestFor: readonly string[];
+        /**
+         * Optional preset roster the template exposes. Each preset is a
+         * palette + options bundle the dashboard can surface as a
+         * thumbnail picker. Undefined on templates that don't support
+         * presets yet.
+         */
+        availablePresets?: ReadonlyArray<{
+          id: string;
+          name: string;
+          description?: string;
+          palette?: Partial<{
+            primary: string;
+            accent: string;
+            pop: string;
+            dark: string;
+            paper: string;
+          }>;
+          options?: Partial<VideoRenderOptions>;
+          thumbnailSeed?: string;
+        }>;
       }>
     >('/api/v1/videos/templates');
   }
@@ -825,6 +863,12 @@ export class BoostApi {
       dark?: string;
       paper?: string;
     };
+    /**
+     * Per-template overrides — preset id, mood, accent style, headline
+     * size. Send `{ presetId: 'sunset' }` to swap the Liquid Gradient
+     * into warm corals without touching the client's brand palette.
+     */
+    options?: VideoRenderOptions;
   }) {
     return this.request<{
       videoUrl: string;
@@ -858,6 +902,7 @@ export class BoostApi {
       dark?: string;
       paper?: string;
     };
+    options?: VideoRenderOptions;
   }) {
     return this.request<{
       total: number;

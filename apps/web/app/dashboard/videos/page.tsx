@@ -21,6 +21,20 @@ import {
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { api } from '@/lib/dashboard/api';
 
+interface TemplatePreset {
+  id: string;
+  name: string;
+  description?: string;
+  palette?: Partial<{
+    primary: string;
+    accent: string;
+    pop: string;
+    dark: string;
+    paper: string;
+  }>;
+  thumbnailSeed?: string;
+}
+
 interface TemplateMeta {
   id: string;
   name: string;
@@ -28,6 +42,7 @@ interface TemplateMeta {
   durationFrames: number;
   usesImage: boolean;
   bestFor: readonly string[];
+  availablePresets?: readonly TemplatePreset[];
 }
 
 export default function VideosPage() {
@@ -42,6 +57,7 @@ export default function VideosPage() {
   });
 
   const [selectedTemplate, setSelectedTemplate] = useState<string>('liquid-blob');
+  const [selectedPreset, setSelectedPreset] = useState<string>('default');
   const [clientId, setClientId] = useState<string>('');
   const [form, setForm] = useState({
     headline: 'Coffee, slowly.',
@@ -66,6 +82,12 @@ export default function VideosPage() {
   const selected = templates.find((t) => t.id === selectedTemplate);
   const client = clients.find((c) => c.id === clientId);
 
+  // Reset the preset choice whenever the user switches templates so we
+  // don't carry a 'sunset' pick from Liquid Gradient into Aurora.
+  useEffect(() => {
+    setSelectedPreset('default');
+  }, [selectedTemplate]);
+
   const render = async () => {
     if (!selectedTemplate || !clientId) {
       toast.error('Pick a template and client');
@@ -89,6 +111,10 @@ export default function VideosPage() {
               accent: client.brandColors.accent,
             }
           : undefined,
+        options:
+          selectedPreset && selectedPreset !== 'default'
+            ? { presetId: selectedPreset }
+            : undefined,
       });
       setRendered(result);
       toast.success(
@@ -163,6 +189,54 @@ export default function VideosPage() {
             </div>
           )}
         </section>
+
+        {/* Preset picker — only for templates that declare presets. */}
+        {selected?.availablePresets && selected.availablePresets.length > 0 && (
+          <section>
+            <h2 className="mb-4 text-sm font-semibold text-slate-900">
+              Pick a look{' '}
+              <span className="font-normal text-slate-500">
+                — same {selected.name}, different palette
+              </span>
+            </h2>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+              {selected.availablePresets.map((p) => {
+                const p1 = p.palette?.primary ?? '#1D9CA1';
+                const p2 = p.palette?.accent ?? '#48D886';
+                const p3 = p.palette?.pop ?? '#FFEC3D';
+                const pDark = p.palette?.dark ?? '#0B1220';
+                const active = selectedPreset === p.id;
+                return (
+                  <button
+                    key={p.id}
+                    onClick={() => setSelectedPreset(p.id)}
+                    className={`group overflow-hidden rounded-xl border text-left transition-all ${
+                      active
+                        ? 'border-[#48D886] ring-2 ring-[#48D886]/20'
+                        : 'border-slate-200 hover:border-slate-300'
+                    }`}
+                    title={p.description}
+                  >
+                    <div
+                      className="aspect-[9/12]"
+                      style={{
+                        background: `radial-gradient(circle at 28% 30%, ${p1}, transparent 50%), radial-gradient(circle at 72% 60%, ${p2}, transparent 55%), radial-gradient(circle at 50% 85%, ${p3}, transparent 45%), ${pDark}`,
+                      }}
+                    />
+                    <div className="bg-white p-2.5">
+                      <div className="text-xs font-semibold text-slate-900">{p.name}</div>
+                      {p.description && (
+                        <div className="mt-0.5 line-clamp-2 text-[10px] text-slate-500">
+                          {p.description}
+                        </div>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        )}
 
         {/* Form + preview */}
         <section className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_360px]">

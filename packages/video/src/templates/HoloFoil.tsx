@@ -19,7 +19,8 @@ import {
   Easing,
 } from 'remotion';
 import { FONTS, moodSpeed } from '../types';
-import type { VideoProps } from '../types';
+import type { VideoProps, TemplatePreset } from '../types';
+import { applyPreset } from '../presets';
 import { Rise, SceneFade, BrandMark } from '../components/helpers';
 
 const Scene: React.FC<VideoProps> = ({
@@ -33,12 +34,14 @@ const Scene: React.FC<VideoProps> = ({
 }) => {
   const f = useCurrentFrame();
 
-  const headlineSize = options?.headlineSize ?? 140;
-  const headlineFont = options?.headlineFont ?? 'display';
-  const speed = moodSpeed(options?.mood);
-  const intensity = options?.intensity ?? 1;
-  const showBrandMark = options?.showBrandMark ?? true;
-  const showCta = options?.showCta ?? true;
+  const { palette, options: merged } = applyPreset(brand, options, HOLO_FOIL_PRESETS);
+
+  const headlineSize = merged.headlineSize ?? 140;
+  const headlineFont = merged.headlineFont ?? 'display';
+  const speed = moodSpeed(merged.mood);
+  const intensity = merged.intensity ?? 1;
+  const showBrandMark = merged.showBrandMark ?? true;
+  const showCta = merged.showCta ?? true;
 
   // Card tilt — slow oscillation
   const tiltX = Math.sin(f * 0.03 * speed) * 12;
@@ -59,14 +62,14 @@ const Scene: React.FC<VideoProps> = ({
   const foilPos = ((f * 1.5 * speed) % 300) - 150;
 
   return (
-    <AbsoluteFill style={{ background: brand.dark, overflow: 'hidden' }}>
+    <AbsoluteFill style={{ background: palette.dark, overflow: 'hidden' }}>
       {/* Deep gradient backdrop */}
       <AbsoluteFill
         style={{
           background: `
-            radial-gradient(ellipse at 50% 40%, ${brand.primary}50 0%, transparent 55%),
-            radial-gradient(ellipse at 20% 80%, ${brand.accent}30 0%, transparent 45%),
-            linear-gradient(180deg, #141420, ${brand.dark}, #080810)
+            radial-gradient(ellipse at 50% 40%, ${palette.primary}50 0%, transparent 55%),
+            radial-gradient(ellipse at 20% 80%, ${palette.accent}30 0%, transparent 45%),
+            linear-gradient(180deg, #141420, ${palette.dark}, #080810)
           `,
         }}
       />
@@ -97,7 +100,7 @@ const Scene: React.FC<VideoProps> = ({
               cx={x}
               cy={y}
               r={2}
-              fill={i % 3 === 0 ? brand.accent : i % 3 === 1 ? brand.pop : '#fff'}
+              fill={i % 3 === 0 ? palette.accent : i % 3 === 1 ? palette.pop : '#fff'}
               opacity={twinkle * 0.7}
             />
           );
@@ -114,7 +117,7 @@ const Scene: React.FC<VideoProps> = ({
           height: 1200,
           marginLeft: -600,
           marginTop: -600,
-          background: `radial-gradient(circle, ${brand.accent}20, transparent 60%)`,
+          background: `radial-gradient(circle, ${palette.accent}20, transparent 60%)`,
           filter: 'blur(40px)',
           mixBlendMode: 'screen',
         }}
@@ -147,11 +150,11 @@ const Scene: React.FC<VideoProps> = ({
             inset: 0,
             borderRadius: 36,
             background: `
-              linear-gradient(135deg, ${brand.primary}, ${brand.accent})
+              linear-gradient(135deg, ${palette.primary}, ${palette.accent})
             `,
             boxShadow: `
               0 40px 120px rgba(0,0,0,0.6),
-              0 20px 60px ${brand.primary}40,
+              0 20px 60px ${palette.primary}40,
               inset 0 2px 0 rgba(255,255,255,0.3),
               inset 0 -2px 0 rgba(0,0,0,0.2)
             `,
@@ -165,11 +168,11 @@ const Scene: React.FC<VideoProps> = ({
               inset: 0,
               background: `conic-gradient(
                 from ${f * 2}deg at 50% 50%,
-                ${brand.primary},
-                ${brand.accent},
-                ${brand.pop},
+                ${palette.primary},
+                ${palette.accent},
+                ${palette.pop},
                 #ff00ff,
-                ${brand.primary}
+                ${palette.primary}
               )`,
               opacity: 0.35 * intensity,
               mixBlendMode: 'overlay',
@@ -207,7 +210,7 @@ const Scene: React.FC<VideoProps> = ({
                 transparent 0%,
                 rgba(255,255,255,0.05) 30%,
                 rgba(255,255,255,0.45) 48%,
-                ${brand.pop}80 50%,
+                ${palette.pop}80 50%,
                 rgba(255,255,255,0.45) 52%,
                 rgba(255,255,255,0.05) 70%,
                 transparent 100%
@@ -243,9 +246,9 @@ const Scene: React.FC<VideoProps> = ({
                 width: 14,
                 height: 14,
                 borderRadius: 4,
-                background: brand.pop,
+                background: palette.pop,
                 transform: 'rotate(45deg)',
-                boxShadow: `0 0 10px ${brand.pop}`,
+                boxShadow: `0 0 10px ${palette.pop}`,
               }}
             />
           ))}
@@ -294,7 +297,7 @@ const Scene: React.FC<VideoProps> = ({
                   color: '#fff',
                   letterSpacing: -5,
                   lineHeight: 0.95,
-                  textShadow: `0 4px 20px rgba(0,0,0,0.5), 0 0 40px ${brand.pop}40`,
+                  textShadow: `0 4px 20px rgba(0,0,0,0.5), 0 0 40px ${palette.pop}40`,
                 }}
               >
                 {headline}
@@ -306,9 +309,9 @@ const Scene: React.FC<VideoProps> = ({
                 style={{
                   width: 120,
                   height: 3,
-                  background: brand.pop,
+                  background: palette.pop,
                   borderRadius: 2,
-                  boxShadow: `0 0 10px ${brand.pop}`,
+                  boxShadow: `0 0 10px ${palette.pop}`,
                 }}
               />
             </Rise>
@@ -345,7 +348,7 @@ const Scene: React.FC<VideoProps> = ({
       >
         {showBrandMark && (
           <Rise delay={80}>
-            <BrandMark businessName={businessName} color="#fff" size={40} markColor={brand.accent} />
+            <BrandMark businessName={businessName} color="#fff" size={40} markColor={palette.accent} />
           </Rise>
         )}
         {showCta && (
@@ -354,12 +357,12 @@ const Scene: React.FC<VideoProps> = ({
               style={{
                 padding: '12px 28px',
                 borderRadius: 999,
-                background: `linear-gradient(135deg, ${brand.pop}, ${brand.accent})`,
-                color: brand.dark,
+                background: `linear-gradient(135deg, ${palette.pop}, ${palette.accent})`,
+                color: palette.dark,
                 fontFamily: FONTS.display,
                 fontSize: 22,
                 fontWeight: 800,
-                boxShadow: `0 10px 30px ${brand.pop}40`,
+                boxShadow: `0 10px 30px ${palette.pop}40`,
               }}
             >
               {cta} →
@@ -393,3 +396,129 @@ export const HoloFoilMeta = {
   usesImage: false,
   bestFor: ['launch', 'premium-brand', 'drop'] as const,
 };
+
+/**
+ * Holo Foil preset roster. Each preset reshapes the card's gradient,
+ * foil shine, and gem markers. The motion (tilt, sweep, twinkle) stays
+ * identical — only the palette changes.
+ */
+export const HOLO_FOIL_PRESETS: readonly TemplatePreset[] = [
+  {
+    id: 'default',
+    name: 'Brand default',
+    description: 'Uses the client brand palette directly — no overrides.',
+    thumbnailSeed: 'holo-default',
+  },
+  {
+    id: 'rainbow',
+    name: 'Rainbow holo',
+    description: 'Classic trading-card rainbow iridescence — pink, teal, gold.',
+    palette: {
+      primary: '#8B5CF6',
+      accent: '#22D3EE',
+      pop: '#FACC15',
+      dark: '#0A0519',
+    },
+    thumbnailSeed: 'holo-rainbow',
+  },
+  {
+    id: 'pokemon',
+    name: 'Crystal',
+    description: 'Cool blues and silvers with ice-blue pop. Tech launch.',
+    palette: {
+      primary: '#0EA5E9',
+      accent: '#38BDF8',
+      pop: '#E0F2FE',
+      dark: '#050915',
+    },
+    thumbnailSeed: 'holo-crystal',
+  },
+  {
+    id: 'ruby',
+    name: 'Ruby',
+    description: 'Deep crimson card with gold pop. Fine dining, luxury.',
+    palette: {
+      primary: '#991B1B',
+      accent: '#DC2626',
+      pop: '#FBBF24',
+      dark: '#0A0303',
+    },
+    thumbnailSeed: 'holo-ruby',
+  },
+  {
+    id: 'emerald',
+    name: 'Emerald',
+    description: 'Rich greens with gold. Legal, accounting, fine spirits.',
+    palette: {
+      primary: '#047857',
+      accent: '#10B981',
+      pop: '#FDE68A',
+      dark: '#02120A',
+    },
+    thumbnailSeed: 'holo-emerald',
+  },
+  {
+    id: 'obsidian',
+    name: 'Obsidian',
+    description: 'Near-black card with silver and white pop. Exclusive, VIP.',
+    palette: {
+      primary: '#1F2937',
+      accent: '#6B7280',
+      pop: '#F9FAFB',
+      dark: '#000000',
+    },
+    options: { intensity: 0.6 },
+    thumbnailSeed: 'holo-obsidian',
+  },
+  {
+    id: 'gold-bar',
+    name: 'Gold bar',
+    description: 'Full gold foil with copper and cream accents. Premium drop.',
+    palette: {
+      primary: '#B45309',
+      accent: '#F59E0B',
+      pop: '#FEF3C7',
+      dark: '#0E0703',
+    },
+    thumbnailSeed: 'holo-gold',
+  },
+  {
+    id: 'candy',
+    name: 'Candy',
+    description: 'Bubblegum pink, mint, yellow. Playful, beauty, confectionery.',
+    palette: {
+      primary: '#F472B6',
+      accent: '#34D399',
+      pop: '#FEF08A',
+      dark: '#1F0F1A',
+    },
+    options: { mood: 'energetic' },
+    thumbnailSeed: 'holo-candy',
+  },
+  {
+    id: 'arcade',
+    name: 'Arcade',
+    description: 'Hot pink + cyan neon on black. Retro drop, esports, nightlife.',
+    palette: {
+      primary: '#EC4899',
+      accent: '#06B6D4',
+      pop: '#FDE047',
+      dark: '#050010',
+    },
+    options: { mood: 'energetic', intensity: 1.2 },
+    thumbnailSeed: 'holo-arcade',
+  },
+  {
+    id: 'sepia',
+    name: 'Sepia',
+    description: 'Muted browns and cream. Heritage, artisan, vintage brand.',
+    palette: {
+      primary: '#78350F',
+      accent: '#D97706',
+      pop: '#FEF3C7',
+      dark: '#140A03',
+    },
+    options: { intensity: 0.75, headlineFont: 'serif' },
+    thumbnailSeed: 'holo-sepia',
+  },
+] as const;

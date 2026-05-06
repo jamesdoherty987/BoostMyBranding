@@ -81,6 +81,25 @@ const renderSchema = z.object({
     )
     .max(6)
     .optional(),
+  /**
+   * Per-template visual overrides. The dashboard preset picker sends
+   * `presetId`; the rest are optional fine-tuning knobs. Unknown
+   * presets fall back to the template's default styling rather than
+   * erroring, so a renamed preset doesn't break in-flight renders.
+   */
+  options: z
+    .object({
+      presetId: z.string().max(60).optional(),
+      headlineSize: z.number().int().min(40).max(400).optional(),
+      headlineFont: z.enum(['serif', 'display']).optional(),
+      duration: z.number().int().min(60).max(1800).optional(),
+      intensity: z.number().min(0).max(2).optional(),
+      accentStyle: z.enum(['underline', 'dot', 'bar', 'ring', 'none']).optional(),
+      mood: z.enum(['calm', 'balanced', 'energetic']).optional(),
+      showBrandMark: z.boolean().optional(),
+      showCta: z.boolean().optional(),
+    })
+    .optional(),
 });
 
 videosRouter.post(

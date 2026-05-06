@@ -18,7 +18,8 @@ import {
   Easing,
 } from 'remotion';
 import { FONTS, moodSpeed } from '../types';
-import type { VideoProps } from '../types';
+import type { VideoProps, TemplatePreset } from '../types';
+import { applyPreset } from '../presets';
 import { Rise, SceneFade, BrandMark } from '../components/helpers';
 
 const bezier = Easing.bezier(0.22, 1, 0.36, 1);
@@ -74,13 +75,18 @@ const Scene: React.FC<VideoProps> = ({
 }) => {
   const f = useCurrentFrame();
 
-  const headlineSize = options?.headlineSize ?? 180;
-  const headlineFont = options?.headlineFont ?? 'serif';
-  const accentStyle = options?.accentStyle ?? 'underline';
-  const speed = moodSpeed(options?.mood);
-  const intensity = options?.intensity ?? 1;
-  const showBrandMark = options?.showBrandMark ?? true;
-  const showCta = options?.showCta ?? true;
+  // Resolve the preset (if any) and overlay its overrides on the
+  // caller-supplied palette + options. See packages/video/src/presets.ts
+  // for the merge rules.
+  const { palette, options: merged } = applyPreset(brand, options, LIQUID_BLOB_PRESETS);
+
+  const headlineSize = merged.headlineSize ?? 180;
+  const headlineFont = merged.headlineFont ?? 'serif';
+  const accentStyle = merged.accentStyle ?? 'underline';
+  const speed = moodSpeed(merged.mood);
+  const intensity = merged.intensity ?? 1;
+  const showBrandMark = merged.showBrandMark ?? true;
+  const showCta = merged.showCta ?? true;
 
   // Staggered animations
   const underlinePct = interpolate(f, [50, 85], [0, 1], {
@@ -97,7 +103,7 @@ const Scene: React.FC<VideoProps> = ({
   });
 
   return (
-    <AbsoluteFill style={{ background: brand.dark }}>
+    <AbsoluteFill style={{ background: palette.dark }}>
       {/* Filters */}
       <svg width="0" height="0" style={{ position: 'absolute' }}>
         <defs>
@@ -114,11 +120,11 @@ const Scene: React.FC<VideoProps> = ({
 
       {/* Blob field */}
       <AbsoluteFill style={{ filter: 'url(#liquidGoo)', opacity: intensity }}>
-        <Blob x={300} y={500} c1={brand.primary} c2={brand.accent} seed={0} delay={0} speed={speed} />
-        <Blob x={760} y={700} c1={brand.accent} c2={brand.primary} seed={1} delay={8} speed={speed} />
-        <Blob x={540} y={1200} c1={brand.pop} c2={brand.primary} seed={2} delay={16} speed={speed} />
-        <Blob x={200} y={1500} c1={brand.primary} c2={brand.accent} seed={3} delay={24} speed={speed} />
-        <Blob x={880} y={1400} c1={brand.accent} c2={brand.pop} seed={4} delay={32} speed={speed} />
+        <Blob x={300} y={500} c1={palette.primary} c2={palette.accent} seed={0} delay={0} speed={speed} />
+        <Blob x={760} y={700} c1={palette.accent} c2={palette.primary} seed={1} delay={8} speed={speed} />
+        <Blob x={540} y={1200} c1={palette.pop} c2={palette.primary} seed={2} delay={16} speed={speed} />
+        <Blob x={200} y={1500} c1={palette.primary} c2={palette.accent} seed={3} delay={24} speed={speed} />
+        <Blob x={880} y={1400} c1={palette.accent} c2={palette.pop} seed={4} delay={32} speed={speed} />
       </AbsoluteFill>
 
       {/* Depth backlight behind headline */}
@@ -131,7 +137,7 @@ const Scene: React.FC<VideoProps> = ({
           height: 400,
           marginLeft: -350,
           marginTop: -200,
-          background: `radial-gradient(ellipse, ${brand.accent}${Math.floor(glowStrength * 60).toString(16).padStart(2, '0')}, transparent 70%)`,
+          background: `radial-gradient(ellipse, ${palette.accent}${Math.floor(glowStrength * 60).toString(16).padStart(2, '0')}, transparent 70%)`,
           filter: 'blur(60px)',
           opacity: glowStrength,
         }}
@@ -198,7 +204,7 @@ const Scene: React.FC<VideoProps> = ({
                   height: 4,
                   width: `${underlinePct * 60}%`,
                   transform: 'translateX(-50%)',
-                  background: `linear-gradient(90deg, ${brand.accent}, ${brand.pop})`,
+                  background: `linear-gradient(90deg, ${palette.accent}, ${palette.pop})`,
                   borderRadius: 2,
                 }}
               />
@@ -213,8 +219,8 @@ const Scene: React.FC<VideoProps> = ({
                   height: 14,
                   marginLeft: -7,
                   borderRadius: '50%',
-                  background: brand.pop,
-                  boxShadow: `0 0 20px ${brand.pop}`,
+                  background: palette.pop,
+                  boxShadow: `0 0 20px ${palette.pop}`,
                   opacity: underlinePct,
                   transform: `scale(${underlinePct})`,
                 }}
@@ -229,7 +235,7 @@ const Scene: React.FC<VideoProps> = ({
                   height: 8,
                   width: `${underlinePct * 140}px`,
                   transform: 'translateX(-50%)',
-                  background: brand.accent,
+                  background: palette.accent,
                   borderRadius: 4,
                 }}
               />
@@ -244,7 +250,7 @@ const Scene: React.FC<VideoProps> = ({
                   height: 180 * underlinePct,
                   marginLeft: -220 * underlinePct,
                   marginTop: -90 * underlinePct,
-                  border: `2px solid ${brand.accent}`,
+                  border: `2px solid ${palette.accent}`,
                   borderRadius: 200,
                   opacity: 0.6,
                   pointerEvents: 'none',
@@ -256,7 +262,7 @@ const Scene: React.FC<VideoProps> = ({
 
         {showBrandMark && (
           <Rise delay={80} dur={16} style={{ marginTop: 70 }}>
-            <BrandMark businessName={businessName} color="#fff" size={54} markColor={brand.accent} />
+            <BrandMark businessName={businessName} color="#fff" size={54} markColor={palette.accent} />
           </Rise>
         )}
 
@@ -267,7 +273,7 @@ const Scene: React.FC<VideoProps> = ({
                 style={{
                   padding: '16px 34px',
                   background: '#fff',
-                  color: brand.dark,
+                  color: palette.dark,
                   borderRadius: 999,
                   fontFamily: FONTS.display,
                   fontSize: 26,
@@ -317,3 +323,139 @@ export const LiquidBlobMeta = {
   usesImage: false,
   bestFor: ['promotional', 'announcement', 'brand-story'] as const,
 };
+
+/**
+ * Preset roster for Liquid Gradient. Each entry picks a distinct mood
+ * via palette + options overrides. Pass `options: { presetId: 'sunset' }`
+ * to the renderer to pick one. Client brand palette still wins for any
+ * colour the preset leaves undefined, so a sunset preset on a teal brand
+ * produces sunset-with-teal-accents instead of losing the brand.
+ *
+ * Adding a new preset: append an entry below. Nothing else to change —
+ * the dashboard picker pulls `availablePresets` off the template meta.
+ */
+export const LIQUID_BLOB_PRESETS: readonly TemplatePreset[] = [
+  {
+    id: 'default',
+    name: 'Brand default',
+    description: 'Uses the client brand palette directly — no overrides.',
+    thumbnailSeed: 'liquid-default',
+  },
+  {
+    id: 'sunset',
+    name: 'Sunset',
+    description: 'Warm corals and golden hour amber on a near-black backdrop.',
+    palette: {
+      primary: '#FF7B6B',
+      accent: '#FFB347',
+      pop: '#FFE066',
+      dark: '#1A0E2E',
+    },
+    options: { accentStyle: 'bar', mood: 'calm' },
+    thumbnailSeed: 'liquid-sunset',
+  },
+  {
+    id: 'midnight',
+    name: 'Midnight',
+    description: 'Deep indigos and electric violets for tech/premium brands.',
+    palette: {
+      primary: '#6366F1',
+      accent: '#A855F7',
+      pop: '#EC4899',
+      dark: '#05050F',
+    },
+    options: { accentStyle: 'ring', mood: 'balanced' },
+    thumbnailSeed: 'liquid-midnight',
+  },
+  {
+    id: 'ocean',
+    name: 'Ocean',
+    description: 'Cool teals and seafoam greens. Calming, coastal, fresh.',
+    palette: {
+      primary: '#06B6D4',
+      accent: '#10B981',
+      pop: '#FDE68A',
+      dark: '#0C1E2E',
+    },
+    options: { accentStyle: 'underline', mood: 'calm' },
+    thumbnailSeed: 'liquid-ocean',
+  },
+  {
+    id: 'rose',
+    name: 'Rose',
+    description: 'Dusty pinks and blush. Salons, bakeries, lifestyle brands.',
+    palette: {
+      primary: '#F472B6',
+      accent: '#FB7185',
+      pop: '#FDE68A',
+      dark: '#2D1324',
+    },
+    options: { accentStyle: 'dot', mood: 'calm', headlineFont: 'serif' },
+    thumbnailSeed: 'liquid-rose',
+  },
+  {
+    id: 'forest',
+    name: 'Forest',
+    description: 'Deep greens with amber pop. Outdoorsy, artisanal, rooted.',
+    palette: {
+      primary: '#22C55E',
+      accent: '#84CC16',
+      pop: '#F59E0B',
+      dark: '#0A1F14',
+    },
+    options: { accentStyle: 'underline', mood: 'calm' },
+    thumbnailSeed: 'liquid-forest',
+  },
+  {
+    id: 'neon',
+    name: 'Neon',
+    description: 'Hot magenta + cyan + chartreuse. High-energy nightlife / fitness.',
+    palette: {
+      primary: '#EC4899',
+      accent: '#22D3EE',
+      pop: '#A3E635',
+      dark: '#050510',
+    },
+    options: { accentStyle: 'ring', mood: 'energetic', intensity: 1.2 },
+    thumbnailSeed: 'liquid-neon',
+  },
+  {
+    id: 'mono',
+    name: 'Mono',
+    description: 'Monochrome greys with a single white pop. Editorial / luxury.',
+    palette: {
+      primary: '#94A3B8',
+      accent: '#CBD5E1',
+      pop: '#F8FAFC',
+      dark: '#0F172A',
+    },
+    options: { accentStyle: 'bar', mood: 'calm', headlineFont: 'serif' },
+    thumbnailSeed: 'liquid-mono',
+  },
+  {
+    id: 'gold-dust',
+    name: 'Gold dust',
+    description: 'Warm gold and bronze on obsidian. Jewellery, fine dining.',
+    palette: {
+      primary: '#D4A574',
+      accent: '#E8C48F',
+      pop: '#F5E6C8',
+      dark: '#120908',
+    },
+    options: { accentStyle: 'underline', mood: 'calm', headlineFont: 'serif' },
+    thumbnailSeed: 'liquid-gold',
+  },
+  {
+    id: 'champagne',
+    name: 'Champagne',
+    description: 'Soft peach + cream on warm black. Soft-launch, wedding, salon.',
+    palette: {
+      primary: '#FBBF77',
+      accent: '#FCD9B6',
+      pop: '#FFF4E0',
+      dark: '#1B0F07',
+    },
+    options: { accentStyle: 'dot', mood: 'calm', headlineFont: 'serif' },
+    thumbnailSeed: 'liquid-champagne',
+  },
+] as const;

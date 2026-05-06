@@ -19,7 +19,8 @@ import {
   Easing,
 } from 'remotion';
 import { FONTS, moodSpeed } from '../types';
-import type { VideoProps } from '../types';
+import type { VideoProps, TemplatePreset } from '../types';
+import { applyPreset } from '../presets';
 import { SceneFade, BrandMark, Rise } from '../components/helpers';
 
 function seeded(f: number, seed: number): number {
@@ -39,11 +40,13 @@ const Scene: React.FC<VideoProps> = ({
   const f = useCurrentFrame();
   const { fps } = useVideoConfig();
 
-  const headlineSize = options?.headlineSize ?? 200;
-  const speed = moodSpeed(options?.mood);
-  const intensity = options?.intensity ?? 1;
-  const showBrandMark = options?.showBrandMark ?? true;
-  const showCta = options?.showCta ?? true;
+  const { palette, options: merged } = applyPreset(brand, options, GLITCH_ART_PRESETS);
+
+  const headlineSize = merged.headlineSize ?? 200;
+  const speed = moodSpeed(merged.mood);
+  const intensity = merged.intensity ?? 1;
+  const showBrandMark = merged.showBrandMark ?? true;
+  const showCta = merged.showCta ?? true;
 
   // Glitch intensity — high at start, resolves (mood adjusts resolve speed)
   const glitchEnd = 80 / speed;
@@ -84,7 +87,7 @@ const Scene: React.FC<VideoProps> = ({
   const timestamp = `REC · ${String(seconds).padStart(2, '0')}:${String(frames).padStart(2, '0')}`;
 
   return (
-    <AbsoluteFill style={{ background: brand.dark, overflow: 'hidden' }}>
+    <AbsoluteFill style={{ background: palette.dark, overflow: 'hidden' }}>
       {/* Horizontal CRT scanlines */}
       <AbsoluteFill
         style={{
@@ -109,7 +112,7 @@ const Scene: React.FC<VideoProps> = ({
           right: 0,
           top: scanY,
           height: 40,
-          background: `linear-gradient(180deg, transparent 0%, ${brand.accent}40 50%, transparent 100%)`,
+          background: `linear-gradient(180deg, transparent 0%, ${palette.accent}40 50%, transparent 100%)`,
           pointerEvents: 'none',
         }}
       />
@@ -123,7 +126,7 @@ const Scene: React.FC<VideoProps> = ({
             bottom: 0,
             left: scanX,
             width: 2,
-            background: `${brand.pop}50`,
+            background: `${palette.pop}50`,
             opacity: glitchPhase,
             pointerEvents: 'none',
           }}
@@ -144,7 +147,7 @@ const Scene: React.FC<VideoProps> = ({
                 top: y,
                 width: '100%',
                 height: 60,
-                background: `${brand.accent}30`,
+                background: `${palette.accent}30`,
                 mixBlendMode: 'screen',
                 pointerEvents: 'none',
               }}
@@ -213,7 +216,7 @@ const Scene: React.FC<VideoProps> = ({
               letterSpacing: -8,
               lineHeight: 0.92,
               textAlign: 'center',
-              textShadow: lockIn > 0.5 ? `0 0 40px ${brand.accent}` : 'none',
+              textShadow: lockIn > 0.5 ? `0 0 40px ${palette.accent}` : 'none',
               transform: `scale(${1 + lockIn * 0.05})`,
               position: 'relative',
             }}
@@ -250,7 +253,7 @@ const Scene: React.FC<VideoProps> = ({
           justifyContent: 'space-between',
           fontFamily: FONTS.mono,
           fontSize: 18,
-          color: brand.pop,
+          color: palette.pop,
           letterSpacing: 3,
           textTransform: 'uppercase',
           fontWeight: 700,
@@ -287,10 +290,10 @@ const Scene: React.FC<VideoProps> = ({
             };
             if ('left' in bracket) style.left = bracket.left;
             if ('right' in bracket) style.right = bracket.right;
-            if (bracket.corners.includes('top')) style.borderTop = `3px solid ${brand.accent}`;
-            if (bracket.corners.includes('bottom')) style.borderBottom = `3px solid ${brand.accent}`;
-            if (bracket.corners.includes('left')) style.borderLeft = `3px solid ${brand.accent}`;
-            if (bracket.corners.includes('right')) style.borderRight = `3px solid ${brand.accent}`;
+            if (bracket.corners.includes('top')) style.borderTop = `3px solid ${palette.accent}`;
+            if (bracket.corners.includes('bottom')) style.borderBottom = `3px solid ${palette.accent}`;
+            if (bracket.corners.includes('left')) style.borderLeft = `3px solid ${palette.accent}`;
+            if (bracket.corners.includes('right')) style.borderRight = `3px solid ${palette.accent}`;
             return <div key={i} style={style} />;
           })}
         </>
@@ -311,7 +314,7 @@ const Scene: React.FC<VideoProps> = ({
       >
         {showBrandMark && (
           <Rise delay={glitchEnd + 20}>
-            <BrandMark businessName={businessName} color="#fff" size={40} markColor={brand.accent} />
+            <BrandMark businessName={businessName} color="#fff" size={40} markColor={palette.accent} />
           </Rise>
         )}
         {showCta && (
@@ -319,8 +322,8 @@ const Scene: React.FC<VideoProps> = ({
             <div
               style={{
                 padding: '14px 32px',
-                background: brand.accent,
-                color: brand.dark,
+                background: palette.accent,
+                color: palette.dark,
                 fontFamily: FONTS.mono,
                 fontSize: 22,
                 fontWeight: 800,
@@ -360,3 +363,132 @@ export const GlitchArtMeta = {
   usesImage: false,
   bestFor: ['drop', 'launch', 'youth-brand'] as const,
 };
+
+/**
+ * Glitch Art preset roster. Keep the signature cyan/magenta RGB split
+ * channels untouched — that's what makes it read as "glitch" — and
+ * change the surrounding palette (background, accent glow, pop chip).
+ */
+export const GLITCH_ART_PRESETS: readonly TemplatePreset[] = [
+  {
+    id: 'default',
+    name: 'Brand default',
+    description: 'Uses the client brand palette directly — no overrides.',
+    thumbnailSeed: 'glitch-default',
+  },
+  {
+    id: 'vaporwave',
+    name: 'Vaporwave',
+    description: 'Miami pink + cyan on deep purple. Peak 80s vibe.',
+    palette: {
+      primary: '#FF00AA',
+      accent: '#00FFFF',
+      pop: '#FFD700',
+      dark: '#0A0225',
+    },
+    options: { mood: 'energetic', intensity: 1.2 },
+    thumbnailSeed: 'glitch-vaporwave',
+  },
+  {
+    id: 'matrix',
+    name: 'Matrix',
+    description: 'Green-on-black with lime pop. Hacker, tech-drop energy.',
+    palette: {
+      primary: '#22C55E',
+      accent: '#4ADE80',
+      pop: '#A3E635',
+      dark: '#000800',
+    },
+    thumbnailSeed: 'glitch-matrix',
+  },
+  {
+    id: 'alarm',
+    name: 'Alarm',
+    description: 'Blood red + orange on black. Urgent, limited-time drop.',
+    palette: {
+      primary: '#EF4444',
+      accent: '#F97316',
+      pop: '#FACC15',
+      dark: '#0B0000',
+    },
+    options: { mood: 'energetic', intensity: 1.3 },
+    thumbnailSeed: 'glitch-alarm',
+  },
+  {
+    id: 'broadcast',
+    name: 'Broadcast',
+    description: 'Warm beige + saturated cyan — classic CRT television.',
+    palette: {
+      primary: '#F59E0B',
+      accent: '#06B6D4',
+      pop: '#FDE68A',
+      dark: '#0A0F1F',
+    },
+    thumbnailSeed: 'glitch-broadcast',
+  },
+  {
+    id: 'ice',
+    name: 'Ice',
+    description: 'Icy blue + white on midnight. Cold, minimalist tech.',
+    palette: {
+      primary: '#38BDF8',
+      accent: '#BFDBFE',
+      pop: '#F8FAFC',
+      dark: '#01071A',
+    },
+    options: { intensity: 0.8 },
+    thumbnailSeed: 'glitch-ice',
+  },
+  {
+    id: 'acid',
+    name: 'Acid',
+    description: 'Lime + magenta + yellow. Aggressive late-night energy.',
+    palette: {
+      primary: '#A3E635',
+      accent: '#EC4899',
+      pop: '#FDE047',
+      dark: '#0A0A15',
+    },
+    options: { mood: 'energetic', intensity: 1.25 },
+    thumbnailSeed: 'glitch-acid',
+  },
+  {
+    id: 'terminal',
+    name: 'Terminal',
+    description: 'Amber phosphor monochrome. Retro computer terminal.',
+    palette: {
+      primary: '#FBBF24',
+      accent: '#F59E0B',
+      pop: '#FEF3C7',
+      dark: '#0A0800',
+    },
+    options: { intensity: 0.7 },
+    thumbnailSeed: 'glitch-terminal',
+  },
+  {
+    id: 'blackbox',
+    name: 'Blackbox',
+    description: 'White on black with single red pop. High-contrast, editorial.',
+    palette: {
+      primary: '#FFFFFF',
+      accent: '#E5E7EB',
+      pop: '#EF4444',
+      dark: '#000000',
+    },
+    options: { intensity: 0.9 },
+    thumbnailSeed: 'glitch-blackbox',
+  },
+  {
+    id: 'cyberpunk-2077',
+    name: 'Cyberpunk',
+    description: 'Yellow + cyan on midnight blue. Future-noir dystopia.',
+    palette: {
+      primary: '#FACC15',
+      accent: '#06B6D4',
+      pop: '#EC4899',
+      dark: '#030518',
+    },
+    options: { mood: 'energetic' },
+    thumbnailSeed: 'glitch-cyber2077',
+  },
+] as const;

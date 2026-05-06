@@ -20,7 +20,8 @@ import {
   Easing,
 } from 'remotion';
 import { FONTS, moodSpeed } from '../types';
-import type { VideoProps } from '../types';
+import type { VideoProps, TemplatePreset } from '../types';
+import { applyPreset } from '../presets';
 import { Rise, SceneFade, BrandMark } from '../components/helpers';
 
 const Scene: React.FC<VideoProps> = ({
@@ -35,12 +36,14 @@ const Scene: React.FC<VideoProps> = ({
 }) => {
   const f = useCurrentFrame();
 
-  const headlineSize = options?.headlineSize ?? 120;
-  const headlineFont = options?.headlineFont ?? 'display';
-  const speed = moodSpeed(options?.mood);
-  const intensity = options?.intensity ?? 1;
-  const showBrandMark = options?.showBrandMark ?? true;
-  const showCta = options?.showCta ?? true;
+  const { palette, options: merged } = applyPreset(brand, options, PRODUCT_SHOWCASE_PRESETS);
+
+  const headlineSize = merged.headlineSize ?? 120;
+  const headlineFont = merged.headlineFont ?? 'display';
+  const speed = moodSpeed(merged.mood);
+  const intensity = merged.intensity ?? 1;
+  const showBrandMark = merged.showBrandMark ?? true;
+  const showCta = merged.showCta ?? true;
 
   // Product motion
   const floatY = Math.sin(f * 0.04 * speed) * 20;
@@ -67,13 +70,13 @@ const Scene: React.FC<VideoProps> = ({
   });
 
   return (
-    <AbsoluteFill style={{ background: brand.dark, overflow: 'hidden' }}>
+    <AbsoluteFill style={{ background: palette.dark, overflow: 'hidden' }}>
       {/* Primary rotating conic gradient */}
       <div
         style={{
           position: 'absolute',
           inset: '-20%',
-          background: `conic-gradient(from ${rot1}deg at 50% 50%, ${brand.primary}, ${brand.accent}, ${brand.pop}, ${brand.primary})`,
+          background: `conic-gradient(from ${rot1}deg at 50% 50%, ${palette.primary}, ${palette.accent}, ${palette.pop}, ${palette.primary})`,
           opacity: 0.35 * intensity,
           filter: 'blur(80px)',
         }}
@@ -84,7 +87,7 @@ const Scene: React.FC<VideoProps> = ({
         style={{
           position: 'absolute',
           inset: '-30%',
-          background: `conic-gradient(from ${rot2}deg at 30% 70%, transparent, ${brand.accent}, transparent, ${brand.pop}, transparent)`,
+          background: `conic-gradient(from ${rot2}deg at 30% 70%, transparent, ${palette.accent}, transparent, ${palette.pop}, transparent)`,
           opacity: 0.25 * intensity,
           filter: 'blur(120px)',
           mixBlendMode: 'screen',
@@ -108,7 +111,7 @@ const Scene: React.FC<VideoProps> = ({
           width: 140,
           height: 140,
           borderRadius: '50%',
-          background: brand.accent,
+          background: palette.accent,
           opacity: 0.18,
           filter: 'blur(40px)',
           transform: `translateY(${Math.sin(f * 0.03 * speed) * 30}px)`,
@@ -122,7 +125,7 @@ const Scene: React.FC<VideoProps> = ({
           width: 200,
           height: 200,
           borderRadius: '50%',
-          background: brand.pop,
+          background: palette.pop,
           opacity: 0.15,
           filter: 'blur(60px)',
           transform: `translateY(${Math.cos(f * 0.025 * speed) * 40}px)`,
@@ -250,7 +253,7 @@ const Scene: React.FC<VideoProps> = ({
       >
         {showBrandMark && (
           <Rise delay={66} dur={14}>
-            <BrandMark businessName={businessName} color="#fff" size={46} markColor={brand.accent} />
+            <BrandMark businessName={businessName} color="#fff" size={46} markColor={palette.accent} />
           </Rise>
         )}
         {showCta && (
@@ -259,13 +262,13 @@ const Scene: React.FC<VideoProps> = ({
               <div
                 style={{
                   padding: '18px 40px',
-                  background: brand.accent,
-                  color: brand.dark,
+                  background: palette.accent,
+                  color: palette.dark,
                   borderRadius: 999,
                   fontFamily: FONTS.display,
                   fontSize: 28,
                   fontWeight: 800,
-                  boxShadow: `0 10px 40px ${brand.accent}60`,
+                  boxShadow: `0 10px 40px ${palette.accent}60`,
                 }}
               >
                 {cta}
@@ -310,3 +313,144 @@ export const ProductShowcaseMeta = {
   usesImage: true,
   bestFor: ['promotional', 'product-launch'] as const,
 };
+
+/**
+ * Product Showcase preset roster. Reshapes the backdrop conic gradients
+ * and orb colours to fit different product categories (skincare, tech,
+ * food, etc.) without touching the product shot itself.
+ */
+export const PRODUCT_SHOWCASE_PRESETS: readonly TemplatePreset[] = [
+  {
+    id: 'default',
+    name: 'Brand default',
+    description: 'Uses the client brand palette directly — no overrides.',
+    thumbnailSeed: 'product-default',
+  },
+  {
+    id: 'skincare',
+    name: 'Skincare',
+    description: 'Blush + sand + soft cream. Clean beauty product shots.',
+    palette: {
+      primary: '#FBCFE8',
+      accent: '#FED7AA',
+      pop: '#FEF3C7',
+      dark: '#1F1014',
+    },
+    options: { mood: 'calm', intensity: 0.8 },
+    thumbnailSeed: 'product-skincare',
+  },
+  {
+    id: 'coffee',
+    name: 'Coffee',
+    description: 'Deep espresso browns with amber pop. Cafes, roasters.',
+    palette: {
+      primary: '#78350F',
+      accent: '#B45309',
+      pop: '#FBBF24',
+      dark: '#140A03',
+    },
+    options: { mood: 'calm' },
+    thumbnailSeed: 'product-coffee',
+  },
+  {
+    id: 'tech',
+    name: 'Tech',
+    description: 'Cool chrome blues and electric cyan. Gadgets, apps, SaaS.',
+    palette: {
+      primary: '#1E293B',
+      accent: '#0EA5E9',
+      pop: '#7DD3FC',
+      dark: '#020617',
+    },
+    thumbnailSeed: 'product-tech',
+  },
+  {
+    id: 'food',
+    name: 'Food',
+    description: 'Warm terracotta, saffron, cream. Restaurants, bakeries.',
+    palette: {
+      primary: '#DC2626',
+      accent: '#F59E0B',
+      pop: '#FEF3C7',
+      dark: '#1A0503',
+    },
+    thumbnailSeed: 'product-food',
+  },
+  {
+    id: 'fitness',
+    name: 'Fitness',
+    description: 'High-energy lime + electric blue. Gyms, supplements.',
+    palette: {
+      primary: '#22C55E',
+      accent: '#3B82F6',
+      pop: '#FACC15',
+      dark: '#050810',
+    },
+    options: { mood: 'energetic', intensity: 1.2 },
+    thumbnailSeed: 'product-fitness',
+  },
+  {
+    id: 'fashion',
+    name: 'Fashion',
+    description: 'Blush + burgundy + cream. Boutiques, accessories.',
+    palette: {
+      primary: '#831843',
+      accent: '#F472B6',
+      pop: '#FDF2F8',
+      dark: '#14030A',
+    },
+    options: { headlineFont: 'serif' },
+    thumbnailSeed: 'product-fashion',
+  },
+  {
+    id: 'jewellery',
+    name: 'Jewellery',
+    description: 'Near-black with champagne gold. High-end luxury.',
+    palette: {
+      primary: '#0F0F0F',
+      accent: '#D4A574',
+      pop: '#F5E6C8',
+      dark: '#050505',
+    },
+    options: { intensity: 0.75, headlineFont: 'serif' },
+    thumbnailSeed: 'product-jewellery',
+  },
+  {
+    id: 'wellness',
+    name: 'Wellness',
+    description: 'Sage green + soft cream. Yoga, supplements, spa.',
+    palette: {
+      primary: '#65A30D',
+      accent: '#A7F3D0',
+      pop: '#FEF08A',
+      dark: '#0F1708',
+    },
+    options: { mood: 'calm' },
+    thumbnailSeed: 'product-wellness',
+  },
+  {
+    id: 'kids',
+    name: 'Kids',
+    description: 'Cheerful primary colours with playful intensity.',
+    palette: {
+      primary: '#3B82F6',
+      accent: '#F59E0B',
+      pop: '#EF4444',
+      dark: '#0F172A',
+    },
+    options: { mood: 'energetic' },
+    thumbnailSeed: 'product-kids',
+  },
+  {
+    id: 'industrial',
+    name: 'Industrial',
+    description: 'Gunmetal + safety orange. Trades, tools, automotive.',
+    palette: {
+      primary: '#334155',
+      accent: '#F97316',
+      pop: '#FDE047',
+      dark: '#0A0A0F',
+    },
+    thumbnailSeed: 'product-industrial',
+  },
+] as const;

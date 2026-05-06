@@ -37,6 +37,12 @@ const schema = z.object({
   R2_SECRET_ACCESS_KEY: z.string().optional(),
   R2_BUCKET_NAME: z.string().optional(),
   R2_PUBLIC_URL: z.string().url().optional().or(z.literal('')),
+  /**
+   * Force-disable R2 even when credentials are set. Useful on dev
+   * machines whose network blocks *.r2.dev (e.g. work laptops with
+   * managed DNS). Falls back to local disk uploads served at /uploads.
+   */
+  R2_DISABLED: z.enum(['true', 'false']).optional(),
 
   STRIPE_SECRET_KEY: z.string().optional(),
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
@@ -102,7 +108,7 @@ export const features = {
   db: Boolean(env.DATABASE_URL),
   claude: Boolean(env.ANTHROPIC_API_KEY),
   fal: Boolean(env.FAL_KEY),
-  r2: Boolean(env.R2_ACCESS_KEY_ID && env.R2_BUCKET_NAME),
+  r2: Boolean(env.R2_ACCESS_KEY_ID && env.R2_BUCKET_NAME) && env.R2_DISABLED !== 'true',
   stripe: Boolean(env.STRIPE_SECRET_KEY),
   resend: Boolean(env.RESEND_API_KEY),
   contentStudio: Boolean(env.CONTENTSTUDIO_API_KEY),

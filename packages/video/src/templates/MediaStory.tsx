@@ -32,7 +32,8 @@ import {
   Easing,
 } from 'remotion';
 import { FONTS, moodSpeed } from '../types';
-import type { VideoProps, MediaClip } from '../types';
+import type { VideoProps, MediaClip, BrandPalette, TemplatePreset } from '../types';
+import { applyPreset } from '../presets';
 import { Rise, BrandMark } from '../components/helpers';
 
 const bezier = Easing.bezier(0.22, 1, 0.36, 1);
@@ -54,10 +55,10 @@ function clipFrames(clip: MediaClip | undefined, fps: number) {
  */
 const MediaClipScene: React.FC<{
   clip: MediaClip;
-  brand: VideoProps['brand'];
+  palette: BrandPalette;
   index: number;
   total: number;
-}> = ({ clip, brand, index, total }) => {
+}> = ({ clip, palette, index, total }) => {
   const f = useCurrentFrame();
   const { fps } = useVideoConfig();
   const dur = clipFrames(clip, fps);
@@ -84,7 +85,7 @@ const MediaClipScene: React.FC<{
 
   return (
     <AbsoluteFill
-      style={{ background: brand.dark, overflow: 'hidden', fontFamily: FONTS.display }}
+      style={{ background: palette.dark, overflow: 'hidden', fontFamily: FONTS.display }}
     >
       {/* The media itself, zoomed with a focal-point transform-origin. */}
       <div
@@ -110,12 +111,14 @@ const MediaClipScene: React.FC<{
         )}
       </div>
 
-      {/* Brand-color gradient scrim along the bottom for copy legibility. */}
+      {/* Brand-color gradient scrim along the bottom for copy legibility.
+          Uses the resolved palette's dark color so presets like "Editorial"
+          can switch from navy to near-black without losing the wash. */}
       <div
         style={{
           position: 'absolute',
           inset: 0,
-          background: `linear-gradient(to top, rgba(11,18,32,0.9) 0%, rgba(11,18,32,0.55) 28%, rgba(11,18,32,0) 55%)`,
+          background: `linear-gradient(to top, ${palette.dark}e6 0%, ${palette.dark}8c 28%, ${palette.dark}00 55%)`,
         }}
       />
 
@@ -137,7 +140,7 @@ const MediaClipScene: React.FC<{
               flex: 1,
               height: 3,
               borderRadius: 2,
-              background: i < index ? '#fff' : i === index ? brand.primary : 'rgba(255,255,255,0.18)',
+              background: i < index ? '#fff' : i === index ? palette.primary : 'rgba(255,255,255,0.18)',
             }}
           />
         ))}
@@ -160,7 +163,7 @@ const MediaClipScene: React.FC<{
               fontSize: 32,
               textTransform: 'uppercase',
               letterSpacing: 4,
-              color: brand.accent,
+              color: palette.accent,
               fontWeight: 700,
               marginBottom: 20,
             }}
@@ -189,7 +192,13 @@ const MediaClipScene: React.FC<{
 };
 
 /** End card: headline + CTA + domain, uses brand colors only. */
-const Outro: React.FC<VideoProps> = ({ businessName, headline, cta, domain, brand }) => {
+const Outro: React.FC<{
+  businessName: string;
+  headline: string;
+  cta?: string;
+  domain?: string;
+  palette: BrandPalette;
+}> = ({ businessName, headline, cta, domain, palette }) => {
   const f = useCurrentFrame();
   const scale = interpolate(f, [0, 16], [0.96, 1], {
     extrapolateRight: 'clamp',
@@ -200,7 +209,7 @@ const Outro: React.FC<VideoProps> = ({ businessName, headline, cta, domain, bran
     <AbsoluteFill
       style={{
         fontFamily: FONTS.display,
-        background: `radial-gradient(circle at 30% 20%, ${brand.primary}44, transparent 60%), radial-gradient(circle at 70% 80%, ${brand.accent}44, transparent 60%), ${brand.dark}`,
+        background: `radial-gradient(circle at 30% 20%, ${palette.primary}44, transparent 60%), radial-gradient(circle at 70% 80%, ${palette.accent}44, transparent 60%), ${palette.dark}`,
         padding: 90,
         display: 'flex',
         flexDirection: 'column',
@@ -209,7 +218,7 @@ const Outro: React.FC<VideoProps> = ({ businessName, headline, cta, domain, bran
       }}
     >
       <Rise delay={6} dur={16}>
-        <BrandMark businessName={businessName} color="#fff" markColor={brand.primary} size={60} />
+        <BrandMark businessName={businessName} color="#fff" markColor={palette.primary} size={60} />
       </Rise>
 
       <Rise delay={12} dur={18}>
@@ -237,8 +246,8 @@ const Outro: React.FC<VideoProps> = ({ businessName, headline, cta, domain, bran
                 display: 'inline-block',
                 padding: '22px 44px',
                 borderRadius: 999,
-                background: brand.accent,
-                color: brand.dark,
+                background: palette.accent,
+                color: palette.dark,
                 fontWeight: 700,
                 fontSize: 38,
                 letterSpacing: 0.2,
@@ -261,11 +270,15 @@ const Outro: React.FC<VideoProps> = ({ businessName, headline, cta, domain, bran
  * the single `imageUrl` (or a brand-colored canvas) and the headline so
  * the template isn't a blank frame.
  */
-const FallbackClip: React.FC<VideoProps> = ({ imageUrl, headline, brand }) => {
+const FallbackClip: React.FC<{
+  imageUrl?: string;
+  headline: string;
+  palette: BrandPalette;
+}> = ({ imageUrl, headline, palette }) => {
   const f = useCurrentFrame();
   const scale = interpolate(f, [0, 120], [1, 1.08], { extrapolateRight: 'clamp' });
   return (
-    <AbsoluteFill style={{ background: brand.dark, overflow: 'hidden' }}>
+    <AbsoluteFill style={{ background: palette.dark, overflow: 'hidden' }}>
       {imageUrl ? (
         <div style={{ position: 'absolute', inset: 0, transform: `scale(${scale})` }}>
           <Img src={imageUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -273,7 +286,7 @@ const FallbackClip: React.FC<VideoProps> = ({ imageUrl, headline, brand }) => {
       ) : null}
       <AbsoluteFill
         style={{
-          background: `linear-gradient(135deg, ${brand.primary}ee, ${brand.accent}dd)`,
+          background: `linear-gradient(135deg, ${palette.primary}ee, ${palette.accent}dd)`,
           opacity: imageUrl ? 0.35 : 1,
         }}
       />
@@ -297,7 +310,12 @@ const FallbackClip: React.FC<VideoProps> = ({ imageUrl, headline, brand }) => {
 
 export const MediaStory: React.FC<VideoProps> = (props) => {
   const { fps } = useVideoConfig();
-  const speed = moodSpeed(props.options?.mood);
+  const { palette, options: merged } = applyPreset(
+    props.brand,
+    props.options,
+    MEDIA_STORY_PRESETS,
+  );
+  const speed = moodSpeed(merged.mood);
   const clips = (props.mediaClips ?? []).slice(0, 6);
 
   if (clips.length === 0) {
@@ -305,10 +323,16 @@ export const MediaStory: React.FC<VideoProps> = (props) => {
       <AbsoluteFill>
         <Series>
           <Series.Sequence durationInFrames={Math.round(6 * fps * speed)}>
-            <FallbackClip {...props} />
+            <FallbackClip imageUrl={props.imageUrl} headline={props.headline} palette={palette} />
           </Series.Sequence>
           <Series.Sequence durationInFrames={Math.round(OUTRO_SECONDS * fps * speed)}>
-            <Outro {...props} />
+            <Outro
+              businessName={props.businessName}
+              headline={props.headline}
+              cta={props.cta}
+              domain={props.domain}
+              palette={palette}
+            />
           </Series.Sequence>
         </Series>
       </AbsoluteFill>
@@ -320,11 +344,17 @@ export const MediaStory: React.FC<VideoProps> = (props) => {
       <Series>
         {clips.map((clip, i) => (
           <Series.Sequence key={i} durationInFrames={Math.round(clipFrames(clip, fps) / speed)}>
-            <MediaClipScene clip={clip} brand={props.brand} index={i} total={clips.length} />
+            <MediaClipScene clip={clip} palette={palette} index={i} total={clips.length} />
           </Series.Sequence>
         ))}
         <Series.Sequence durationInFrames={Math.round(OUTRO_SECONDS * fps * speed)}>
-          <Outro {...props} />
+          <Outro
+            businessName={props.businessName}
+            headline={props.headline}
+            cta={props.cta}
+            domain={props.domain}
+            palette={palette}
+          />
         </Series.Sequence>
       </Series>
     </AbsoluteFill>
@@ -351,6 +381,148 @@ export const MediaStoryMeta = {
     'Menu reveals',
   ],
 } as const;
+
+/**
+ * MediaStory preset roster. Photography stays untouched — only the
+ * bottom scrim, outro gradient, accent captions, and progress dots
+ * take on the preset palette. This keeps the client's own photos
+ * front-and-centre, which is what MediaStory is for.
+ */
+export const MEDIA_STORY_PRESETS: readonly TemplatePreset[] = [
+  {
+    id: 'default',
+    name: 'Brand default',
+    description: 'Uses the client brand palette directly — no overrides.',
+    thumbnailSeed: 'story-default',
+  },
+  {
+    id: 'editorial',
+    name: 'Editorial',
+    description: 'Near-black scrim with warm cream accents. Magazine-style.',
+    palette: {
+      primary: '#F5F1EA',
+      accent: '#E8DCC8',
+      pop: '#D4A574',
+      dark: '#0A0A0A',
+    },
+    options: { mood: 'calm' },
+    thumbnailSeed: 'story-editorial',
+  },
+  {
+    id: 'cinema',
+    name: 'Cinema',
+    description: 'Deep cinematic teal with copper accents. Moody storytelling.',
+    palette: {
+      primary: '#0E5E5F',
+      accent: '#D97706',
+      pop: '#FBBF24',
+      dark: '#051112',
+    },
+    options: { mood: 'calm' },
+    thumbnailSeed: 'story-cinema',
+  },
+  {
+    id: 'sunlit',
+    name: 'Sunlit',
+    description: 'Warm peach scrim with gold pop. Bright, daytime outdoor.',
+    palette: {
+      primary: '#FBBF77',
+      accent: '#F97316',
+      pop: '#FEF3C7',
+      dark: '#1F0F07',
+    },
+    thumbnailSeed: 'story-sunlit',
+  },
+  {
+    id: 'nordic',
+    name: 'Nordic',
+    description: 'Cool cloudy greys with slate pop. Minimal Scandinavian feel.',
+    palette: {
+      primary: '#CBD5E1',
+      accent: '#94A3B8',
+      pop: '#F8FAFC',
+      dark: '#0F172A',
+    },
+    options: { mood: 'calm' },
+    thumbnailSeed: 'story-nordic',
+  },
+  {
+    id: 'midnight-mag',
+    name: 'Midnight',
+    description: 'Pure-black scrim with electric cyan accent. Tech / nightlife.',
+    palette: {
+      primary: '#22D3EE',
+      accent: '#06B6D4',
+      pop: '#67E8F9',
+      dark: '#000000',
+    },
+    thumbnailSeed: 'story-midnight',
+  },
+  {
+    id: 'harvest',
+    name: 'Harvest',
+    description: 'Deep forest with ochre. Agricultural, artisanal, farm-to-table.',
+    palette: {
+      primary: '#14532D',
+      accent: '#CA8A04',
+      pop: '#FDE68A',
+      dark: '#0A1A10',
+    },
+    options: { mood: 'calm' },
+    thumbnailSeed: 'story-harvest',
+  },
+  {
+    id: 'romance',
+    name: 'Romance',
+    description: 'Rose pink scrim with champagne accent. Weddings, salons.',
+    palette: {
+      primary: '#F472B6',
+      accent: '#FDE68A',
+      pop: '#FDF2F8',
+      dark: '#2D0818',
+    },
+    options: { mood: 'calm' },
+    thumbnailSeed: 'story-romance',
+  },
+  {
+    id: 'pulse',
+    name: 'Pulse',
+    description: 'Electric red with hot pink pop. High-energy fitness / nightlife.',
+    palette: {
+      primary: '#EF4444',
+      accent: '#EC4899',
+      pop: '#FDE047',
+      dark: '#0A0205',
+    },
+    options: { mood: 'energetic' },
+    thumbnailSeed: 'story-pulse',
+  },
+  {
+    id: 'ocean-story',
+    name: 'Ocean',
+    description: 'Deep blues with seafoam accent. Coastal, travel, wellness.',
+    palette: {
+      primary: '#0284C7',
+      accent: '#22D3EE',
+      pop: '#A7F3D0',
+      dark: '#03101E',
+    },
+    thumbnailSeed: 'story-ocean',
+  },
+  {
+    id: 'legacy',
+    name: 'Legacy',
+    description: 'Monochrome cream on black. Heritage brands, documentary style.',
+    palette: {
+      primary: '#F5F1EA',
+      accent: '#D1C6B3',
+      pop: '#FBBF24',
+      dark: '#000000',
+    },
+    options: { mood: 'calm' },
+    thumbnailSeed: 'story-legacy',
+  },
+] as const;
 
 /**
  * Dynamically size the composition based on the number of clips. The

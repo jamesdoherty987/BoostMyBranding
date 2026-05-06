@@ -430,12 +430,13 @@ clientsRouter.patch(
         return res.json({ data: { id, ...patch } });
       }
       const db = getDb();
-      const set: Record<string, any> = { updatedAt: new Date() };
+      // Drizzle's `.set()` is keyed by TS property names (camelCase),
+      // not by snake_case column names. Pass the patch straight through,
+      // normalising empty strings to null so the columns can clear.
+      const set: Record<string, unknown> = { updatedAt: new Date() };
       for (const [k, v] of Object.entries(patch)) {
         if (v !== undefined) {
-          // Map camelCase to snake_case column names
-          const col = k.replace(/[A-Z]/g, (m) => `_${m.toLowerCase()}`);
-          set[col] = v === '' ? null : v;
+          set[k] = v === '' ? null : v;
         }
       }
       const [row] = await db

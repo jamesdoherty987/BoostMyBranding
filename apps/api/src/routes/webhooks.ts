@@ -136,6 +136,20 @@ webhooksRouter.post('/stripe', raw({ type: 'application/json' }), async (req, re
             customer_email: inv.customer_email,
           });
           if (clientId) {
+            // Stripe redelivers webhooks on transient failures, so we
+            // must guard against double-inserts. `stripe_invoice_id`
+            // has no unique index in the schema (see invoices table),
+            // which meant the previous `onConflictDoNothing()` had no
+            // conflict target to match and still inserted duplicates.
+            // Check first, insert only if missing.
+            if (inv.id) {
+              const [existing] = await db
+                .select({ id: invoices.id })
+                .from(invoices)
+                .where(eq(invoices.stripeInvoiceId, inv.id))
+                .limit(1);
+              if (existing) break;
+            }
             await db
               .insert(invoices)
               .values({
@@ -147,8 +161,7 @@ webhooksRouter.post('/stripe', raw({ type: 'application/json' }), async (req, re
                 hostedUrl: inv.hosted_invoice_url,
                 pdfUrl: inv.invoice_pdf,
                 paidAt: new Date(),
-              })
-              .onConflictDoNothing();
+              });
           }
         }
         break;

@@ -25,7 +25,10 @@ let bundleCache: string | null = null;
 async function getBundle(): Promise<string> {
   if (bundleCache) return bundleCache;
   bundleCache = await bundle({
-    entryPoint: path.join(__dirname, 'index.ts'),
+    // Must be the file that calls `registerRoot()` — see Root.tsx.
+    // The package ships TS sources (no dist build), so this resolves
+    // to packages/video/src/Root.tsx at runtime under tsx/node.
+    entryPoint: path.join(__dirname, 'Root.tsx'),
     webpackOverride: (config) => config,
   });
   return bundleCache;

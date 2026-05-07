@@ -37,6 +37,9 @@ import {
   Monitor,
   Tablet,
   Smartphone,
+  Upload,
+  X,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { SiteEditor } from '@/components/dashboard/SiteEditor';
@@ -1350,6 +1353,7 @@ export default function WebsitesPage() {
       {imagePicker ? (
         <ImagePickerModal
           images={clientImages}
+          imageRows={clientImageRows}
           clientId={newSite.clientId}
           onPick={(pick) => {
             const fieldName = imagePicker.fieldName;
@@ -2015,24 +2019,50 @@ function TeamMemberRow({
  * Modal image picker. Lets the agency pick from the client's media
  * library OR upload a new photo on the spot. Fires `onPick` with either
  * a library index or a direct URL. Closes on backdrop click / Esc.
+ *
+ * Enhancements over the naïve grid:
+ *   - Live search box filters the grid by filename (quick way to find
+ *     "that kitchen photo" in a library of 80 images).
+ *   - Keyboard shortcuts: Esc closes; Enter picks the first match when
+ *     a search query is active; Cmd/Ctrl+U opens the upload dialog.
+ *   - Upload from here gets auto-picked once complete so the agency
+ *     doesn't have to scroll to find their upload in the library.
+ *   - Image count + filter count shown in the header so the agency
+ *     always knows how many matches a search returned.
  */
 function ImagePickerModal({
   images,
+  imageRows,
   clientId,
   onPick,
   onClose,
 }: {
   images: string[];
+  /** Optional DB rows with filenames / descriptions for search. */
+  imageRows?: Array<{
+    id: string;
+    fileUrl: string;
+    fileName?: string | null;
+    aiDescription?: string | null;
+  }>;
   clientId: string;
   onPick: (pick: { kind: 'library'; index: number } | { kind: 'url'; url: string }) => void;
   onClose: () => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const [query, setQuery] = useState('');
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
+      // Cmd/Ctrl+U → open upload dialog. Quality-of-life shortcut
+      // that mirrors the keyboard convention most browsers use for
+      // "Upload".
+      if ((e.metaKey || e.ctrlKey) && e.key === 'u') {
+        e.preventDefault();
+        fileRef.current?.click();
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -2065,6 +2095,25 @@ function ImagePickerModal({
     }
   };
 
+  // Build a filterable projection — preserve original index so picks
+  // still write the correct array position even when filtered.
+  const filtered = images
+    .map((src, i) => {
+      const row = imageRows?.find((r) => r.fileUrl === src);
+      const searchable = [
+        row?.fileName ?? '',
+        row?.aiDescription ?? '',
+        src.split('/').pop() ?? '',
+      ]
+        .join(' ')
+        .toLowerCase();
+      return { src, index: i, row, searchable };
+    })
+    .filter((entry) => {
+      if (!query.trim()) return true;
+      return entry.searchable.includes(query.trim().toLowerCase());
+    });
+
   return (
     <div
       className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 backdrop-blur-sm"
@@ -2078,10 +2127,14 @@ function ImagePickerModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
-          <div>
-            <h3 className="text-sm font-semibold text-slate-900">Choose an image</h3>
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold text-slate-900">
+              Choose an image
+            </h3>
             <p className="text-[11px] text-slate-500">
-              From the library or upload a fresh one.
+              {query.trim()
+                ? `${filtered.length} of ${images.length} match "${query.trim()}"`
+                : `${images.length} in the library · search or upload a fresh one`}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -2090,11 +2143,12 @@ function ImagePickerModal({
               onClick={() => fileRef.current?.click()}
               disabled={uploading || !clientId}
               className="flex items-center gap-1.5 rounded-full bg-[#1D9CA1] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[#158087] disabled:opacity-60"
+              title="Upload (⌘U / Ctrl+U)"
             >
               {uploading ? (
                 <Loader2 className="h-3 w-3 animate-spin" />
               ) : (
-                <Sparkles className="h-3 w-3" />
+                <Upload className="h-3 w-3" />
               )}
               Upload new
             </button>
@@ -2104,7 +2158,7 @@ function ImagePickerModal({
               className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
               aria-label="Close"
             >
-              <Trash2 className="h-4 w-4 rotate-45" />
+              <X className="h-4 w-4" />
             </button>
             <input
               ref={fileRef}
@@ -2119,27 +2173,93 @@ function ImagePickerModal({
           </div>
         </div>
 
-        <div className="max-h-[70vh] overflow-y-auto p-5">
+        {/* Search bar — only shown when we have enough images that search
+            actually helps. Below ~8 images a flat grid is easier to scan. */}
+        {images.length >= 8 ? (
+          <div className="border-b border-slate-100 bg-slate-50 px-5 py-2">
+            <div className="relative">
+              <Input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search by filename or description…"
+                className="h-9 pl-8 text-xs"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && filtered.length > 0) {
+                    e.preventDefault();
+                    onPick({ kind: 'library', index: filtered[0]!.index });
+                  }
+                }}
+              />
+              <Edit3 className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+              {query ? (
+                <button
+                  type="button"
+                  onClick={() => setQuery('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-700"
+                  aria-label="Clear search"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+
+        <div className="max-h-[60vh] overflow-y-auto p-5">
           {images.length === 0 ? (
-            <p className="py-10 text-center text-sm text-slate-500">
-              No images in the library yet. Upload one above.
-            </p>
+            <div className="py-10 text-center">
+              <ImageIcon className="mx-auto h-8 w-8 text-slate-300" />
+              <p className="mt-2 text-sm text-slate-500">
+                No images in the library yet.
+              </p>
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-[#1D9CA1] px-4 py-1.5 text-xs font-semibold text-white hover:bg-[#158087]"
+              >
+                <Upload className="h-3 w-3" />
+                Upload the first photo
+              </button>
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="py-10 text-center">
+              <p className="text-sm text-slate-500">
+                No images match &quot;{query.trim()}&quot;.
+              </p>
+              <button
+                type="button"
+                onClick={() => setQuery('')}
+                className="mt-2 text-[11px] font-medium text-[#1D9CA1] hover:underline"
+              >
+                Clear search
+              </button>
+            </div>
           ) : (
             <div className="grid grid-cols-3 gap-3 md:grid-cols-4 lg:grid-cols-5">
-              {images.map((src, i) => (
+              {filtered.map(({ src, index, row }) => (
                 <button
-                  key={`${src}-${i}`}
+                  key={`${src}-${index}`}
                   type="button"
-                  onClick={() => onPick({ kind: 'library', index: i })}
+                  onClick={() => onPick({ kind: 'library', index })}
                   className="group relative aspect-square overflow-hidden rounded-xl border-2 border-transparent bg-slate-100 transition-all hover:border-[#1D9CA1]"
+                  title={row?.aiDescription ?? row?.fileName ?? undefined}
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={src}
-                    alt=""
+                    alt={row?.aiDescription ?? ''}
                     className="h-full w-full object-cover"
                     loading="lazy"
                   />
+                  {/* Caption overlay on hover — surfaces the AI label
+                      so the agency can read "which one is the lemon
+                      cake" before clicking. */}
+                  {row?.aiDescription ? (
+                    <span className="pointer-events-none absolute inset-x-0 bottom-0 line-clamp-2 bg-gradient-to-t from-black/80 via-black/40 to-transparent px-2 pb-2 pt-6 text-left text-[10px] font-medium text-white opacity-0 transition-opacity group-hover:opacity-100">
+                      {row.aiDescription}
+                    </span>
+                  ) : null}
                   <span className="absolute inset-0 flex items-center justify-center bg-[#1D9CA1]/0 transition-colors group-hover:bg-[#1D9CA1]/30">
                     <span className="rounded-full bg-white/95 px-2.5 py-0.5 text-[10px] font-semibold text-slate-900 opacity-0 shadow transition-opacity group-hover:opacity-100">
                       Pick
@@ -2149,6 +2269,33 @@ function ImagePickerModal({
               ))}
             </div>
           )}
+        </div>
+
+        {/* Footer helper — keyboard shortcuts. Tiny copy so it doesn't
+            steal attention from the grid. */}
+        <div className="flex items-center justify-between gap-2 border-t border-slate-100 bg-slate-50 px-5 py-2 text-[10px] text-slate-500">
+          <span>
+            <kbd className="rounded bg-white px-1 font-mono ring-1 ring-slate-200">
+              Esc
+            </kbd>{' '}
+            to close
+            {images.length >= 8 ? (
+              <>
+                {' '}
+                ·{' '}
+                <kbd className="rounded bg-white px-1 font-mono ring-1 ring-slate-200">
+                  Enter
+                </kbd>{' '}
+                picks first match
+              </>
+            ) : null}
+          </span>
+          <span>
+            <kbd className="rounded bg-white px-1 font-mono ring-1 ring-slate-200">
+              ⌘/Ctrl+U
+            </kbd>{' '}
+            to upload
+          </span>
         </div>
       </div>
     </div>

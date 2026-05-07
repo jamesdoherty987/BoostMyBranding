@@ -624,6 +624,39 @@ export class BoostApi {
   }
 
   /**
+   * AI-powered single-page generator. Appends a fully-populated page
+   * (hero + layout + per-page block data) to the client's site config
+   * and returns both the new config and the new page on its own.
+   *
+   * The `brief` is free text describing what the page is for (e.g.
+   * "a Menu page with our seasonal espresso drinks and weekend specials").
+   * `titleHint` is optional — Claude picks a better title when the hint
+   * doesn't fit.
+   */
+  generateWebsitePage(args: {
+    clientId: string;
+    currentConfig: Record<string, any>;
+    brief: string;
+    titleHint?: string;
+  }) {
+    return this.request<{
+      config: WebsiteConfig;
+      page: {
+        slug: string;
+        title: string;
+        layout: string[];
+        hero?: Record<string, unknown>;
+        blocks?: Record<string, unknown>;
+        meta?: { title?: string; description?: string };
+      };
+      summary: string;
+    }>('/api/v1/automation/generate-website-page', {
+      method: 'POST',
+      body: JSON.stringify(args),
+    });
+  }
+
+  /**
    * Targeted single-field update. Used by the inline editor — a headline
    * tweak shouldn't round-trip through Claude. `path` is dotted
    * (e.g. `hero.headline`, `services.0.title`).
@@ -666,6 +699,25 @@ export class BoostApi {
         body: JSON.stringify(args),
       },
     );
+  }
+
+  /**
+   * Generate a bespoke hero illustration — the scroll-animated "prop"
+   * sitting next to the hero copy — via fal.ai from a short brief.
+   * Different from `generateHeroImage`: that one produces a full-bleed
+   * background photograph; this one produces a stylised, brand-coloured
+   * illustrated object for the parallax slot. Result is saved as
+   * `hero.illustration.customUrl`.
+   */
+  generateHeroIllustration(args: { clientId: string; brief: string }) {
+    return this.request<{
+      imageUrl: string;
+      prompt: string;
+      fromMock?: boolean;
+    }>('/api/v1/automation/generate-hero-illustration', {
+      method: 'POST',
+      body: JSON.stringify(args),
+    });
   }
 
   /**

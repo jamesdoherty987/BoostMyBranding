@@ -138,3 +138,166 @@ Now write the prompt for ${args.businessName}.`;
     .replace(/^["']|["']$/g, '')
     .trim();
 }
+
+
+/* ═══════════════════════════════════════════════════════════════════ */
+/* Hero illustration generator — the SVG-like "prop" next to the hero  */
+/* ═══════════════════════════════════════════════════════════════════ */
+
+export interface GenerateHeroIllustrationArgs {
+  clientId: string;
+  businessName: string;
+  industry: string;
+  /** Free-text brief from the agency. Drives the look. */
+  brief: string;
+  /**
+   * Brand palette so the generated illustration picks up the site's
+   * colours rather than a random mid-grey. Passed verbatim into the
+   * image prompt as "brand colours: #..." hints.
+   */
+  primaryColor?: string;
+  accentColor?: string;
+}
+
+export interface GenerateHeroIllustrationResult {
+  imageUrl: string;
+  prompt: string;
+  fromMock: boolean;
+}
+
+/**
+ * AI-generated hero illustration. Where `generateHeroImage` above
+ * produces a full-bleed photograph for the hero background, this
+ * produces a small SIDE-OF-HERO illustrated object (the parallax SVG
+ * slot) — the equivalent of the rocket on the marketing site, but
+ * drawn bespoke for the business rather than picked from the 15
+ * built-in styles.
+ *
+ * Output is a transparent-background PNG suitable for the
+ * `hero.illustration.customUrl` field. The renderer's existing motion
+ * presets (launch, float, drift, tilt-3d, etc.) apply to the custom
+ * URL exactly as they do to the built-in styles.
+ *
+ * Runs through fal.ai's text-to-image models. Persists the result on
+ * the client's website config so the public renderer picks it up on
+ * next view.
+ */
+export async function generateHeroIllustration(
+  args: GenerateHeroIllustrationArgs,
+): Promise<GenerateHeroIllustrationResult> {
+  const prompt = await buildIllustrationPrompt(args);
+
+  // Square aspect — the renderer puts this in a fixed-width slot next
+  // to the hero copy, and a square PNG scales cleanly to any size.
+  // We request the illustration on transparent background via the
+  // prompt; fal's default is still opaque, but Flux respects
+  // "isolated on white/transparent" instructions well enough for most
+  // cases. Downstream CSS can mix-blend-mode it in worst case.
+  const imageUrl = await withRetry(() => generateImage(prompt, '1:1'), {
+    label: `hero_illustration:${args.clientId}`,
+    attempts: 2,
+  });
+
+  if (isDbConfigured()) {
+    const db = getDb();
+    const [row] = await db
+      .select({ websiteConfig: clients.websiteConfig })
+      .from(clients)
+      .where(eq(clients.id, args.clientId));
+    const current = (row?.websiteConfig ?? {}) as Partial<WebsiteConfig>;
+    const existingHero = current.hero ?? {
+      headline: '',
+      subheadline: '',
+      imageIndex: null,
+      ctaPrimary: { label: '', href: '' },
+    };
+    const existingIllustration = existingHero.illustration ?? {};
+    const next: Partial<WebsiteConfig> = {
+      ...current,
+      hero: {
+        ...existingHero,
+        illustration: {
+          // Preserve motion / side / scale if already set.
+          ...existingIllustration,
+          customUrl: imageUrl,
+          // Store the brief so later regenerations start from the same
+          // creative direction.
+          prompt: args.brief,
+        },
+      } as WebsiteConfig['hero'],
+    };
+    await db
+      .update(clients)
+      .set({ websiteConfig: next as any })
+      .where(eq(clients.id, args.clientId));
+  }
+
+  return {
+    imageUrl,
+    prompt,
+    fromMock: !features.fal,
+  };
+}
+
+/**
+ * Turn a short agency brief into a full image-generation prompt. We
+ * deliberately steer away from photo realism — the illustration slot
+ * is meant to be a stylised mark, not a second hero photo.
+ */
+async function buildIllustrationPrompt(
+  args: GenerateHeroIllustrationArgs,
+): Promise<string> {
+  const colourHint =
+    args.primaryColor || args.accentColor
+      ? `Use the brand palette: primary ${args.primaryColor ?? ''} accent ${args.accentColor ?? ''}. Render the subject in these colours as gradients and flat shapes — not background wash.`
+      : '';
+
+  if (!features.claude) {
+    // Deterministic fallback when Claude isn't wired — build a decent
+    // prompt directly from the brief.
+    return [
+      `Stylised vector illustration of ${args.brief} for a ${args.industry} business.`,
+      'Flat design with subtle gradients, clean geometric shapes, isolated on a transparent background. No text, no watermark, no photo-realism.',
+      colourHint,
+      'Single dominant object centred in frame, minimal composition, sharp edges, soft shadows.',
+    ]
+      .filter(Boolean)
+      .join(' ');
+  }
+
+  const instruction = `You are an art director writing ONE image-generation prompt for a brand illustration that will sit next to the hero copy on a small business website.
+
+BUSINESS: ${args.businessName}
+INDUSTRY: ${args.industry}
+AGENCY BRIEF: ${args.brief}
+${args.primaryColor ? `PRIMARY COLOR: ${args.primaryColor}\n` : ''}${args.accentColor ? `ACCENT COLOR: ${args.accentColor}\n` : ''}
+CONSTRAINTS:
+- Stylised vector illustration — NOT a photograph, NOT photo-realistic.
+- Flat design with subtle gradients, clean geometric shapes.
+- Single dominant object centred in frame.
+- Transparent background (isolated on white/transparent so the renderer can composite it cleanly).
+- Brand palette ONLY for the subject colours. No background wash.
+- No text, no logos, no watermarks.
+- Visual style cues: modern, confident, editorial illustration, mirrors Apple / Stripe / Linear marketing-site aesthetic.
+
+Return ONLY the prompt string — no preamble, no JSON, no quotes.`;
+
+  try {
+    const result = await generateText(instruction, {
+      model: 'sonnet',
+      maxTokens: 400,
+    });
+    return result.trim().slice(0, 2000);
+  } catch {
+    // Fall back to the deterministic prompt on Claude errors so the
+    // request still produces an image.
+    return [
+      `Stylised vector illustration of ${args.brief} for a ${args.industry} business.`,
+      'Flat design with subtle gradients, clean geometric shapes, isolated on a transparent background. No text, no watermark, no photo-realism.',
+      colourHint,
+      'Single dominant object centred in frame, minimal composition.',
+    ]
+      .filter(Boolean)
+      .join(' ');
+  }
+}

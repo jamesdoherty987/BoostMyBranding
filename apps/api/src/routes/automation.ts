@@ -13,8 +13,9 @@ import {
   editWebsiteWithAI,
   updateWebsiteField,
   saveWebsiteConfig,
+  generateWebsitePage,
 } from '../services/websites.js';
-import { generateHeroImage } from '../services/heroImage.js';
+import { generateHeroImage, generateHeroIllustration } from '../services/heroImage.js';
 import { getDb, isDbConfigured, clients, posts } from '@boost/database';
 import {
   publishDue,
@@ -208,6 +209,40 @@ automationRouter.post(
 );
 
 /**
+ * AI-powered single-page generator. Takes a current site config + a
+ * natural-language brief ("a Menu page with our espresso drinks") and
+ * returns a fully populated new PageConfig appended to the site's
+ * pages array. Uses the same rate limiter as `edit-website` since it
+ * makes one Claude call per request.
+ */
+const generatePageSchema = z.object({
+  clientId: z.string().min(1).max(100),
+  currentConfig: z.record(z.any()),
+  brief: z.string().min(1).max(3000),
+  titleHint: z.string().max(100).optional(),
+});
+
+automationRouter.post(
+  '/generate-website-page',
+  requireAuth,
+  requireRole('agency_admin', 'agency_member'),
+  regenerationLimiter,
+  async (req, res, next) => {
+    try {
+      const args = generatePageSchema.parse(req.body);
+      args.brief = sanitizeUserText(args.brief);
+      if (args.titleHint) {
+        args.titleHint = sanitizeUserText(args.titleHint);
+      }
+      const result = await generateWebsitePage(args);
+      res.json({ data: result });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+/**
  * Targeted single-field update. Used by the inline section editor so a
  * headline tweak doesn't round-trip through Claude. `path` is a dotted
  * key only (e.g. `hero.headline`, `services.0.title`). Numeric segments
@@ -330,6 +365,66 @@ automationRouter.post(
         description: client.brandVoice ?? undefined,
         overridePrompt: cleanedOverride,
         heroVariant: config?.hero?.variant,
+      });
+      res.json({ data: result });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+/**
+ * Generate a bespoke hero illustration — the scroll-animated "prop"
+ * next to the hero copy — via fal.ai from an agency brief.
+ *
+ * Different from `/generate-hero-image`: that one produces a full-bleed
+ * photograph for the hero background; this one produces a small
+ * stylised SVG-like illustration for the parallax slot. The result is
+ * saved to `hero.illustration.customUrl`, so the existing renderer +
+ * motion presets pick it up automatically.
+ */
+const heroIllustrationSchema = z.object({
+  clientId: z.string().min(1).max(100),
+  brief: z.string().min(1).max(1000),
+});
+
+automationRouter.post(
+  '/generate-hero-illustration',
+  requireAuth,
+  requireRole('agency_admin', 'agency_member'),
+  regenerationLimiter,
+  async (req, res, next) => {
+    try {
+      const args = heroIllustrationSchema.parse(req.body);
+      const cleanedBrief = sanitizeUserText(args.brief);
+      if (!isDbConfigured()) {
+        return res.json({
+          data: {
+            imageUrl:
+              'https://picsum.photos/seed/illustration-mock/800/800',
+            prompt: cleanedBrief,
+            fromMock: true,
+          },
+        });
+      }
+      const db = getDb();
+      const [client] = await db
+        .select()
+        .from(clients)
+        .where(eq(clients.id, args.clientId));
+      if (!client) {
+        return res.status(404).json({
+          error: { message: 'Client not found', code: 'NOT_FOUND' },
+        });
+      }
+      const config = (client.websiteConfig ?? {}) as any;
+      const result = await generateHeroIllustration({
+        clientId: args.clientId,
+        businessName: client.businessName,
+        industry: client.industry ?? 'Local Business',
+        brief: cleanedBrief,
+        primaryColor: config?.brand?.primaryColor,
+        accentColor: config?.brand?.accentColor,
       });
       res.json({ data: result });
     } catch (e) {

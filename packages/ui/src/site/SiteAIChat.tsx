@@ -26,14 +26,28 @@ interface Message {
 /**
  * Suggested starter prompts shown on first open. Kept short and
  * actionable — the user can click to insert into the input.
+ *
+ * The list maps to the full edit surface exposed by `editWebsiteWithAI`
+ * — colours, hero variants, illustrations, sections, layout, items,
+ * stats, contact info, SEO, navigation, pages. Agencies skim these to
+ * learn what the AI can actually change.
  */
 const SUGGESTIONS = [
   'Make the hero darker and more premium',
   'Rewrite the headline to be punchier',
-  'Add a menu page',
-  'Change the primary color to navy',
-  'Add a section about our sourcing story',
-  'Make the tone friendlier',
+  'Change the primary color to navy blue',
+  'Swap the hero illustration to a coffee cup on the left',
+  'Use the marquee variant for the logo strip',
+  'Add a Menu page with our espresso drinks and brunch',
+  'Feature the middle team member',
+  'Change the services style to bento grid',
+  'Update the phone to +353 1 234 5678',
+  'Add an announcement bar about Christmas hours',
+  'Change the testimonials to the draggable style',
+  'Rename "Home" nav item to "Start"',
+  'Update SEO title to Murphy Plumbing — Dublin 2',
+  'Add our Instagram to the socials',
+  'Make the rating stat 4.9',
 ] as const;
 
 export function SiteAIChat() {

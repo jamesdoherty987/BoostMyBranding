@@ -940,6 +940,124 @@ LOGO PLACEMENT (critical — don't send logos as hero images):
 }
 
 /**
+ * Single-page generator. Given a fully-generated site config and a
+ * natural-language description of a new page the agency wants added
+ * ("a Menu page showing our espresso drinks", "an About page with our
+ * story"), produce a complete `PageConfig` populated with real copy,
+ * a page-appropriate layout, and — where applicable — hero + per-page
+ * block overrides.
+ *
+ * The generator has access to:
+ *   - the full existing site config (so brand voice, services, team,
+ *     etc. stay consistent with the rest of the site)
+ *   - the image library (so image-heavy pages can reference real photos
+ *     by index rather than leaving placeholders)
+ *   - the page brief from the agency (what this page is for / what
+ *     should be on it)
+ *
+ * The response is a single PageConfig, not a full WebsiteConfig. The
+ * caller appends it to config.pages and persists. The home page is
+ * synthesised separately when converting a single-page site to
+ * multipage — this prompt only ever generates SUB-pages.
+ */
+export function websitePagePrompt(vars: {
+  businessName: string;
+  industry: string;
+  /** The full existing WebsiteConfig serialised as JSON so Claude can keep the new page consistent with the existing brand, services, team, colour palette, tone. */
+  currentConfigJson: string;
+  /** What the agency wants the page to be — title + what should go on it. Free text. */
+  pageBrief: string;
+  /** Optional title hint from the agency (e.g. "Menu", "Practice Areas"). Claude can override if a better one fits. */
+  titleHint?: string;
+  /** Descriptions of the client's available images with indices. */
+  imageDescriptions?: string;
+  /** Slugs already in use — Claude must pick a unique slug for the new page. */
+  existingSlugs: string[];
+}) {
+  return `You are a senior web designer & copywriter adding ONE new page to an existing website. You have the full current site config for context so the new page matches the brand voice, colour palette, and structure.
+
+BUSINESS: "${vars.businessName}" (${vars.industry})
+
+WHAT THE AGENCY WANTS ON THIS PAGE:
+${vars.pageBrief}
+${vars.titleHint ? `\nTITLE HINT (may override if a better one fits): ${vars.titleHint}\n` : ''}
+SLUGS ALREADY IN USE (cannot be reused): ${vars.existingSlugs.join(', ')}
+
+${vars.imageDescriptions ? `AVAILABLE IMAGES (reference by index):\n${vars.imageDescriptions}\n` : ''}
+CURRENT SITE CONFIG (for brand voice / services / team / style reference — DO NOT copy home page content verbatim; the new page must have its own copy that fits the brief):
+${vars.currentConfigJson}
+
+════════════════════════════════════════════════════════════════════
+OUTPUT — JSON only. Return a SINGLE PageConfig object — nothing else.
+════════════════════════════════════════════════════════════════════
+
+{
+  "slug": "<lowercase-dashed url segment. NOT 'home'. Must not be in the existing-slugs list above. Examples: 'menu', 'about', 'practice-areas', 'team', 'pricing', 'shop', 'portfolio'.>",
+  "title": "<Human title for the nav, max ~3 words. E.g. 'Our Menu', 'About', 'Practice Areas', 'Team', 'Pricing', 'Shop', 'Gallery'.>",
+  "meta": {
+    "title": "<SEO page title, ≤60 chars, e.g. 'Menu — ${vars.businessName}'>",
+    "description": "<SEO meta description, ≤160 chars>"
+  },
+  "layout": ["nav","hero","<block>","<block>","contact","footer"],
+  "hero": {
+    "eyebrow": "<optional 2-4 word kicker specific to this page, e.g. 'Our work', 'Meet the team'. OMIT the field when no good kicker fits.>",
+    "headline": "<Page-specific headline, 5-10 words, benefit-led. Last 2 words auto-highlight. DIFFERENT from the home page headline — this page has its own message.>",
+    "subheadline": "<1-2 sentences, specific to this page.>",
+    "ctaPrimary": { "label": "<action verb>", "href": "<#contact or relevant section>" },
+    "ctaSecondary": { "label": "<optional>", "href": "<optional>" },
+    "variant": "<optional: override the site's hero.variant for this page only. Default = reuse the home variant. Prefer 'two-column-image' or 'parallax-layers' when this page has a strong photo; 'spotlight' or 'hero-highlight' for copy-led sub-pages like About / Pricing.>",
+    "imageIndex": <optional image index for the hero, or null>
+  },
+  "blocks": {
+    <POPULATE the per-page overrides for whatever blocks appear in layout. Example: if layout includes 'menu', include a "menu" object. If layout includes 'team', include a "team" object. Data shape for each block is IDENTICAL to the root WebsiteConfig shape — same field names. See the current site config above for reference.>
+  }
+}
+
+════════════════════════════════════════════════════════════════════
+RULES
+════════════════════════════════════════════════════════════════════
+
+1. LAYOUT — pick blocks that FIT THE PAGE. Not everything from home.
+   - A "Menu" page → ["nav","hero","menu","gallery","cta","contact","footer"]
+   - An "About" page → ["nav","hero","about","stats","team","reviews","cta","footer"]
+   - A "Team" page → ["nav","hero","team","reviews","contact","footer"]
+   - A "Practice Areas" page (legal) → ["nav","hero","services","faq","cta","contact","footer"]
+   - A "Pricing" page → ["nav","hero","pricingTiers","faq","cta","contact","footer"] or ["nav","hero","priceList","faq","cta","contact","footer"]
+   - A "Shop" page → ["nav","hero","products","faq","contact","footer"]
+   - A "Gallery" / "Portfolio" page → ["nav","hero","portfolio","cta","contact","footer"] or ["nav","hero","beforeAfter","gallery","cta","contact","footer"]
+   - A "Services" page → ["nav","hero","services","process","faq","cta","contact","footer"]
+   - A "Schedule" / "Classes" page → ["nav","hero","schedule","cta","contact","footer"]
+   - A "Service Areas" page → ["nav","hero","serviceAreas","reviews","cta","contact","footer"]
+   - An "FAQ" page → ["nav","hero","faq","cta","contact","footer"]
+   - A generic "Info" / custom page → ["nav","hero","custom","cta","contact","footer"] and populate customSections in blocks.
+   - ALWAYS start with "nav" and end with "footer".
+
+2. COPY — write real, page-specific content. Do not reuse the home hero headline / subhead. Do not say "coming soon". Do not leave empty strings in required fields. Every field the layout asks for must be populated with real copy.
+
+3. BLOCKS overrides — only include block data in "blocks" for the blocks that appear in "layout" AND need content different from / additional to the home page's data.
+   - For a Menu page, you MUST include a full "menu" object (3-6 categories, 3+ items each).
+   - For a Team page, you MUST include a full "team" object with all members.
+   - For a Portfolio page, you MUST include a "portfolio" object with 3-6 projects.
+   - For a Shop page, populate "products".
+   - For a Pricing page, populate "pricingTiers" or "priceList" depending on the business model.
+   - When a block repeats home content as-is (e.g. "contact" is identical on every page), OMIT it from "blocks" — the renderer falls back to the root config for anything not overridden.
+
+4. IMAGE GUIDANCE — only reference indices that exist in AVAILABLE IMAGES. If you need images for a gallery/portfolio/products and there aren't enough in the library, pick the variant/layout that works with what's available (e.g. use "services" cards with icons instead of "products" with image tiles).
+
+5. SLUG — must be URL-safe, lowercase, dashed. Cannot match any value in the existing-slugs list above. Examples: 'menu', 'our-menu', 'about', 'about-us', 'team', 'our-team', 'practice-areas', 'pricing', 'prices', 'shop', 'gallery', 'portfolio', 'services', 'faq'.
+
+6. TITLE — short and human. Fits the nav at small sizes. "Menu" not "Have a look at our menu". "Team" not "Meet our amazing team". Title Case preferred.
+
+7. BRAND VOICE — re-read the current config's tone / heading style before writing. If the home page uses warm short headings, use warm short headings here too. If the home page uses punchy one-sentence subheadings, use punchy one-sentence subheadings here.
+
+8. CTAs — point at something on THIS page or on the home page's contact section. Use "#contact" for the contact anchor. If the new page has a contact block in its layout, "#contact" still works (it scrolls to the block on this page).
+
+9. HERO VARIANT — pick a variant that fits this page's personality. Sub-pages commonly use smaller, text-focused heroes (spotlight, hero-highlight, two-column-image) rather than the full flashy home-page hero. Omit the field to inherit the home variant.
+
+10. Return ONLY the JSON PageConfig. No preamble, no code fences, no trailing commentary.`;
+}
+
+/**
  * Video script planner. Given a client's brand voice and the pool of
  * available media (with AI subject descriptions), produce a sequenced
  * script for a 15–25 second Reels-style short. Each clip includes:

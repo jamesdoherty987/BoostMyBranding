@@ -295,6 +295,7 @@ RULES:
   - scale: 0.5 to 1.5 multiplier. Default 1.
   - customUrl: set ONLY if the agency explicitly uploaded an image. Don't invent URLs. When set, style is ignored.
   - prompt: short brief stored alongside the illustration so later edits can reference it.
+- If asked to GENERATE a brand-new bespoke illustration ("draw me a donut for the hero", "generate a new illustration of X"), set hero.illustration.prompt to a descriptive brief (so the dedicated Illustration editor picks it up) AND pick the nearest built-in style from the list above as a fallback. Also mention in the summary that the user should click "Generate" in the Illustration editor to actually render the bespoke image. Do NOT invent a customUrl — image generation is a separate endpoint.
 - If asked to remove the hero illustration, set hero.illustration to null (or remove the field entirely).
 - If asked for a typewriter / typing / flipping-words / generative text effect on the headline, set hero.headlineEffect to one of: typewriter (types character-by-character), flip-words (last word cycles — also populate hero.flipWords with 2-5 alternatives), generate (words fade in one-by-one). Clear this field to go back to the static gradient headline.
 - If asked to change the testimonials style, update reviewsSection.variant to one of: grid (default), marquee (auto-scroll), carousel (one at a time with avatars), masonry, draggable (physical drag-around cards), stack (cycling card-stack), animated-testimonials.
@@ -323,6 +324,21 @@ RULES:
 - If asked to "feature press" / "show partner logos", populate "logoStrip".
 - If asked for an intro video / demo / embed, populate "video" with the URL.
 - If asked to add a newsletter / waitlist / email signup, populate "newsletter".
+- If asked to change a specific stat ("change customers stat to 500", "make the rating 4.9"), update the matching entry in the "stats" array — each stat has {value, prefix, suffix, label}. Don't invent new stats unless asked.
+- If asked to update contact info ("change the phone to X", "we moved address", "new email"), update contact.phone / contact.address / contact.email / contact.whatsapp / contact.hours. Keep the same format as the existing value (e.g. keep international phone prefix if already used).
+- If asked to change opening hours / "when are we open", update contact.hours as newline-separated lines ("Mon–Fri 9am–6pm\\nSat 10am–3pm"). If also asked to "show hours on the page", set contact.showHours to true.
+- If asked to show / hide the booking form, set contact.showBookingForm to true or false.
+- If asked to change nav link labels ("rename 'Home' to 'Start'", "add a 'Gallery' nav item"), update the "navigation" array of strings. On multipage sites, page titles take precedence in the nav — rename the page instead.
+- If asked to add / change social links ("add our Instagram", "change Facebook URL"), update the "socials" object: {facebook, instagram, tiktok, linkedin, x, youtube, google}. Only set fields that were mentioned — don't invent URLs.
+- If asked to change SEO / page title / "what Google shows" / meta description, update "meta": {title, description, keywords[]}. Title ≤60 chars, description ≤160 chars.
+- If asked to change a page's SEO individually ("change the About page's meta title"), update pages[N].meta.{title, description}.
+- If asked to change the sticky mobile CTA ("change the mobile button to Call", "hide WhatsApp on mobile"), update "mobileCta": {primaryLabel, primaryHref, showCall, showWhatsApp}.
+- If asked to change the footer tagline, update footer.tagline (leave blank to reuse brand.tagline).
+- If asked to show / hide / remove the announcement bar, toggle "announcement" on or off. To enable: set announcement = {message, tone?, linkLabel?, linkHref?, nonDismissible?}. To remove: set announcement to null.
+- If asked to turn the site dark ("dark mode", "dark hero"), set brand.heroStyle to "dark" AND pick dark-friendly colours in brand.primaryColor / accentColor if the current palette is light.
+- If asked to make the design "more minimal" / "more energetic" / "more premium", adjust brand.tone (warm / professional / playful / premium) AND pick a hero variant + colour palette that matches (premium → spotlight/lamp + navy/gold; playful → multicolor/boxes + brighter palette; minimal → hero-highlight/spotlight + neutral palette).
+- If asked to regenerate the AI hero PHOTO / background image / "hero photo" (different from the SVG illustration above), set hero.aiImagePrompt to a new descriptive prompt and leave hero.aiImageUrl null — the backend regenerates the actual image separately. Don't invent URLs.
+- If asked to feature ALL items in a block ("feature every review"), set every item's .featured to true. If asked to unfeature everything, set every .featured to false.
 - Keep the same JSON structure — don't add or remove top-level keys.
 - The summary should be concise and specific, e.g. "Changed primary color to navy blue and made the hero dark."`;
 
@@ -356,6 +372,351 @@ RULES:
   }
 
   return { config, summary: result.summary ?? 'Config updated.' };
+}
+
+/**
+ * AI-powered page generator. Given an existing site config and a natural
+ * language brief ("an About page with our story", "a Menu page for the
+ * espresso drinks and seasonal specials"), produce a fully populated
+ * PageConfig and append it to the site's `pages` array.
+ *
+ * Unlike the bare "duplicate the home layout" approach, this runs the
+ * brief through Claude with the full current config so the new page has:
+ *   - a page-specific hero (headline, subhead, CTA)
+ *   - a layout picked for what the page is ABOUT (not a copy of home)
+ *   - real per-page block data (menu items, team members, prices etc.)
+ *   - matching brand voice, colours, and tone
+ *
+ * When the site is currently single-page (no `pages` array), we also
+ * synthesize a Home PageConfig from the root layout so the nav can
+ * switch between Home and the new page. The renderer falls back to
+ * root data for anything the page doesn't override.
+ */
+export async function generateWebsitePage(args: {
+  clientId: string;
+  currentConfig: Record<string, any>;
+  /** Natural-language description of what the page is for / should show. */
+  brief: string;
+  /** Optional agency-provided title hint (e.g. "Menu"). Claude may override. */
+  titleHint?: string;
+}): Promise<{
+  config: WebsiteConfig;
+  page: NonNullable<WebsiteConfig['pages']>[number];
+  summary: string;
+}> {
+  if (!isDbConfigured()) {
+    throw new Error('Database not configured');
+  }
+  const db = getDb();
+
+  const [client] = await db
+    .select()
+    .from(clients)
+    .where(eq(clients.id, args.clientId));
+  if (!client) throw new Error('Client not found');
+
+  const currentConfig = args.currentConfig as Partial<WebsiteConfig>;
+  const existingPages = (currentConfig.pages ?? []) as NonNullable<
+    WebsiteConfig['pages']
+  >;
+  const existingSlugs = new Set(existingPages.map((p) => p.slug));
+  // Even a single-page site has a reserved 'home' slug.
+  existingSlugs.add('home');
+
+  // 4 pages max including home. When the site is currently single-page
+  // (no pages array), we have 1 implicit home page, so the ceiling is 3
+  // additional; otherwise pages.length already includes home.
+  const currentPageCount = existingPages.length === 0 ? 1 : existingPages.length;
+  if (currentPageCount >= 4) {
+    throw new Error('Maximum 4 pages reached. Remove one to add another.');
+  }
+
+  // Pull fresh image rows so the generator can reference real indices.
+  const images = await db
+    .select()
+    .from(clientImages)
+    .where(eq(clientImages.clientId, client.id))
+    .orderBy(desc(clientImages.qualityScore))
+    .limit(30);
+  const imageDescriptions =
+    images.length > 0
+      ? images
+          .map(
+            (img, idx) =>
+              `[${idx}] ${img.aiDescription ?? img.fileName ?? 'photo'}${
+                img.qualityScore ? ` (score ${img.qualityScore})` : ''
+              }`,
+          )
+          .join('\n')
+      : undefined;
+
+  // Mock mode — without Claude we can't generate real content, but we
+  // can at least return a sensibly-named skeleton so the UI path still
+  // works offline.
+  if (!features.claude) {
+    const slug = generateUniqueSlug(
+      args.titleHint ?? args.brief ?? 'new-page',
+      existingSlugs,
+    );
+    const title = args.titleHint
+      ? args.titleHint.trim().slice(0, 80)
+      : toTitleCase(slug);
+
+    const mockPage: NonNullable<WebsiteConfig['pages']>[number] = {
+      slug,
+      title,
+      layout: ['nav', 'hero', 'services', 'contact', 'footer'],
+      hero: {
+        headline: title,
+        subheadline: args.brief.slice(0, 200),
+      },
+    };
+
+    const { config: newConfig, createdHome } = appendPageToConfig(
+      currentConfig,
+      mockPage,
+    );
+
+    return {
+      config: newConfig,
+      page: mockPage,
+      summary: createdHome
+        ? `Mock mode: stubbed "${title}" — site converted to multipage (Home + "${title}").`
+        : `Mock mode: stubbed a "${title}" page. Connect Claude for full AI-generated content.`,
+    };
+  }
+
+  const { websitePagePrompt } = await import('./prompts.js');
+  const prompt = websitePagePrompt({
+    businessName: client.businessName,
+    industry: client.industry ?? 'Local Business',
+    currentConfigJson: JSON.stringify(stripHeavyFieldsForContext(currentConfig)),
+    pageBrief: args.brief,
+    titleHint: args.titleHint,
+    imageDescriptions,
+    existingSlugs: Array.from(existingSlugs),
+  });
+
+  const rawPage = await withRetry(
+    () =>
+      generateJSON<Partial<NonNullable<WebsiteConfig['pages']>[number]>>(
+        prompt,
+        { model: 'sonnet', maxTokens: 5120, temperature: 0.4 },
+      ),
+    { label: `generate_page:${client.id}`, attempts: 2 },
+  );
+
+  const page = validateGeneratedPage(rawPage, existingSlugs);
+
+  const { config: newConfig, createdHome } = appendPageToConfig(
+    currentConfig,
+    page,
+  );
+
+  // Persist.
+  await db
+    .update(clients)
+    .set({
+      websiteConfig: newConfig,
+      websiteGeneratedAt: new Date(),
+    })
+    .where(eq(clients.id, client.id));
+
+  const contentBlockCount = Math.max(
+    0,
+    page.layout.filter((k) => k !== 'nav' && k !== 'footer').length,
+  );
+
+  const summary = createdHome
+    ? `Added "${page.title}" page — also converted the site to multipage (Home + "${page.title}").`
+    : `Added "${page.title}" page with ${contentBlockCount} content block${
+        contentBlockCount === 1 ? '' : 's'
+      }.`;
+
+  return { config: newConfig, page, summary };
+}
+
+/**
+ * Append a newly-generated PageConfig to the site's pages array. When the
+ * site is currently single-page (no pages array), synthesize a Home entry
+ * from the root layout first so both pages exist in `pages` and routing /
+ * nav / preview tabs all work.
+ */
+function appendPageToConfig(
+  currentConfig: Partial<WebsiteConfig>,
+  newPage: NonNullable<WebsiteConfig['pages']>[number],
+): {
+  config: WebsiteConfig;
+  createdHome: boolean;
+} {
+  const template = (currentConfig.template ?? 'service') as SiteTemplate;
+  const rootLayout =
+    currentConfig.layout && currentConfig.layout.length > 0
+      ? currentConfig.layout
+      : DEFAULT_LAYOUT[template];
+
+  const existingPages = (currentConfig.pages ?? []) as NonNullable<
+    WebsiteConfig['pages']
+  >;
+
+  let createdHome = false;
+  let nextPages: NonNullable<WebsiteConfig['pages']>;
+  if (existingPages.length === 0) {
+    // Convert single-page to multipage. Synthesize a Home entry from the
+    // current root layout so the nav / preview tabs can switch pages.
+    createdHome = true;
+    nextPages = [
+      {
+        slug: 'home',
+        title: 'Home',
+        layout: rootLayout,
+      },
+      newPage,
+    ];
+  } else {
+    nextPages = [...existingPages, newPage];
+  }
+
+  // Normalize the whole config so any missing fields get sensible defaults.
+  // We want the returned config to be complete & safe — the editor renders
+  // it immediately and expects every field present.
+  const merged = { ...currentConfig, pages: nextPages } as Partial<WebsiteConfig>;
+  return {
+    config: normalizeConfig(merged, template),
+    createdHome,
+  };
+}
+
+/**
+ * Validate and clean a page returned by Claude. Guarantees slug / title /
+ * layout are present and safe; falls back to sensible defaults when
+ * fields are missing or invalid.
+ */
+function validateGeneratedPage(
+  raw: Partial<NonNullable<WebsiteConfig['pages']>[number]> | null | undefined,
+  existingSlugs: Set<string>,
+): NonNullable<WebsiteConfig['pages']>[number] {
+  const validBlockKeys: SiteBlockKey[] = [
+    'nav',
+    'hero',
+    'stats',
+    'services',
+    'about',
+    'gallery',
+    'reviews',
+    'faq',
+    'contact',
+    'footer',
+    'menu',
+    'priceList',
+    'team',
+    'schedule',
+    'serviceAreas',
+    'beforeAfter',
+    'trustBadges',
+    'cta',
+    'custom',
+    'products',
+    'portfolio',
+    'process',
+    'pricingTiers',
+    'announcement',
+    'logoStrip',
+    'video',
+    'newsletter',
+  ];
+
+  const slug = generateUniqueSlug(
+    String(raw?.slug ?? raw?.title ?? 'new-page'),
+    existingSlugs,
+  );
+  const title =
+    String(raw?.title ?? '').trim().slice(0, 100) || toTitleCase(slug);
+
+  const rawLayout = Array.isArray(raw?.layout) ? raw!.layout : [];
+  let layout = rawLayout.filter((k: unknown): k is SiteBlockKey =>
+    validBlockKeys.includes(k as SiteBlockKey),
+  );
+  if (layout.length === 0) {
+    layout = ['nav', 'hero', 'services', 'contact', 'footer'];
+  }
+  if (layout[0] !== 'nav') layout = ['nav', ...layout];
+  if (layout[layout.length - 1] !== 'footer') layout = [...layout, 'footer'];
+
+  return {
+    slug,
+    title,
+    meta:
+      raw?.meta && typeof raw.meta === 'object'
+        ? {
+            title: raw.meta.title,
+            description: raw.meta.description,
+          }
+        : undefined,
+    layout,
+    hero: raw?.hero ?? undefined,
+    blocks: raw?.blocks ?? undefined,
+  };
+}
+
+/**
+ * Slugify a string and guarantee uniqueness against a set of taken slugs.
+ * Appends -2, -3, etc. when the base slug is taken. Also refuses to
+ * return 'home' — the home slug is reserved for the synthesised homepage
+ * entry and overwriting it would wipe the site's landing page.
+ */
+function generateUniqueSlug(
+  source: string,
+  existingSlugs: Set<string>,
+): string {
+  let base = slugify(source);
+  if (!base || base === 'home') base = 'page';
+  if (!existingSlugs.has(base)) return base;
+  let i = 2;
+  while (existingSlugs.has(`${base}-${i}`)) i++;
+  return `${base}-${i}`;
+}
+
+/**
+ * Slim down the current config for inclusion in the prompt context.
+ * The full config blob can exceed the model's context window once it
+ * has 20+ reviews, a full menu, and every block populated — we keep
+ * the fields that drive voice / brand / tone and strip the ones that
+ * would only bloat the prompt without adding signal.
+ */
+function stripHeavyFieldsForContext(
+  config: Partial<WebsiteConfig>,
+): Partial<WebsiteConfig> {
+  const copy = JSON.parse(JSON.stringify(config)) as Partial<WebsiteConfig>;
+  // Trim large arrays to their first ~6 entries so the prompt stays compact.
+  if (Array.isArray(copy.reviews) && copy.reviews.length > 6) {
+    copy.reviews = copy.reviews.slice(0, 6);
+  }
+  if (Array.isArray(copy.faq) && copy.faq.length > 6) {
+    copy.faq = copy.faq.slice(0, 6);
+  }
+  if (Array.isArray(copy.services) && copy.services.length > 8) {
+    copy.services = copy.services.slice(0, 8);
+  }
+  if (copy.gallery?.imageIndices && copy.gallery.imageIndices.length > 10) {
+    copy.gallery = {
+      ...copy.gallery,
+      imageIndices: copy.gallery.imageIndices.slice(0, 10),
+    };
+  }
+  // Pages already include their own big payloads — we don't need full
+  // nested page blocks for context, just the metadata.
+  if (Array.isArray(copy.pages)) {
+    copy.pages = copy.pages.map((p) => ({
+      slug: p.slug,
+      title: p.title,
+      layout: p.layout,
+      // Strip out per-page heavy blocks from context; keep hero so
+      // Claude can see the existing hero tone.
+      hero: p.hero,
+    })) as WebsiteConfig['pages'];
+  }
+  return copy;
 }
 
 /**

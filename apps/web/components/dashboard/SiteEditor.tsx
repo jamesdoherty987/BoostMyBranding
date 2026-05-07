@@ -1105,6 +1105,7 @@ export function SiteEditor({
             <PagesManager
               config={config}
               onChange={onChange}
+              clientId={clientId}
               activePageSlug={activePageSlug}
               onActivePageSlugChange={onActivePageSlugChange}
             />
@@ -1979,6 +1980,58 @@ function HeroEditor({
 
   return (
     <div className="space-y-5">
+      {/* Copy editor — eyebrow / headline / subheadline. Keeping these in
+          the panel as well as inline-editable in the preview means the
+          agency can write headlines without having to hunt the visible
+          preview. Useful when the hero variant covers / obscures the
+          copy (full-bg image, dark themes) so you can't easily click
+          exactly where the text is. */}
+      <div>
+        <p className="text-xs font-medium text-slate-600">Hero copy</p>
+        <div className="mt-2 space-y-2 rounded-xl border border-slate-200 bg-white p-3">
+          <LabelledField label="Eyebrow (optional)" hint="short kicker">
+            <Input
+              value={config.hero?.eyebrow ?? ''}
+              onChange={(e) =>
+                onChange({
+                  ...config,
+                  hero: { ...config.hero, eyebrow: e.target.value || undefined },
+                })
+              }
+              placeholder="e.g. Family-run since 1998"
+              maxLength={80}
+            />
+          </LabelledField>
+          <LabelledField label="Headline" hint="last 2 words auto-highlight">
+            <Input
+              value={config.hero?.headline ?? ''}
+              onChange={(e) =>
+                onChange({
+                  ...config,
+                  hero: { ...config.hero, headline: e.target.value },
+                })
+              }
+              placeholder="The thing people care about most."
+              maxLength={200}
+            />
+          </LabelledField>
+          <LabelledField label="Subheadline">
+            <Textarea
+              value={config.hero?.subheadline ?? ''}
+              onChange={(e) =>
+                onChange({
+                  ...config,
+                  hero: { ...config.hero, subheadline: e.target.value },
+                })
+              }
+              placeholder="One or two sentences that back up the headline."
+              rows={2}
+              maxLength={400}
+            />
+          </LabelledField>
+        </div>
+      </div>
+
       {/* Variant picker */}
       <div>
         <p className="text-xs font-medium text-slate-600">Hero style</p>
@@ -2408,11 +2461,13 @@ function HeroVariantPreview({
 function PagesManager({
   config,
   onChange,
+  clientId,
   activePageSlug,
   onActivePageSlugChange,
 }: {
   config: WebsiteConfig;
   onChange: (c: WebsiteConfig) => void;
+  clientId: string;
   activePageSlug: string;
   onActivePageSlugChange: (slug: string) => void;
 }) {
@@ -2420,25 +2475,24 @@ function PagesManager({
   const activePage = pages.find((p) => p.slug === activePageSlug);
   const MAX_PAGES = 4;
 
-  // Single-page site? Offer to upgrade it to multipage by synthesising a
-  // "home" PageConfig from the current root layout. After the upgrade,
-  // subsequent "Add a page" clicks append new pages.
+  // AI page-generation modal state. When the user clicks "Enable
+  // multipage" or "Add a page", we open a brief dialog asking what
+  // the page is for — the server then runs it through Claude and
+  // returns a fully populated PageConfig (hero + layout + block data).
+  //
+  // This replaces the old behaviour of appending a blank "New page"
+  // stub with a copy-pasted home layout, which always produced a page
+  // that looked identical to the homepage until the user edited every
+  // field by hand.
+  const [newPageModal, setNewPageModal] = useState(false);
+  const [generating, setGenerating] = useState(false);
+
+  // Single-page site? Offer to upgrade it to multipage by running the
+  // AI page generator with a brief — the server will synthesise a
+  // Home entry from the current root layout AND generate the requested
+  // sub-page in a single atomic call.
   const convertToMultipage = () => {
-    const homeLayout =
-      config.layout && config.layout.length > 0
-        ? config.layout
-        : ['nav', 'hero', 'services', 'about', 'contact', 'footer'];
-    const base: PageConfig = {
-      slug: 'home',
-      title: 'Home',
-      layout: homeLayout as PageConfig['layout'],
-    };
-    onChange({ ...config, pages: [base] });
-    onActivePageSlugChange('home');
-    toast.success(
-      'Multipage enabled',
-      'Add more pages below. Each one gets its own URL + sections.',
-    );
+    setNewPageModal(true);
   };
 
   const updatePage = (slug: string, patch: Partial<PageConfig>) => {
@@ -2457,53 +2511,55 @@ function PagesManager({
     });
   };
 
+  /**
+   * Open the AI page-generation modal. Unlike the old `addPage` which
+   * appended an empty stub and hoped the agency would fill it in field
+   * by field, this routes through Claude with the full current config
+   * as context so the new page has matching voice, colour palette, and
+   * appropriate blocks for whatever the agency describes.
+   */
   const addPage = () => {
     if (pages.length >= MAX_PAGES) {
       toast.info(`Maximum ${MAX_PAGES} pages`, 'Remove one to add another.');
       return;
     }
-    // Pick a slug that isn't in use. Users can rename after.
-    const base = 'new-page';
-    let slug = base;
-    let i = 2;
-    while (pages.some((p) => p.slug === slug)) slug = `${base}-${i++}`;
-    const newPage: PageConfig = {
-      slug,
-      title: 'New page',
-      layout: ['nav', 'hero', 'services', 'contact', 'footer'],
-      hero: {
-        headline: 'Something we want to say.',
-        subheadline: 'Edit this sub-page to fit the business.',
-      },
-    };
+    if (!clientId) {
+      toast.error('Pick a client first');
+      return;
+    }
+    setNewPageModal(true);
+  };
 
-    // Converting a single-page site to multipage? We need to synthesize
-    // a Home page entry first, otherwise the preview can't switch between
-    // Home and the new page (PagePicker only shows with >1 entries and
-    // resolvePage wants a `home` entry to exist).
-    const existingPages = pages.length === 0
-      ? [
-          {
-            slug: 'home',
-            title: 'Home',
-            // Use the root layout as the homepage's layout so the site
-            // still looks identical after the conversion.
-            layout:
-              config.layout && config.layout.length > 0
-                ? config.layout
-                : DEFAULT_LAYOUT[config.template ?? 'service'],
-          } satisfies PageConfig,
-        ]
-      : pages;
-
-    onChange({ ...config, pages: [...existingPages, newPage] });
-    onActivePageSlugChange(slug);
-    toast.success(
-      'Page added',
-      pages.length === 0
-        ? 'Site converted to multipage. Edit the new page or switch to Home from the preview tabs.'
-        : 'Give it a title and edit its content.',
-    );
+  /**
+   * Handler invoked when the NewPageModal submits. Calls the server's
+   * `/generate-website-page` endpoint, which runs Claude over the full
+   * site config + the brief, returns a complete PageConfig, and also
+   * persists the updated config on the server side. We still call
+   * `onChange` with the returned config so the local editor state
+   * matches immediately — the debounced save pipeline will reconcile.
+   */
+  const handleGeneratePage = async (brief: string, titleHint: string | undefined) => {
+    if (!clientId) {
+      toast.error('Pick a client first');
+      return;
+    }
+    setGenerating(true);
+    try {
+      const result = await api.generateWebsitePage({
+        clientId,
+        currentConfig: config as unknown as Record<string, unknown>,
+        brief,
+        titleHint: titleHint?.trim() || undefined,
+      });
+      onChange(sanitizeConfig(result.config));
+      onActivePageSlugChange(result.page.slug);
+      setNewPageModal(false);
+      toast.success('Page generated', result.summary);
+    } catch (e) {
+      toast.error('Page generation failed', (e as Error).message);
+    } finally {
+      setGenerating(false);
+    }
   };
 
   const removePage = async (slug: string) => {
@@ -2572,8 +2628,8 @@ function PagesManager({
             onClick={convertToMultipage}
             className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-[#1D9CA1] px-4 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[#158087]"
           >
-            <Plus className="h-3 w-3" />
-            Enable multipage
+            <Sparkles className="h-3 w-3" />
+            Add a page with AI
           </button>
         </div>
       ) : (
@@ -2655,6 +2711,20 @@ function PagesManager({
                   ) : null}
                   <label className="block">
                     <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                      Page hero eyebrow
+                    </span>
+                    <Input
+                      className="mt-0.5 h-9 text-xs"
+                      value={p.hero?.eyebrow ?? ''}
+                      onChange={(e) =>
+                        updatePageHero(p.slug, { eyebrow: e.target.value || undefined })
+                      }
+                      placeholder={isHome ? 'Optional' : 'Our menu'}
+                      maxLength={80}
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
                       Page hero headline
                     </span>
                     <Input
@@ -2680,6 +2750,52 @@ function PagesManager({
                       }
                     />
                   </label>
+                  <details className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5">
+                    <summary className="cursor-pointer text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                      SEO (optional)
+                    </summary>
+                    <div className="mt-2 space-y-1.5">
+                      <label className="block">
+                        <span className="text-[10px] text-slate-500">
+                          SEO title override
+                        </span>
+                        <Input
+                          className="mt-0.5 h-8 text-xs"
+                          value={p.meta?.title ?? ''}
+                          onChange={(e) =>
+                            updatePage(p.slug, {
+                              meta: {
+                                ...(p.meta ?? {}),
+                                title: e.target.value || undefined,
+                              },
+                            })
+                          }
+                          placeholder="Inherits from site title"
+                          maxLength={80}
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-[10px] text-slate-500">
+                          SEO description override
+                        </span>
+                        <Textarea
+                          className="mt-0.5 text-xs no-zoom"
+                          rows={2}
+                          value={p.meta?.description ?? ''}
+                          onChange={(e) =>
+                            updatePage(p.slug, {
+                              meta: {
+                                ...(p.meta ?? {}),
+                                description: e.target.value || undefined,
+                              },
+                            })
+                          }
+                          placeholder="Inherits from site description"
+                          maxLength={200}
+                        />
+                      </label>
+                    </div>
+                  </details>
                 </div>
               ) : null}
             </div>
@@ -2694,10 +2810,339 @@ function PagesManager({
           onClick={addPage}
           className="w-full"
         >
-          <Plus className="h-3.5 w-3.5" />
-          Add a page
+          <Sparkles className="h-3.5 w-3.5" />
+          Add a page with AI
         </Button>
       ) : null}
+
+      {newPageModal ? (
+        <NewPageModal
+          existingPages={pages}
+          generating={generating}
+          isFirstSubPage={pages.length === 0}
+          onClose={() => (generating ? undefined : setNewPageModal(false))}
+          onGenerate={handleGeneratePage}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* New Page Modal — AI-driven sub-page generation                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Modal that asks the agency what the new page is for, then calls the
+ * server's page-generator so Claude produces a fully populated page
+ * (hero, layout, per-page block data) that matches the site's brand.
+ *
+ * The "quick start" chips prime the brief textarea with a template for
+ * common page types (Menu, About, Team, Pricing, etc.) so the agency
+ * doesn't stare at a blank field. They can edit the prefill before
+ * submitting.
+ *
+ * Progress state is owned by the parent — we show a spinner + disabled
+ * buttons while `generating` is true. Esc closes when idle; backdrop
+ * click closes when idle.
+ */
+function NewPageModal({
+  existingPages,
+  generating,
+  isFirstSubPage,
+  onClose,
+  onGenerate,
+}: {
+  existingPages: PageConfig[];
+  generating: boolean;
+  isFirstSubPage: boolean;
+  onClose: () => void;
+  onGenerate: (brief: string, titleHint: string | undefined) => Promise<void>;
+}) {
+  const [titleHint, setTitleHint] = useState('');
+  const [brief, setBrief] = useState('');
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const existingSlugs = new Set(existingPages.map((p) => p.slug));
+
+  useEffect(() => {
+    setTimeout(() => textareaRef.current?.focus(), 60);
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !generating) onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose, generating]);
+
+  const submit = async () => {
+    const cleaned = brief.trim();
+    if (cleaned.length < 10) {
+      toast.info(
+        'Add a bit more detail',
+        'Tell the AI what the page should show — a sentence is plenty.',
+      );
+      return;
+    }
+    await onGenerate(cleaned, titleHint);
+  };
+
+  // Quick-start templates. Each one prefills a title + a starter brief
+  // that the agency can edit before submitting. The briefs are specific
+  // enough for Claude to produce a real page, not generic enough to
+  // feel cookie-cutter.
+  const quickStarts: Array<{
+    title: string;
+    icon: React.ComponentType<{ className?: string }>;
+    brief: string;
+  }> = [
+    {
+      title: 'About',
+      icon: Users,
+      brief:
+        'An About page that tells the story of how the business started, who runs it, and what we care about. Should feel warm and personal. Include the team (if we have one) and a few numbers that prove we know our stuff.',
+    },
+    {
+      title: 'Menu',
+      icon: Coffee,
+      brief:
+        "A Menu page showing everything we serve, organised by category (drinks, brunch, mains, etc.). Include prices and flag any signature items. If we do specials or seasonal stuff, mention that too.",
+    },
+    {
+      title: 'Team',
+      icon: Users,
+      brief:
+        'A Team page with the full roster — photos, names, roles, specialties, and a short bio for each person. Should celebrate the people behind the business.',
+    },
+    {
+      title: 'Pricing',
+      icon: Tags,
+      brief:
+        'A Pricing page laying out our packages / tiers clearly so visitors can compare and pick. Include what each tier gets you, highlight the most popular one, and answer the usual "how do I choose" questions in an FAQ.',
+    },
+    {
+      title: 'Shop',
+      icon: ShoppingBag,
+      brief:
+        'A Shop page showing what we sell — product cards with photos, names, prices, and a way to buy or enquire. Group by category if we have distinct ranges.',
+    },
+    {
+      title: 'Portfolio',
+      icon: Briefcase,
+      brief:
+        'A Portfolio page showing our best recent work as case studies with photos and a short story for each one. Show the range — different styles, scales, problems solved.',
+    },
+    {
+      title: 'Services',
+      icon: Workflow,
+      brief:
+        'A Services page with the full breakdown of everything we offer (wider than the home page teaser). Include a how-it-works section so visitors know what to expect when they book.',
+    },
+    {
+      title: 'Service areas',
+      icon: MapPin,
+      brief:
+        'A Service Areas page listing every town / region we cover, plus the rate / callout policy outside our zone. Include a few reviews from customers in different areas.',
+    },
+    {
+      title: 'FAQ',
+      icon: HelpCircle,
+      brief:
+        'A full FAQ page covering the usual pre-booking questions (pricing, lead time, what to expect, cancellation policy, accessibility, etc.). 8–12 honest answers.',
+    },
+    {
+      title: 'Schedule',
+      icon: Calendar,
+      brief:
+        'A Schedule / Classes page showing the weekly timetable. Include instructor names and class durations. If we do taster weeks or free trials, mention that.',
+    },
+  ];
+
+  return (
+    <div
+      className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+      onClick={() => (generating ? undefined : onClose())}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="new-page-modal-title"
+    >
+      <div
+        className="relative max-h-[92vh] w-full max-w-2xl overflow-hidden rounded-3xl bg-white shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-start justify-between gap-3 border-b border-slate-100 bg-gradient-to-br from-[#1D9CA1]/5 to-transparent px-5 py-4">
+          <div className="flex items-start gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#1D9CA1]/10">
+              <Sparkles className="h-5 w-5 text-[#1D9CA1]" />
+            </div>
+            <div className="min-w-0">
+              <h3
+                id="new-page-modal-title"
+                className="text-base font-semibold text-slate-900"
+              >
+                {isFirstSubPage ? 'Enable multipage' : 'Add a new page'}
+              </h3>
+              <p className="mt-0.5 text-xs text-slate-600">
+                {isFirstSubPage
+                  ? 'Describe what the new page should show. We\'ll also keep your current homepage.'
+                  : 'Tell the AI what the page is for and we\'ll generate the full thing — hero, layout, copy.'}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={generating}
+            className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50"
+            aria-label="Close"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="max-h-[calc(92vh-140px)] space-y-4 overflow-y-auto px-5 py-4">
+          {/* Quick-start templates */}
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+              Quick start
+            </p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {quickStarts
+                .filter((q) => !existingSlugs.has(slugify(q.title)))
+                .map((q) => {
+                  const Icon = q.icon;
+                  return (
+                    <button
+                      key={q.title}
+                      type="button"
+                      disabled={generating}
+                      onClick={() => {
+                        setTitleHint(q.title);
+                        setBrief(q.brief);
+                        setTimeout(() => {
+                          textareaRef.current?.focus();
+                          textareaRef.current?.setSelectionRange(
+                            q.brief.length,
+                            q.brief.length,
+                          );
+                        }, 20);
+                      }}
+                      className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700 transition-colors hover:border-[#1D9CA1] hover:bg-[#1D9CA1]/5 hover:text-[#1D9CA1] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <Icon className="h-3 w-3" />
+                      {q.title}
+                    </button>
+                  );
+                })}
+            </div>
+            <p className="mt-1.5 text-[10px] text-slate-400">
+              Click one to prefill the brief below — you can tweak before generating.
+            </p>
+          </div>
+
+          {/* Title hint */}
+          <div>
+            <label
+              htmlFor="new-page-title"
+              className="block text-xs font-semibold text-slate-700"
+            >
+              Page title <span className="font-normal text-slate-400">(optional)</span>
+            </label>
+            <Input
+              id="new-page-title"
+              className="mt-1"
+              value={titleHint}
+              onChange={(e) => setTitleHint(e.target.value.slice(0, 60))}
+              placeholder="e.g. Menu, About, Our work"
+              disabled={generating}
+              maxLength={60}
+            />
+            <p className="mt-1 text-[10px] text-slate-500">
+              This is what shows in the navigation. The AI can override if a different
+              title fits better.
+            </p>
+          </div>
+
+          {/* Brief */}
+          <div>
+            <label
+              htmlFor="new-page-brief"
+              className="block text-xs font-semibold text-slate-700"
+            >
+              What should this page show?{' '}
+              <span className="font-normal text-rose-500">*</span>
+            </label>
+            <Textarea
+              id="new-page-brief"
+              ref={textareaRef}
+              className="mt-1 min-h-[160px] text-sm"
+              value={brief}
+              onChange={(e) => setBrief(e.target.value.slice(0, 3000))}
+              placeholder="Describe what the page is for. E.g. 'A Menu page organised by category (coffee, brunch, mains) with prices and flagged signature items.'"
+              disabled={generating}
+              onKeyDown={(e) => {
+                if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !generating) {
+                  e.preventDefault();
+                  submit();
+                }
+              }}
+            />
+            <div className="mt-1 flex items-center justify-between">
+              <p className="text-[10px] text-slate-500">
+                Press <kbd className="rounded bg-slate-100 px-1 font-mono">Cmd/Ctrl + Enter</kbd>{' '}
+                to generate.
+              </p>
+              <p className="text-[10px] text-slate-400 tabular-nums">{brief.length}/3000</p>
+            </div>
+          </div>
+
+          {/* Helpful hint on what the AI will do */}
+          <div className="rounded-xl border border-[#1D9CA1]/20 bg-[#1D9CA1]/5 p-3 text-[11px] text-slate-700">
+            <p className="font-semibold text-[#1D9CA1]">
+              <Sparkles className="mr-1 inline h-3 w-3 -translate-y-px" />
+              What happens next
+            </p>
+            <p className="mt-1 text-slate-600">
+              The AI reads your full site config, picks an appropriate layout (menu,
+              team, pricing, etc.), writes page-specific copy in your brand voice,
+              and references your image library by index. The page gets its own
+              URL and nav link. You can edit everything after.
+            </p>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onClose}
+            disabled={generating}
+          >
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            onClick={submit}
+            disabled={generating || brief.trim().length < 10}
+            className="bg-[#1D9CA1] text-white hover:bg-[#158087]"
+          >
+            {generating ? (
+              <>
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Generating page…
+              </>
+            ) : (
+              <>
+                <Wand2 className="h-3.5 w-3.5" />
+                Generate page
+              </>
+            )}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -2717,6 +3162,40 @@ function BrandEditor({
 
   const updateBrand = (patch: Partial<WebsiteConfig['brand']>) => {
     onChange({ ...config, brand: { ...brand, ...patch } });
+  };
+
+  /**
+   * Helper that merges a partial patch into `config.contact` and preserves
+   * every other field. Lets the form below write short, readable
+   * `updateContact({ phone: ... })` calls instead of repeating the whole
+   * 10-field object on every keystroke.
+   */
+  const updateContact = (patch: Partial<WebsiteConfig['contact']>) => {
+    const prev = config.contact ?? {
+      heading: 'Get in touch',
+      body: '',
+      showBookingForm: true,
+      showHours: false,
+    };
+    onChange({
+      ...config,
+      contact: { ...prev, ...patch },
+    });
+  };
+
+  /**
+   * Partial patch into `config.announcement`. When the current
+   * announcement is undefined, `patch` seeds the first version with
+   * sensible defaults so callers don't have to think about it.
+   */
+  const updateAnnouncement = (
+    patch: Partial<NonNullable<WebsiteConfig['announcement']>>,
+  ) => {
+    const prev = config.announcement ?? { message: '', tone: 'brand' as const };
+    onChange({
+      ...config,
+      announcement: { ...prev, ...patch },
+    });
   };
 
   return (
@@ -2811,6 +3290,345 @@ function BrandEditor({
             </button>
           ))}
         </div>
+      </div>
+
+      {/* SEO meta — what shows in the browser tab + Google search result. */}
+      <div className="rounded-xl border border-slate-200 bg-white p-3">
+        <p className="text-xs font-medium text-slate-600">
+          SEO &amp; sharing
+          <span className="ml-2 font-normal text-slate-400">
+            what search engines see
+          </span>
+        </p>
+        <div className="mt-2 space-y-2">
+          <LabelledField label="Page title" hint="≤60 chars">
+            <Input
+              value={config.meta?.title ?? ''}
+              onChange={(e) =>
+                onChange({
+                  ...config,
+                  meta: {
+                    title: e.target.value,
+                    description: config.meta?.description ?? '',
+                    keywords: config.meta?.keywords ?? [],
+                  },
+                })
+              }
+              placeholder="Murphy's Plumbing — Dublin 2"
+              maxLength={80}
+            />
+          </LabelledField>
+          <LabelledField label="Meta description" hint="≤160 chars">
+            <Textarea
+              value={config.meta?.description ?? ''}
+              onChange={(e) =>
+                onChange({
+                  ...config,
+                  meta: {
+                    title: config.meta?.title ?? '',
+                    description: e.target.value,
+                    keywords: config.meta?.keywords ?? [],
+                  },
+                })
+              }
+              placeholder="What your business does, in one sentence. This shows up under the page title in Google."
+              rows={2}
+              maxLength={200}
+            />
+          </LabelledField>
+          <TagListField
+            label="Keywords"
+            tags={config.meta?.keywords ?? []}
+            max={10}
+            placeholder="Add and press Enter"
+            onChange={(keywords) =>
+              onChange({
+                ...config,
+                meta: {
+                  title: config.meta?.title ?? '',
+                  description: config.meta?.description ?? '',
+                  keywords,
+                },
+              })
+            }
+          />
+        </div>
+      </div>
+
+      {/* Navigation items */}
+      <div className="rounded-xl border border-slate-200 bg-white p-3">
+        <p className="text-xs font-medium text-slate-600">Navigation links</p>
+        <p className="mt-0.5 text-[10px] text-slate-400">
+          {(config.pages?.length ?? 0) > 1
+            ? 'Multipage sites use page titles for the nav (edit them in the Pages tab).'
+            : 'Shown in the top nav bar. Each label becomes an anchor link to the matching section.'}
+        </p>
+        <div className="mt-2">
+          <TagListField
+            label="Nav items"
+            tags={config.navigation ?? []}
+            max={8}
+            placeholder="Home, Services, About…"
+            onChange={(navigation) => onChange({ ...config, navigation })}
+          />
+        </div>
+      </div>
+
+      {/* Social links */}
+      <div className="rounded-xl border border-slate-200 bg-white p-3">
+        <p className="text-xs font-medium text-slate-600">Social links</p>
+        <p className="mt-0.5 text-[10px] text-slate-400">
+          Rendered in the footer and (when set) on the contact block.
+        </p>
+        <div className="mt-2 space-y-2">
+          {(
+            [
+              { key: 'facebook', label: 'Facebook' },
+              { key: 'instagram', label: 'Instagram' },
+              { key: 'tiktok', label: 'TikTok' },
+              { key: 'linkedin', label: 'LinkedIn' },
+              { key: 'x', label: 'X / Twitter' },
+              { key: 'youtube', label: 'YouTube' },
+              { key: 'google', label: 'Google Business Profile' },
+            ] as const
+          ).map(({ key, label }) => (
+            <LabelledField key={key} label={label}>
+              <Input
+                type="url"
+                value={(config.socials as Record<string, string | undefined> | undefined)?.[key] ?? ''}
+                onChange={(e) => {
+                  const next = { ...(config.socials ?? {}) } as Record<string, string | undefined>;
+                  const v = e.target.value.trim();
+                  if (v) next[key] = v;
+                  else delete next[key];
+                  onChange({
+                    ...config,
+                    socials: Object.keys(next).length > 0 ? (next as WebsiteConfig['socials']) : undefined,
+                  });
+                }}
+                placeholder="https://…"
+                maxLength={500}
+              />
+            </LabelledField>
+          ))}
+        </div>
+      </div>
+
+      {/* Contact info */}
+      <div className="rounded-xl border border-slate-200 bg-white p-3">
+        <p className="text-xs font-medium text-slate-600">Contact info</p>
+        <p className="mt-0.5 text-[10px] text-slate-400">
+          Used in the contact section, footer, and mobile CTA bar.
+        </p>
+        <div className="mt-2 space-y-2">
+          <LabelledField label="Heading">
+            <Input
+              value={config.contact?.heading ?? ''}
+              onChange={(e) => updateContact({ heading: e.target.value })}
+              placeholder="Get in touch"
+              maxLength={100}
+            />
+          </LabelledField>
+          <LabelledField label="Body">
+            <Textarea
+              value={config.contact?.body ?? ''}
+              onChange={(e) => updateContact({ body: e.target.value })}
+              placeholder="Drop us a line, we usually respond within a few hours."
+              rows={2}
+              maxLength={400}
+            />
+          </LabelledField>
+          <FieldGrid>
+            <LabelledField label="Phone">
+              <Input
+                type="tel"
+                value={config.contact?.phone ?? ''}
+                onChange={(e) =>
+                  updateContact({ phone: e.target.value || undefined })
+                }
+                placeholder="+353 1 555 0100"
+                maxLength={50}
+              />
+            </LabelledField>
+            <LabelledField label="WhatsApp">
+              <Input
+                type="tel"
+                value={config.contact?.whatsapp ?? ''}
+                onChange={(e) =>
+                  updateContact({ whatsapp: e.target.value || undefined })
+                }
+                placeholder="+353851234567"
+                maxLength={50}
+              />
+            </LabelledField>
+          </FieldGrid>
+          <LabelledField label="Email">
+            <Input
+              type="email"
+              value={config.contact?.email ?? ''}
+              onChange={(e) =>
+                updateContact({ email: e.target.value || undefined })
+              }
+              placeholder="hello@business.com"
+              maxLength={200}
+            />
+          </LabelledField>
+          <LabelledField label="Address">
+            <Input
+              value={config.contact?.address ?? ''}
+              onChange={(e) =>
+                updateContact({ address: e.target.value || undefined })
+              }
+              placeholder="12 Market Street, Dublin 2"
+              maxLength={300}
+            />
+          </LabelledField>
+          <LabelledField label="Opening hours" hint="one line per day">
+            <Textarea
+              value={config.contact?.hours ?? ''}
+              onChange={(e) =>
+                updateContact({ hours: e.target.value || undefined })
+              }
+              placeholder={'Mon–Fri 9am–6pm\nSat 10am–3pm'}
+              rows={3}
+              maxLength={500}
+            />
+          </LabelledField>
+          <FieldGrid>
+            <label className="flex items-center gap-2 text-[11px] text-slate-700">
+              <input
+                type="checkbox"
+                checked={config.contact?.showBookingForm ?? true}
+                onChange={(e) =>
+                  updateContact({ showBookingForm: e.target.checked })
+                }
+                className="rounded border-slate-300 text-[#1D9CA1] focus:ring-[#1D9CA1]"
+              />
+              Show booking form
+            </label>
+            <label className="flex items-center gap-2 text-[11px] text-slate-700">
+              <input
+                type="checkbox"
+                checked={config.contact?.showHours ?? false}
+                onChange={(e) =>
+                  updateContact({ showHours: e.target.checked })
+                }
+                className="rounded border-slate-300 text-[#1D9CA1] focus:ring-[#1D9CA1]"
+              />
+              Show hours
+            </label>
+          </FieldGrid>
+        </div>
+      </div>
+
+      {/* Announcement bar */}
+      <div className="rounded-xl border border-slate-200 bg-white p-3">
+        <div className="flex items-center justify-between">
+          <p className="text-xs font-medium text-slate-600">
+            Announcement bar
+            {config.announcement ? (
+              <span className="ml-2 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
+                On
+              </span>
+            ) : (
+              <span className="ml-2 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">
+                Off
+              </span>
+            )}
+          </p>
+          {config.announcement ? (
+            <button
+              type="button"
+              onClick={() => onChange({ ...config, announcement: undefined })}
+              className="text-[10px] font-medium text-slate-500 hover:text-rose-600"
+            >
+              Remove
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() =>
+                onChange({
+                  ...config,
+                  announcement: {
+                    message: 'Limited-time offer — book before Friday.',
+                    tone: 'brand',
+                  },
+                })
+              }
+              className="rounded-full border border-dashed border-slate-300 px-2 py-0.5 text-[10px] font-medium text-slate-600 transition-colors hover:border-[#1D9CA1] hover:text-[#1D9CA1]"
+            >
+              Add banner
+            </button>
+          )}
+        </div>
+        {config.announcement ? (
+          <div className="mt-2 space-y-2">
+            <LabelledField label="Message">
+              <Input
+                value={config.announcement.message ?? ''}
+                onChange={(e) => updateAnnouncement({ message: e.target.value })}
+                placeholder="Short, one-line message"
+                maxLength={200}
+              />
+            </LabelledField>
+            <FieldGrid>
+              <LabelledField label="CTA label (optional)">
+                <Input
+                  value={config.announcement.linkLabel ?? ''}
+                  onChange={(e) =>
+                    updateAnnouncement({
+                      linkLabel: e.target.value || undefined,
+                    })
+                  }
+                  placeholder="Book now"
+                  maxLength={30}
+                />
+              </LabelledField>
+              <LabelledField label="CTA link">
+                <Input
+                  value={config.announcement.linkHref ?? ''}
+                  onChange={(e) =>
+                    updateAnnouncement({
+                      linkHref: e.target.value || undefined,
+                    })
+                  }
+                  placeholder="#contact"
+                  maxLength={300}
+                />
+              </LabelledField>
+            </FieldGrid>
+            <LabelledField label="Tone">
+              <div className="flex gap-1.5">
+                {(['brand', 'success', 'warning'] as const).map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => updateAnnouncement({ tone: t })}
+                    className={`flex-1 rounded-md border px-2 py-1 text-[11px] font-medium capitalize ${
+                      (config.announcement!.tone ?? 'brand') === t
+                        ? 'border-[#1D9CA1] bg-[#1D9CA1]/10 text-[#1D9CA1]'
+                        : 'border-slate-200 bg-white text-slate-700 hover:border-slate-400'
+                    }`}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+            </LabelledField>
+            <label className="flex items-center gap-2 text-[11px] text-slate-700">
+              <input
+                type="checkbox"
+                checked={config.announcement.nonDismissible ?? false}
+                onChange={(e) =>
+                  updateAnnouncement({ nonDismissible: e.target.checked })
+                }
+                className="rounded border-slate-300 text-[#1D9CA1] focus:ring-[#1D9CA1]"
+              />
+              Hide the dismiss button (use for critical notices only)
+            </label>
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -3339,13 +4157,15 @@ const AVAILABLE_ICONS = [
 
 /**
  * Collection editor for everything that's an array in the config:
- * services, reviews, FAQ entries, stats, about bullets. Agencies use this
- * to add a missing service, reorder reviews, or drop a duplicated FAQ
- * that Claude produced. Each list auto-saves via onChange, so changes
- * flow through the existing debounced persist path.
+ * services, reviews, FAQ entries, stats, about bullets, menu
+ * categories / items, price list, team members, schedule entries,
+ * service areas, trust badges, before/after, custom sections, products,
+ * portfolio, process, pricing tiers, logo strip.
  *
- * Text inside each row is edited inline in the preview — this tab is just
- * for structural changes (add/remove/reorder/pick icon).
+ * Each row is independently expandable. Collapsed view shows a summary;
+ * expanded view reveals full inline field editing (no need to click
+ * into the preview unless you prefer to). Supports reorder up/down,
+ * feature toggle where the data model allows, and delete.
  */
 function ItemsEditor({
   config,
@@ -3360,10 +4180,91 @@ function ItemsEditor({
   const stats = config.stats ?? [];
   const bullets = config.about?.bullets ?? [];
 
+  /** Helper to patch a single service at an index. */
+  const patchService = (
+    i: number,
+    patch: Partial<NonNullable<WebsiteConfig['services']>[number]>,
+  ) => {
+    const next = [...services];
+    next[i] = { ...next[i]!, ...patch };
+    onChange({ ...config, services: next });
+  };
+
+  /** Swap two services by index — powers the up/down reorder buttons. */
+  const moveService = (i: number, dir: -1 | 1) => {
+    const j = i + dir;
+    if (j < 0 || j >= services.length) return;
+    const next = [...services];
+    [next[i], next[j]] = [next[j]!, next[i]!];
+    onChange({ ...config, services: next });
+  };
+
+  const patchReview = (
+    i: number,
+    patch: Partial<NonNullable<WebsiteConfig['reviews']>[number]>,
+  ) => {
+    const next = [...reviews];
+    next[i] = { ...next[i]!, ...patch };
+    onChange({ ...config, reviews: next });
+  };
+  const moveReview = (i: number, dir: -1 | 1) => {
+    const j = i + dir;
+    if (j < 0 || j >= reviews.length) return;
+    const next = [...reviews];
+    [next[i], next[j]] = [next[j]!, next[i]!];
+    onChange({ ...config, reviews: next });
+  };
+
+  const patchFaq = (i: number, patch: Partial<NonNullable<WebsiteConfig['faq']>[number]>) => {
+    const next = [...faq];
+    next[i] = { ...next[i]!, ...patch };
+    onChange({ ...config, faq: next });
+  };
+  const moveFaq = (i: number, dir: -1 | 1) => {
+    const j = i + dir;
+    if (j < 0 || j >= faq.length) return;
+    const next = [...faq];
+    [next[i], next[j]] = [next[j]!, next[i]!];
+    onChange({ ...config, faq: next });
+  };
+
+  const patchStat = (
+    i: number,
+    patch: Partial<NonNullable<WebsiteConfig['stats']>[number]>,
+  ) => {
+    const next = [...stats];
+    next[i] = { ...next[i]!, ...patch };
+    onChange({ ...config, stats: next });
+  };
+  const moveStat = (i: number, dir: -1 | 1) => {
+    const j = i + dir;
+    if (j < 0 || j >= stats.length) return;
+    const next = [...stats];
+    [next[i], next[j]] = [next[j]!, next[i]!];
+    onChange({ ...config, stats: next });
+  };
+
+  const patchBullet = (i: number, text: string) => {
+    const next = [...bullets];
+    next[i] = text;
+    onChange({
+      ...config,
+      about: { ...config.about!, bullets: next },
+    });
+  };
+  const moveBullet = (i: number, dir: -1 | 1) => {
+    const j = i + dir;
+    if (j < 0 || j >= bullets.length) return;
+    const next = [...bullets];
+    [next[i], next[j]] = [next[j]!, next[i]!];
+    onChange({ ...config, about: { ...config.about!, bullets: next } });
+  };
+
   return (
     <div className="space-y-5">
       <p className="text-xs text-slate-500">
-        Add or remove items from each section. Click any row to edit its text in the preview.
+        Click a row to expand and edit its fields directly. You can also click any
+        text in the preview to edit it in place.
       </p>
 
       {/* Services */}
@@ -3384,10 +4285,14 @@ function ItemsEditor({
         emptyHint="No services yet. Add one to show up in the grid."
       >
         {services.map((s, i) => (
-          <ItemRow
-            key={i}
-            primary={s.title || `Service ${i + 1}`}
-            secondary={s.description}
+          <ExpandableItemRow
+            key={`svc-${i}`}
+            summary={s.title || `Service ${i + 1}`}
+            summarySecondary={s.description}
+            featured={s.featured ?? false}
+            onToggleFeatured={() => patchService(i, { featured: !s.featured })}
+            onMoveUp={i > 0 ? () => moveService(i, -1) : undefined}
+            onMoveDown={i < services.length - 1 ? () => moveService(i, 1) : undefined}
             onRemove={async () => {
               if (
                 !(await confirmDialog({
@@ -3404,16 +4309,28 @@ function ItemsEditor({
               });
             }}
           >
-            <div className="mt-1 flex items-center gap-1">
-              <span className="text-[10px] text-slate-400">Icon:</span>
+            <LabelledField label="Title">
+              <Input
+                value={s.title ?? ''}
+                onChange={(e) => patchService(i, { title: e.target.value })}
+                placeholder="Service title"
+                maxLength={80}
+              />
+            </LabelledField>
+            <LabelledField label="Description">
+              <Textarea
+                value={s.description ?? ''}
+                onChange={(e) => patchService(i, { description: e.target.value })}
+                placeholder="One or two sentences"
+                rows={2}
+                maxLength={300}
+              />
+            </LabelledField>
+            <LabelledField label="Icon">
               <select
                 value={s.icon ?? 'Sparkles'}
-                onChange={(e) => {
-                  const next = [...services];
-                  next[i] = { ...next[i]!, icon: e.target.value };
-                  onChange({ ...config, services: next });
-                }}
-                className="h-6 rounded border border-slate-200 bg-white px-1 text-[10px]"
+                onChange={(e) => patchService(i, { icon: e.target.value })}
+                className="h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-xs"
               >
                 {AVAILABLE_ICONS.map((name) => (
                   <option key={name} value={name}>
@@ -3421,8 +4338,8 @@ function ItemsEditor({
                   </option>
                 ))}
               </select>
-            </div>
-          </ItemRow>
+            </LabelledField>
+          </ExpandableItemRow>
         ))}
       </ArrayBlock>
 
@@ -3444,10 +4361,14 @@ function ItemsEditor({
         emptyHint="No reviews yet. Add a testimonial or two."
       >
         {reviews.map((r, i) => (
-          <ItemRow
-            key={i}
-            primary={`"${(r.text ?? '').slice(0, 60)}${(r.text ?? '').length > 60 ? '…' : ''}"`}
-            secondary={`— ${r.author} · ${'★'.repeat(Math.max(1, Math.min(5, Math.round(r.rating ?? 5))))}`}
+          <ExpandableItemRow
+            key={`rev-${i}`}
+            summary={`"${(r.text ?? '').slice(0, 60)}${(r.text ?? '').length > 60 ? '…' : ''}"`}
+            summarySecondary={`— ${r.author ?? 'Anonymous'} · ${'★'.repeat(Math.max(1, Math.min(5, Math.round(r.rating ?? 5))))}`}
+            featured={r.featured ?? false}
+            onToggleFeatured={() => patchReview(i, { featured: !r.featured })}
+            onMoveUp={i > 0 ? () => moveReview(i, -1) : undefined}
+            onMoveDown={i < reviews.length - 1 ? () => moveReview(i, 1) : undefined}
             onRemove={async () => {
               if (
                 !(await confirmDialog({
@@ -3461,25 +4382,39 @@ function ItemsEditor({
               onChange({ ...config, reviews: reviews.filter((_, j) => j !== i) });
             }}
           >
-            <div className="mt-1 flex items-center gap-1">
-              <span className="text-[10px] text-slate-400">Rating:</span>
-              <select
-                value={r.rating ?? 5}
-                onChange={(e) => {
-                  const next = [...reviews];
-                  next[i] = { ...next[i]!, rating: Number(e.target.value) };
-                  onChange({ ...config, reviews: next });
-                }}
-                className="h-6 rounded border border-slate-200 bg-white px-1 text-[10px]"
-              >
-                {[5, 4, 3, 2, 1].map((n) => (
-                  <option key={n} value={n}>
-                    {n} ★
-                  </option>
-                ))}
-              </select>
-            </div>
-          </ItemRow>
+            <LabelledField label="Review text">
+              <Textarea
+                value={r.text ?? ''}
+                onChange={(e) => patchReview(i, { text: e.target.value })}
+                placeholder="What the customer said"
+                rows={3}
+                maxLength={500}
+              />
+            </LabelledField>
+            <FieldGrid>
+              <LabelledField label="Author">
+                <Input
+                  value={r.author ?? ''}
+                  onChange={(e) => patchReview(i, { author: e.target.value })}
+                  placeholder="Aoife K."
+                  maxLength={60}
+                />
+              </LabelledField>
+              <LabelledField label="Rating">
+                <select
+                  value={r.rating ?? 5}
+                  onChange={(e) => patchReview(i, { rating: Number(e.target.value) })}
+                  className="h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-xs"
+                >
+                  {[5, 4, 3, 2, 1].map((n) => (
+                    <option key={n} value={n}>
+                      {n} ★
+                    </option>
+                  ))}
+                </select>
+              </LabelledField>
+            </FieldGrid>
+          </ExpandableItemRow>
         ))}
       </ArrayBlock>
 
@@ -3501,10 +4436,14 @@ function ItemsEditor({
         emptyHint="No FAQs yet."
       >
         {faq.map((f, i) => (
-          <ItemRow
-            key={i}
-            primary={f.question || `Question ${i + 1}`}
-            secondary={(f.answer ?? '').slice(0, 80) + ((f.answer ?? '').length > 80 ? '…' : '')}
+          <ExpandableItemRow
+            key={`faq-${i}`}
+            summary={f.question || `Question ${i + 1}`}
+            summarySecondary={
+              (f.answer ?? '').slice(0, 80) + ((f.answer ?? '').length > 80 ? '…' : '')
+            }
+            onMoveUp={i > 0 ? () => moveFaq(i, -1) : undefined}
+            onMoveDown={i < faq.length - 1 ? () => moveFaq(i, 1) : undefined}
             onRemove={async () => {
               if (
                 !(await confirmDialog({
@@ -3517,13 +4456,31 @@ function ItemsEditor({
                 return;
               onChange({ ...config, faq: faq.filter((_, j) => j !== i) });
             }}
-          />
+          >
+            <LabelledField label="Question">
+              <Input
+                value={f.question ?? ''}
+                onChange={(e) => patchFaq(i, { question: e.target.value })}
+                placeholder="What customers ask"
+                maxLength={200}
+              />
+            </LabelledField>
+            <LabelledField label="Answer">
+              <Textarea
+                value={f.answer ?? ''}
+                onChange={(e) => patchFaq(i, { answer: e.target.value })}
+                placeholder="Short, honest answer"
+                rows={3}
+                maxLength={800}
+              />
+            </LabelledField>
+          </ExpandableItemRow>
         ))}
       </ArrayBlock>
 
       {/* Stats */}
       <ArrayBlock
-        icon={<Star className="h-3.5 w-3.5" />}
+        icon={<BarChart3 className="h-3.5 w-3.5" />}
         label="Stats"
         count={stats.length}
         onAdd={() => {
@@ -3543,14 +4500,59 @@ function ItemsEditor({
         emptyHint="No stats yet. Add a metric like '500+ happy customers'."
       >
         {stats.map((s, i) => (
-          <ItemRow
-            key={i}
-            primary={`${s.prefix ?? ''}${s.value}${s.suffix ?? ''}`}
-            secondary={s.label}
+          <ExpandableItemRow
+            key={`stat-${i}`}
+            summary={`${s.prefix ?? ''}${s.value}${s.suffix ?? ''}`}
+            summarySecondary={s.label}
+            onMoveUp={i > 0 ? () => moveStat(i, -1) : undefined}
+            onMoveDown={i < stats.length - 1 ? () => moveStat(i, 1) : undefined}
             onRemove={() => {
               onChange({ ...config, stats: stats.filter((_, j) => j !== i) });
             }}
-          />
+          >
+            <FieldGrid>
+              <LabelledField label="Prefix" hint="€ / $ / £">
+                <Input
+                  value={s.prefix ?? ''}
+                  onChange={(e) => patchStat(i, { prefix: e.target.value })}
+                  placeholder=""
+                  maxLength={4}
+                />
+              </LabelledField>
+              <LabelledField label="Value" hint="number">
+                <Input
+                  type="number"
+                  step="any"
+                  value={Number.isFinite(s.value) ? s.value : 0}
+                  onChange={(e) => {
+                    const n = Number(e.target.value);
+                    patchStat(i, {
+                      value: Number.isFinite(n) ? n : 0,
+                    });
+                  }}
+                  placeholder="0"
+                />
+              </LabelledField>
+            </FieldGrid>
+            <FieldGrid>
+              <LabelledField label="Suffix" hint="+ / % / yrs">
+                <Input
+                  value={s.suffix ?? ''}
+                  onChange={(e) => patchStat(i, { suffix: e.target.value })}
+                  placeholder="+"
+                  maxLength={8}
+                />
+              </LabelledField>
+              <LabelledField label="Label">
+                <Input
+                  value={s.label ?? ''}
+                  onChange={(e) => patchStat(i, { label: e.target.value })}
+                  placeholder="Happy customers"
+                  maxLength={60}
+                />
+              </LabelledField>
+            </FieldGrid>
+          </ExpandableItemRow>
         ))}
       </ArrayBlock>
 
@@ -3573,10 +4575,11 @@ function ItemsEditor({
           emptyHint="No bullets in About yet. Add some quick proof points."
         >
           {bullets.map((b, i) => (
-            <ItemRow
-              key={i}
-              primary={b || `Bullet ${i + 1}`}
-              secondary=""
+            <ExpandableItemRow
+              key={`bullet-${i}`}
+              summary={b || `Bullet ${i + 1}`}
+              onMoveUp={i > 0 ? () => moveBullet(i, -1) : undefined}
+              onMoveDown={i < bullets.length - 1 ? () => moveBullet(i, 1) : undefined}
               onRemove={() => {
                 onChange({
                   ...config,
@@ -3586,7 +4589,16 @@ function ItemsEditor({
                   },
                 });
               }}
-            />
+            >
+              <LabelledField label="Bullet text">
+                <Input
+                  value={b ?? ''}
+                  onChange={(e) => patchBullet(i, e.target.value)}
+                  placeholder="A short proof point"
+                  maxLength={120}
+                />
+              </LabelledField>
+            </ExpandableItemRow>
           ))}
         </ArrayBlock>
       ) : null}
@@ -3615,79 +4627,178 @@ function ItemsEditor({
           addLabel="Add category"
           emptyHint="No menu categories yet."
         >
-          {(config.menu.categories ?? []).map((cat, i) => (
-            <div key={i} className="rounded-xl border border-slate-200 bg-white p-2.5">
-              <div className="flex items-center justify-between">
-                <p className="truncate text-xs font-medium text-slate-900">
-                  {cat.title || `Section ${i + 1}`}
-                </p>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    if (
-                      !(await confirmDialog({
-                        title: `Delete "${cat.title}"?`,
-                        description: `Removes ${cat.items?.length ?? 0} items from the menu.`,
-                        confirmLabel: 'Delete',
-                        danger: true,
-                      }))
-                    )
-                      return;
-                    onChange({
-                      ...config,
-                      menu: {
-                        ...config.menu!,
-                        categories: (config.menu!.categories ?? []).filter((_, j) => j !== i),
-                      },
-                    });
-                  }}
-                  className="rounded-lg p-1 text-slate-400 hover:bg-red-50 hover:text-red-500"
-                  aria-label="Remove category"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              </div>
-              <div className="mt-1 flex items-center justify-between text-[10px] text-slate-500">
-                <span>{cat.items?.length ?? 0} items</span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const cats = [...(config.menu!.categories ?? [])];
-                    cats[i] = {
-                      ...cats[i]!,
-                      items: [...(cats[i]?.items ?? []), { name: 'Item', price: '0' }],
-                    };
-                    onChange({ ...config, menu: { ...config.menu!, categories: cats } });
-                  }}
-                  className="inline-flex items-center gap-0.5 font-medium text-[#1D9CA1] hover:underline"
-                >
-                  <Plus className="h-2.5 w-2.5" />
-                  Add item
-                </button>
-              </div>
-              {/* Per-item remove */}
-              {(cat.items ?? []).map((item, ii) => (
-                <div key={ii} className="mt-1 flex items-center justify-between rounded-lg bg-slate-50 px-2 py-1 text-[11px]">
-                  <span className="truncate text-slate-700">{item.name}</span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const cats = [...(config.menu!.categories ?? [])];
-                      cats[i] = {
-                        ...cats[i]!,
-                        items: (cats[i]?.items ?? []).filter((_, k) => k !== ii),
+          <LabelledField label="Currency" hint="€ / $ / £">
+            <Input
+              value={config.menu.currency ?? '€'}
+              onChange={(e) =>
+                onChange({
+                  ...config,
+                  menu: { ...config.menu!, currency: e.target.value.slice(0, 4) },
+                })
+              }
+              maxLength={4}
+              className="max-w-[80px]"
+            />
+          </LabelledField>
+          {(config.menu.categories ?? []).map((cat, i) => {
+            const updateCategory = (
+              patch: Partial<NonNullable<NonNullable<WebsiteConfig['menu']>['categories']>[number]>,
+            ) => {
+              const cats = [...(config.menu!.categories ?? [])];
+              cats[i] = { ...cats[i]!, ...patch };
+              onChange({ ...config, menu: { ...config.menu!, categories: cats } });
+            };
+            const moveCategory = (dir: -1 | 1) => {
+              const cats = [...(config.menu!.categories ?? [])];
+              const j = i + dir;
+              if (j < 0 || j >= cats.length) return;
+              [cats[i], cats[j]] = [cats[j]!, cats[i]!];
+              onChange({ ...config, menu: { ...config.menu!, categories: cats } });
+            };
+            return (
+              <ExpandableItemRow
+                key={`menu-cat-${i}`}
+                summary={cat.title || `Section ${i + 1}`}
+                summarySecondary={`${cat.items?.length ?? 0} item${
+                  cat.items?.length === 1 ? '' : 's'
+                }`}
+                onMoveUp={
+                  i > 0 ? () => moveCategory(-1) : undefined
+                }
+                onMoveDown={
+                  i < (config.menu!.categories?.length ?? 0) - 1
+                    ? () => moveCategory(1)
+                    : undefined
+                }
+                onRemove={async () => {
+                  if (
+                    !(await confirmDialog({
+                      title: `Delete "${cat.title}"?`,
+                      description: `Removes ${cat.items?.length ?? 0} items.`,
+                      confirmLabel: 'Delete',
+                      danger: true,
+                    }))
+                  )
+                    return;
+                  onChange({
+                    ...config,
+                    menu: {
+                      ...config.menu!,
+                      categories: (config.menu!.categories ?? []).filter((_, j) => j !== i),
+                    },
+                  });
+                }}
+              >
+                <LabelledField label="Category title">
+                  <Input
+                    value={cat.title ?? ''}
+                    onChange={(e) => updateCategory({ title: e.target.value })}
+                    placeholder="e.g. Coffee, Mains, Drinks"
+                    maxLength={60}
+                  />
+                </LabelledField>
+                <LabelledField label="Short description (optional)">
+                  <Input
+                    value={cat.description ?? ''}
+                    onChange={(e) => updateCategory({ description: e.target.value })}
+                    placeholder="Blurb shown under the category title"
+                    maxLength={200}
+                  />
+                </LabelledField>
+
+                <div className="rounded-lg border border-slate-200 bg-white p-2">
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+                      Items · {cat.items?.length ?? 0}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        updateCategory({
+                          items: [
+                            ...(cat.items ?? []),
+                            { name: 'New item', price: '0' },
+                          ],
+                        });
+                      }}
+                      className="inline-flex items-center gap-0.5 text-[10px] font-medium text-[#1D9CA1] hover:underline"
+                    >
+                      <Plus className="h-2.5 w-2.5" />
+                      Add item
+                    </button>
+                  </div>
+                  <div className="space-y-1">
+                    {(cat.items ?? []).map((item, ii) => {
+                      const updateItem = (
+                        patch: Partial<
+                          NonNullable<
+                            NonNullable<
+                              NonNullable<WebsiteConfig['menu']>['categories']
+                            >[number]['items']
+                          >[number]
+                        >,
+                      ) => {
+                        const items = [...(cat.items ?? [])];
+                        items[ii] = { ...items[ii]!, ...patch };
+                        updateCategory({ items });
                       };
-                      onChange({ ...config, menu: { ...config.menu!, categories: cats } });
-                    }}
-                    className="rounded p-0.5 text-slate-400 hover:bg-red-50 hover:text-red-500"
-                    aria-label="Remove item"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
+                      return (
+                        <ExpandableItemRow
+                          key={`menu-item-${i}-${ii}`}
+                          summary={item.name || `Item ${ii + 1}`}
+                          summarySecondary={`${config.menu!.currency ?? '€'}${item.price ?? ''}${
+                            item.tags?.length ? ` · ${item.tags.join(', ')}` : ''
+                          }`}
+                          featured={item.featured ?? false}
+                          onToggleFeatured={() =>
+                            updateItem({ featured: !item.featured })
+                          }
+                          onRemove={() => {
+                            updateCategory({
+                              items: (cat.items ?? []).filter((_, k) => k !== ii),
+                            });
+                          }}
+                        >
+                          <LabelledField label="Name">
+                            <Input
+                              value={item.name ?? ''}
+                              onChange={(e) => updateItem({ name: e.target.value })}
+                              placeholder="Flat white"
+                              maxLength={80}
+                            />
+                          </LabelledField>
+                          <LabelledField label="Description (optional)">
+                            <Textarea
+                              value={item.description ?? ''}
+                              onChange={(e) => updateItem({ description: e.target.value })}
+                              placeholder="Short description"
+                              rows={2}
+                              maxLength={200}
+                            />
+                          </LabelledField>
+                          <LabelledField label="Price" hint="e.g. 4.50 or 'from 12'">
+                            <Input
+                              value={item.price ?? ''}
+                              onChange={(e) => updateItem({ price: e.target.value })}
+                              placeholder="4.50"
+                              maxLength={20}
+                            />
+                          </LabelledField>
+                          <TagListField
+                            label="Dietary tags"
+                            tags={item.tags ?? []}
+                            max={4}
+                            placeholder="V, VG, GF, DF"
+                            onChange={(tags) => updateItem({ tags })}
+                          />
+                        </ExpandableItemRow>
+                      );
+                    })}
+                  </div>
                 </div>
-              ))}
-            </div>
-          ))}
+              </ExpandableItemRow>
+            );
+          })}
         </ArrayBlock>
       ) : null}
 
@@ -3716,22 +4827,322 @@ function ItemsEditor({
           addLabel="Add service"
           emptyHint="No priced services yet."
         >
-          {(config.priceList.items ?? []).map((item, i) => (
-            <ItemRow
-              key={`pl-${i}`}
-              primary={item.name}
-              secondary={`${item.price ?? '—'} · ${item.duration ?? ''}`}
-              onRemove={() =>
+          <LabelledField label="Currency" hint="€ / $ / £">
+            <Input
+              value={config.priceList.currency ?? '€'}
+              onChange={(e) =>
                 onChange({
                   ...config,
-                  priceList: {
-                    ...config.priceList!,
-                    items: (config.priceList!.items ?? []).filter((_, j) => j !== i),
-                  },
+                  priceList: { ...config.priceList!, currency: e.target.value.slice(0, 4) },
                 })
               }
+              maxLength={4}
+              className="max-w-[80px]"
             />
-          ))}
+          </LabelledField>
+          {/* Grouped price list — Claude often generates these with
+              category headings (Cuts, Colour, Beard). Each group has
+              its own title + items, edited the same way as the flat
+              list below. Shown only when at least one group exists. */}
+          {(config.priceList.groups?.length ?? 0) === 0 ? (
+            <div className="flex items-center justify-between rounded-lg border border-dashed border-slate-300 bg-slate-50 px-2 py-1.5">
+              <span className="text-[10px] text-slate-500">
+                Flat list. Want categories like Cuts / Colour / Beard?
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  onChange({
+                    ...config,
+                    priceList: {
+                      ...config.priceList!,
+                      groups: [{ title: 'New group', items: [] }],
+                    },
+                  });
+                }}
+                className="inline-flex items-center gap-0.5 rounded-full border border-slate-300 bg-white px-2 py-0.5 text-[10px] font-medium text-slate-600 hover:border-[#1D9CA1] hover:text-[#1D9CA1]"
+              >
+                <Plus className="h-2.5 w-2.5" />
+                Add group
+              </button>
+            </div>
+          ) : null}
+          {(config.priceList.groups?.length ?? 0) > 0 ? (
+            <div className="rounded-lg border border-slate-200 bg-white p-2">
+              <div className="mb-1.5 flex items-center justify-between">
+                <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+                  Groups · {config.priceList.groups?.length ?? 0}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onChange({
+                      ...config,
+                      priceList: {
+                        ...config.priceList!,
+                        groups: [
+                          ...(config.priceList!.groups ?? []),
+                          { title: 'New group', items: [] },
+                        ],
+                      },
+                    });
+                  }}
+                  className="inline-flex items-center gap-0.5 text-[10px] font-medium text-[#1D9CA1] hover:underline"
+                >
+                  <Plus className="h-2.5 w-2.5" />
+                  Add group
+                </button>
+              </div>
+              <div className="space-y-1.5">
+                {(config.priceList.groups ?? []).map((group, gi) => {
+                  const updateGroup = (
+                    patch: Partial<
+                      NonNullable<
+                        NonNullable<WebsiteConfig['priceList']>['groups']
+                      >[number]
+                    >,
+                  ) => {
+                    const groups = [...(config.priceList!.groups ?? [])];
+                    groups[gi] = { ...groups[gi]!, ...patch };
+                    onChange({
+                      ...config,
+                      priceList: { ...config.priceList!, groups },
+                    });
+                  };
+                  const moveGroup = (dir: -1 | 1) => {
+                    const groups = [...(config.priceList!.groups ?? [])];
+                    const j = gi + dir;
+                    if (j < 0 || j >= groups.length) return;
+                    [groups[gi], groups[j]] = [groups[j]!, groups[gi]!];
+                    onChange({
+                      ...config,
+                      priceList: { ...config.priceList!, groups },
+                    });
+                  };
+                  return (
+                    <ExpandableItemRow
+                      key={`pl-group-${gi}`}
+                      summary={group.title || `Group ${gi + 1}`}
+                      summarySecondary={`${group.items?.length ?? 0} item${
+                        group.items?.length === 1 ? '' : 's'
+                      }`}
+                      onMoveUp={gi > 0 ? () => moveGroup(-1) : undefined}
+                      onMoveDown={
+                        gi < (config.priceList!.groups?.length ?? 0) - 1
+                          ? () => moveGroup(1)
+                          : undefined
+                      }
+                      onRemove={async () => {
+                        if (
+                          !(await confirmDialog({
+                            title: `Delete "${group.title}"?`,
+                            description: `Removes ${group.items?.length ?? 0} items.`,
+                            confirmLabel: 'Delete',
+                            danger: true,
+                          }))
+                        )
+                          return;
+                        onChange({
+                          ...config,
+                          priceList: {
+                            ...config.priceList!,
+                            groups: (config.priceList!.groups ?? []).filter(
+                              (_, j) => j !== gi,
+                            ),
+                          },
+                        });
+                      }}
+                    >
+                      <LabelledField label="Group title">
+                        <Input
+                          value={group.title ?? ''}
+                          onChange={(e) => updateGroup({ title: e.target.value })}
+                          placeholder="e.g. Cuts, Colour, Beard"
+                          maxLength={60}
+                        />
+                      </LabelledField>
+                      <div className="rounded-lg border border-slate-200 bg-white p-2">
+                        <div className="mb-1.5 flex items-center justify-between">
+                          <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+                            Items · {group.items?.length ?? 0}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              updateGroup({
+                                items: [
+                                  ...(group.items ?? []),
+                                  { name: 'New service', price: '0' },
+                                ],
+                              })
+                            }
+                            className="inline-flex items-center gap-0.5 text-[10px] font-medium text-[#1D9CA1] hover:underline"
+                          >
+                            <Plus className="h-2.5 w-2.5" />
+                            Add item
+                          </button>
+                        </div>
+                        <div className="space-y-1">
+                          {(group.items ?? []).map((it, ii) => {
+                            const updateItem = (
+                              patch: Partial<typeof it>,
+                            ) => {
+                              const items = [...(group.items ?? [])];
+                              items[ii] = { ...items[ii]!, ...patch };
+                              updateGroup({ items });
+                            };
+                            return (
+                              <ExpandableItemRow
+                                key={`pl-group-${gi}-item-${ii}`}
+                                summary={it.name || `Item ${ii + 1}`}
+                                summarySecondary={`${
+                                  config.priceList!.currency ?? '€'
+                                }${it.price ?? '—'} · ${it.duration ?? ''}`}
+                                featured={it.featured ?? false}
+                                onToggleFeatured={() =>
+                                  updateItem({ featured: !it.featured })
+                                }
+                                onRemove={() =>
+                                  updateGroup({
+                                    items: (group.items ?? []).filter(
+                                      (_, k) => k !== ii,
+                                    ),
+                                  })
+                                }
+                              >
+                                <LabelledField label="Service name">
+                                  <Input
+                                    value={it.name ?? ''}
+                                    onChange={(e) =>
+                                      updateItem({ name: e.target.value })
+                                    }
+                                    maxLength={80}
+                                  />
+                                </LabelledField>
+                                <FieldGrid>
+                                  <LabelledField label="Price">
+                                    <Input
+                                      value={it.price ?? ''}
+                                      onChange={(e) =>
+                                        updateItem({ price: e.target.value })
+                                      }
+                                      placeholder="25"
+                                      maxLength={20}
+                                    />
+                                  </LabelledField>
+                                  <LabelledField label="Duration">
+                                    <Input
+                                      value={it.duration ?? ''}
+                                      onChange={(e) =>
+                                        updateItem({ duration: e.target.value })
+                                      }
+                                      placeholder="45 min"
+                                      maxLength={30}
+                                    />
+                                  </LabelledField>
+                                </FieldGrid>
+                                <LabelledField label="Note (optional)">
+                                  <Input
+                                    value={it.note ?? ''}
+                                    onChange={(e) =>
+                                      updateItem({ note: e.target.value })
+                                    }
+                                    placeholder="incl. consultation"
+                                    maxLength={100}
+                                  />
+                                </LabelledField>
+                              </ExpandableItemRow>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </ExpandableItemRow>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+          {(config.priceList.items ?? []).map((item, i) => {
+            const updateItem = (patch: Partial<typeof item>) => {
+              const items = [...(config.priceList!.items ?? [])];
+              items[i] = { ...items[i]!, ...patch };
+              onChange({
+                ...config,
+                priceList: { ...config.priceList!, items },
+              });
+            };
+            const moveItem = (dir: -1 | 1) => {
+              const items = [...(config.priceList!.items ?? [])];
+              const j = i + dir;
+              if (j < 0 || j >= items.length) return;
+              [items[i], items[j]] = [items[j]!, items[i]!];
+              onChange({
+                ...config,
+                priceList: { ...config.priceList!, items },
+              });
+            };
+            return (
+              <ExpandableItemRow
+                key={`pl-${i}`}
+                summary={item.name || `Service ${i + 1}`}
+                summarySecondary={`${config.priceList!.currency ?? '€'}${item.price ?? '—'} · ${
+                  item.duration ?? ''
+                }`}
+                featured={item.featured ?? false}
+                onToggleFeatured={() => updateItem({ featured: !item.featured })}
+                onMoveUp={i > 0 ? () => moveItem(-1) : undefined}
+                onMoveDown={
+                  i < (config.priceList!.items?.length ?? 0) - 1
+                    ? () => moveItem(1)
+                    : undefined
+                }
+                onRemove={() =>
+                  onChange({
+                    ...config,
+                    priceList: {
+                      ...config.priceList!,
+                      items: (config.priceList!.items ?? []).filter((_, j) => j !== i),
+                    },
+                  })
+                }
+              >
+                <LabelledField label="Service name">
+                  <Input
+                    value={item.name ?? ''}
+                    onChange={(e) => updateItem({ name: e.target.value })}
+                    placeholder="Men's cut"
+                    maxLength={80}
+                  />
+                </LabelledField>
+                <FieldGrid>
+                  <LabelledField label="Price" hint="25 / from 85">
+                    <Input
+                      value={item.price ?? ''}
+                      onChange={(e) => updateItem({ price: e.target.value })}
+                      placeholder="25"
+                      maxLength={20}
+                    />
+                  </LabelledField>
+                  <LabelledField label="Duration">
+                    <Input
+                      value={item.duration ?? ''}
+                      onChange={(e) => updateItem({ duration: e.target.value })}
+                      placeholder="45 min"
+                      maxLength={30}
+                    />
+                  </LabelledField>
+                </FieldGrid>
+                <LabelledField label="Note (optional)">
+                  <Input
+                    value={item.note ?? ''}
+                    onChange={(e) => updateItem({ note: e.target.value })}
+                    placeholder="incl. consultation"
+                    maxLength={100}
+                  />
+                </LabelledField>
+              </ExpandableItemRow>
+            );
+          })}
         </ArrayBlock>
       ) : null}
 
@@ -3768,11 +5179,42 @@ function ItemsEditor({
               })
             }
           />
-          {(config.team.members ?? []).map((m, i) => (
-            <div key={`tm-${i}`} className="space-y-1.5">
-              <ItemRow
-                primary={m.name ?? '(unnamed)'}
-                secondary={m.role ?? ''}
+          {(config.team.members ?? []).map((m, i) => {
+            const updateMember = (
+              patch: Partial<
+                NonNullable<NonNullable<WebsiteConfig['team']>['members']>[number]
+              >,
+            ) => {
+              const next = [...(config.team!.members ?? [])];
+              next[i] = { ...next[i]!, ...patch };
+              onChange({
+                ...config,
+                team: { ...config.team!, members: next },
+              });
+            };
+            const moveMember = (dir: -1 | 1) => {
+              const next = [...(config.team!.members ?? [])];
+              const j = i + dir;
+              if (j < 0 || j >= next.length) return;
+              [next[i], next[j]] = [next[j]!, next[i]!];
+              onChange({
+                ...config,
+                team: { ...config.team!, members: next },
+              });
+            };
+            return (
+              <ExpandableItemRow
+                key={`tm-${i}`}
+                summary={m.name || '(unnamed)'}
+                summarySecondary={m.role ?? ''}
+                featured={m.featured ?? false}
+                onToggleFeatured={() => updateMember({ featured: !m.featured })}
+                onMoveUp={i > 0 ? () => moveMember(-1) : undefined}
+                onMoveDown={
+                  i < (config.team!.members?.length ?? 0) - 1
+                    ? () => moveMember(1)
+                    : undefined
+                }
                 onRemove={async () => {
                   if (
                     !(await confirmDialog({
@@ -3791,6 +5233,48 @@ function ItemsEditor({
                   });
                 }}
               >
+                <FieldGrid>
+                  <LabelledField label="Name">
+                    <Input
+                      value={m.name ?? ''}
+                      onChange={(e) => updateMember({ name: e.target.value })}
+                      placeholder="Sarah O'Brien"
+                      maxLength={80}
+                    />
+                  </LabelledField>
+                  <LabelledField label="Role">
+                    <Input
+                      value={m.role ?? ''}
+                      onChange={(e) => updateMember({ role: e.target.value })}
+                      placeholder="Senior stylist"
+                      maxLength={80}
+                    />
+                  </LabelledField>
+                </FieldGrid>
+                <LabelledField label="Bio (optional)">
+                  <Textarea
+                    value={m.bio ?? ''}
+                    onChange={(e) => updateMember({ bio: e.target.value })}
+                    placeholder="A short bio — 1 or 2 sentences"
+                    rows={2}
+                    maxLength={400}
+                  />
+                </LabelledField>
+                <LabelledField label="Credentials (optional)" hint="e.g. BDS, RGN">
+                  <Input
+                    value={m.credentials ?? ''}
+                    onChange={(e) => updateMember({ credentials: e.target.value })}
+                    placeholder="BDS, MFDS RCSI"
+                    maxLength={100}
+                  />
+                </LabelledField>
+                <TagListField
+                  label="Specialties"
+                  tags={m.specialties ?? []}
+                  max={5}
+                  placeholder="Beard trims, skin fades"
+                  onChange={(tags) => updateMember({ specialties: tags })}
+                />
                 <VariantPicker
                   label="This member's card"
                   value={m.variant}
@@ -3807,19 +5291,16 @@ function ItemsEditor({
                       ? 'portrait'
                       : config.team!.variant
                   }
-                  onChange={(v) => {
-                    const next = [...(config.team!.members ?? [])];
-                    next[i] = { ...next[i]!, variant: v ?? undefined };
-                    onChange({
-                      ...config,
-                      team: { ...config.team!, members: next },
-                    });
-                  }}
+                  onChange={(v) => updateMember({ variant: v ?? undefined })}
                   allowDefault
                 />
-              </ItemRow>
-            </div>
-          ))}
+                <p className="text-[10px] text-slate-400">
+                  Tip: photos are managed from the preview — click the member&apos;s avatar
+                  in the preview or the Images tab.
+                </p>
+              </ExpandableItemRow>
+            );
+          })}
         </ArrayBlock>
       ) : null}
 
@@ -3844,29 +5325,102 @@ function ItemsEditor({
           addLabel="Add entry"
           emptyHint="No schedule entries yet."
         >
-          {(config.schedule.entries ?? []).map((e, i) => (
-            <ItemRow
-              key={`sch-${i}`}
-              primary={`${e.day} ${e.time} — ${e.title}`}
-              secondary={e.detail ?? ''}
-              onRemove={() =>
-                onChange({
-                  ...config,
-                  schedule: {
-                    ...config.schedule!,
-                    entries: (config.schedule!.entries ?? []).filter((_, j) => j !== i),
-                  },
-                })
-              }
-            />
-          ))}
+          {(config.schedule.entries ?? []).map((e, i) => {
+            const updateEntry = (
+              patch: Partial<
+                NonNullable<WebsiteConfig['schedule']>['entries'][number]
+              >,
+            ) => {
+              const entries = [...(config.schedule!.entries ?? [])];
+              entries[i] = { ...entries[i]!, ...patch };
+              onChange({
+                ...config,
+                schedule: { ...config.schedule!, entries },
+              });
+            };
+            const moveEntry = (dir: -1 | 1) => {
+              const entries = [...(config.schedule!.entries ?? [])];
+              const j = i + dir;
+              if (j < 0 || j >= entries.length) return;
+              [entries[i], entries[j]] = [entries[j]!, entries[i]!];
+              onChange({
+                ...config,
+                schedule: { ...config.schedule!, entries },
+              });
+            };
+            return (
+              <ExpandableItemRow
+                key={`sch-${i}`}
+                summary={`${e.day} ${e.time} — ${e.title}`}
+                summarySecondary={e.detail ?? ''}
+                featured={e.featured ?? false}
+                onToggleFeatured={() => updateEntry({ featured: !e.featured })}
+                onMoveUp={i > 0 ? () => moveEntry(-1) : undefined}
+                onMoveDown={
+                  i < (config.schedule!.entries?.length ?? 0) - 1
+                    ? () => moveEntry(1)
+                    : undefined
+                }
+                onRemove={() =>
+                  onChange({
+                    ...config,
+                    schedule: {
+                      ...config.schedule!,
+                      entries: (config.schedule!.entries ?? []).filter(
+                        (_, j) => j !== i,
+                      ),
+                    },
+                  })
+                }
+              >
+                <FieldGrid>
+                  <LabelledField label="Day">
+                    <select
+                      value={e.day ?? 'Mo'}
+                      onChange={(ev) => updateEntry({ day: ev.target.value })}
+                      className="h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-xs"
+                    >
+                      {['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'].map((d) => (
+                        <option key={d} value={d}>
+                          {d}
+                        </option>
+                      ))}
+                    </select>
+                  </LabelledField>
+                  <LabelledField label="Time" hint="24hr, HH:MM">
+                    <Input
+                      type="time"
+                      value={e.time ?? '09:00'}
+                      onChange={(ev) => updateEntry({ time: ev.target.value })}
+                    />
+                  </LabelledField>
+                </FieldGrid>
+                <LabelledField label="Title">
+                  <Input
+                    value={e.title ?? ''}
+                    onChange={(ev) => updateEntry({ title: ev.target.value })}
+                    placeholder="HIIT"
+                    maxLength={80}
+                  />
+                </LabelledField>
+                <LabelledField label="Detail (optional)" hint="duration · instructor">
+                  <Input
+                    value={e.detail ?? ''}
+                    onChange={(ev) => updateEntry({ detail: ev.target.value })}
+                    placeholder="45 min · Coach Maria"
+                    maxLength={120}
+                  />
+                </LabelledField>
+              </ExpandableItemRow>
+            );
+          })}
         </ArrayBlock>
       ) : null}
 
       {/* Service areas */}
       {config.serviceAreas ? (
         <ArrayBlock
-          icon={<Globe className="h-3.5 w-3.5" />}
+          icon={<MapPin className="h-3.5 w-3.5" />}
           label="Service areas"
           count={config.serviceAreas.areas?.length ?? 0}
           onAdd={() =>
@@ -3881,28 +5435,65 @@ function ItemsEditor({
           addLabel="Add area"
           emptyHint="No service areas yet."
         >
-          {(config.serviceAreas.areas ?? []).map((area, i) => (
-            <ItemRow
-              key={`sa-${i}`}
-              primary={area || `Area ${i + 1}`}
-              onRemove={() =>
-                onChange({
-                  ...config,
-                  serviceAreas: {
-                    ...config.serviceAreas!,
-                    areas: (config.serviceAreas!.areas ?? []).filter((_, j) => j !== i),
-                  },
-                })
-              }
-            />
-          ))}
+          {(config.serviceAreas.areas ?? []).map((area, i) => {
+            const updateArea = (next: string) => {
+              const areas = [...(config.serviceAreas!.areas ?? [])];
+              areas[i] = next;
+              onChange({
+                ...config,
+                serviceAreas: { ...config.serviceAreas!, areas },
+              });
+            };
+            const moveArea = (dir: -1 | 1) => {
+              const areas = [...(config.serviceAreas!.areas ?? [])];
+              const j = i + dir;
+              if (j < 0 || j >= areas.length) return;
+              [areas[i], areas[j]] = [areas[j]!, areas[i]!];
+              onChange({
+                ...config,
+                serviceAreas: { ...config.serviceAreas!, areas },
+              });
+            };
+            return (
+              <ExpandableItemRow
+                key={`sa-${i}`}
+                summary={area || `Area ${i + 1}`}
+                onMoveUp={i > 0 ? () => moveArea(-1) : undefined}
+                onMoveDown={
+                  i < (config.serviceAreas!.areas?.length ?? 0) - 1
+                    ? () => moveArea(1)
+                    : undefined
+                }
+                onRemove={() =>
+                  onChange({
+                    ...config,
+                    serviceAreas: {
+                      ...config.serviceAreas!,
+                      areas: (config.serviceAreas!.areas ?? []).filter(
+                        (_, j) => j !== i,
+                      ),
+                    },
+                  })
+                }
+              >
+                <LabelledField label="Area name">
+                  <Input
+                    value={area ?? ''}
+                    onChange={(e) => updateArea(e.target.value)}
+                    placeholder="Dublin 2"
+                    maxLength={80}
+                  />
+                </LabelledField>
+              </ExpandableItemRow>
+            );
+          })}
         </ArrayBlock>
       ) : null}
 
       {/* Trust badges */}
       {config.trustBadges ? (
         <ArrayBlock
-          icon={<Check className="h-3.5 w-3.5" />}
+          icon={<ShieldCheck className="h-3.5 w-3.5" />}
           label="Trust badges"
           count={config.trustBadges.badges?.length ?? 0}
           onAdd={() =>
@@ -3920,22 +5511,66 @@ function ItemsEditor({
           addLabel="Add badge"
           emptyHint="No trust badges yet."
         >
-          {(config.trustBadges.badges ?? []).map((b, i) => (
-            <ItemRow
-              key={`tb-${i}`}
-              primary={b.label}
-              secondary={b.detail ?? ''}
-              onRemove={() =>
-                onChange({
-                  ...config,
-                  trustBadges: {
-                    ...config.trustBadges!,
-                    badges: (config.trustBadges!.badges ?? []).filter((_, j) => j !== i),
-                  },
-                })
-              }
-            />
-          ))}
+          {(config.trustBadges.badges ?? []).map((b, i) => {
+            const updateBadge = (
+              patch: Partial<
+                NonNullable<
+                  NonNullable<WebsiteConfig['trustBadges']>['badges']
+                >[number]
+              >,
+            ) => {
+              const badges = [...(config.trustBadges!.badges ?? [])];
+              badges[i] = { ...badges[i]!, ...patch };
+              onChange({
+                ...config,
+                trustBadges: { ...config.trustBadges!, badges },
+              });
+            };
+            return (
+              <ExpandableItemRow
+                key={`tb-${i}`}
+                summary={b.label || `Badge ${i + 1}`}
+                summarySecondary={b.detail ?? ''}
+                onRemove={() =>
+                  onChange({
+                    ...config,
+                    trustBadges: {
+                      ...config.trustBadges!,
+                      badges: (config.trustBadges!.badges ?? []).filter(
+                        (_, j) => j !== i,
+                      ),
+                    },
+                  })
+                }
+              >
+                <LabelledField label="Label">
+                  <Input
+                    value={b.label ?? ''}
+                    onChange={(e) => updateBadge({ label: e.target.value })}
+                    placeholder="RGI Registered"
+                    maxLength={80}
+                  />
+                </LabelledField>
+                <LabelledField label="Detail (optional)">
+                  <Input
+                    value={b.detail ?? ''}
+                    onChange={(e) => updateBadge({ detail: e.target.value })}
+                    placeholder="Reg. No. 12345"
+                    maxLength={200}
+                  />
+                </LabelledField>
+                <LabelledField label="Link (optional)" hint="URL to verify">
+                  <Input
+                    type="url"
+                    value={b.href ?? ''}
+                    onChange={(e) => updateBadge({ href: e.target.value })}
+                    placeholder="https://rgii.ie/member/12345"
+                    maxLength={500}
+                  />
+                </LabelledField>
+              </ExpandableItemRow>
+            );
+          })}
         </ArrayBlock>
       ) : null}
 
@@ -3955,24 +5590,79 @@ function ItemsEditor({
             })
           }
           addLabel="Add pair"
-          emptyHint="No before/after pairs yet. Pick image indexes from the Images tab."
+          emptyHint="No before/after pairs yet. Add one, then pick images in the Images tab."
         >
-          {(config.beforeAfter.pairs ?? []).map((p, i) => (
-            <ItemRow
-              key={`ba-${i}`}
-              primary={p.caption || `Pair ${i + 1}`}
-              secondary={`Before: ${p.beforeIndex ?? '—'} · After: ${p.afterIndex ?? '—'}`}
-              onRemove={() =>
-                onChange({
-                  ...config,
-                  beforeAfter: {
-                    ...config.beforeAfter!,
-                    pairs: (config.beforeAfter!.pairs ?? []).filter((_, j) => j !== i),
-                  },
-                })
-              }
-            />
-          ))}
+          {(config.beforeAfter.pairs ?? []).map((p, i) => {
+            const updatePair = (
+              patch: Partial<
+                NonNullable<WebsiteConfig['beforeAfter']>['pairs'][number]
+              >,
+            ) => {
+              const pairs = [...(config.beforeAfter!.pairs ?? [])];
+              pairs[i] = { ...pairs[i]!, ...patch };
+              onChange({
+                ...config,
+                beforeAfter: { ...config.beforeAfter!, pairs },
+              });
+            };
+            return (
+              <ExpandableItemRow
+                key={`ba-${i}`}
+                summary={p.caption || `Pair ${i + 1}`}
+                summarySecondary={`Before: ${p.beforeIndex ?? '—'} · After: ${p.afterIndex ?? '—'}`}
+                onRemove={() =>
+                  onChange({
+                    ...config,
+                    beforeAfter: {
+                      ...config.beforeAfter!,
+                      pairs: (config.beforeAfter!.pairs ?? []).filter(
+                        (_, j) => j !== i,
+                      ),
+                    },
+                  })
+                }
+              >
+                <LabelledField label="Caption (optional)">
+                  <Input
+                    value={p.caption ?? ''}
+                    onChange={(e) => updatePair({ caption: e.target.value })}
+                    placeholder="Bathroom refit — 3 days"
+                    maxLength={150}
+                  />
+                </LabelledField>
+                <FieldGrid>
+                  <LabelledField label="Before image index" hint="from Images tab">
+                    <Input
+                      type="number"
+                      min={0}
+                      value={p.beforeIndex ?? ''}
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        updatePair({
+                          beforeIndex: raw === '' ? undefined : Number(raw),
+                        });
+                      }}
+                      placeholder="0"
+                    />
+                  </LabelledField>
+                  <LabelledField label="After image index" hint="from Images tab">
+                    <Input
+                      type="number"
+                      min={0}
+                      value={p.afterIndex ?? ''}
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        updatePair({
+                          afterIndex: raw === '' ? undefined : Number(raw),
+                        });
+                      }}
+                      placeholder="1"
+                    />
+                  </LabelledField>
+                </FieldGrid>
+              </ExpandableItemRow>
+            );
+          })}
         </ArrayBlock>
       ) : null}
 
@@ -3982,7 +5672,7 @@ function ItemsEditor({
       {/* Products */}
       {config.products ? (
         <ArrayBlock
-          icon={<ImageIcon className="h-3.5 w-3.5" />}
+          icon={<ShoppingBag className="h-3.5 w-3.5" />}
           label="Products"
           count={config.products.items?.length ?? 0}
           onAdd={() =>
@@ -4000,22 +5690,169 @@ function ItemsEditor({
           addLabel="Add product"
           emptyHint="No products yet."
         >
-          {(config.products.items ?? []).map((p, i) => (
-            <ItemRow
-              key={`prod-${i}`}
-              primary={p.name}
-              secondary={`${p.price ?? ''}${p.category ? ` · ${p.category}` : ''}`}
-              onRemove={() =>
-                onChange({
-                  ...config,
-                  products: {
-                    ...config.products!,
-                    items: (config.products!.items ?? []).filter((_, j) => j !== i),
-                  },
-                })
-              }
-            />
-          ))}
+          <FieldGrid>
+            <LabelledField label="Currency" hint="€ / $ / £">
+              <Input
+                value={config.products.currency ?? '€'}
+                onChange={(e) =>
+                  onChange({
+                    ...config,
+                    products: {
+                      ...config.products!,
+                      currency: e.target.value.slice(0, 4),
+                    },
+                  })
+                }
+                maxLength={4}
+                className="max-w-[80px]"
+              />
+            </LabelledField>
+            <div />
+          </FieldGrid>
+          <TagListField
+            label="Category tabs (optional)"
+            tags={config.products.categories ?? []}
+            max={8}
+            placeholder="Cakes, Bread, Pastries"
+            onChange={(categories) =>
+              onChange({
+                ...config,
+                products: { ...config.products!, categories },
+              })
+            }
+          />
+          {(config.products.items ?? []).map((p, i) => {
+            const updateProduct = (
+              patch: Partial<
+                NonNullable<NonNullable<WebsiteConfig['products']>['items']>[number]
+              >,
+            ) => {
+              const items = [...(config.products!.items ?? [])];
+              items[i] = { ...items[i]!, ...patch };
+              onChange({
+                ...config,
+                products: { ...config.products!, items },
+              });
+            };
+            const moveProduct = (dir: -1 | 1) => {
+              const items = [...(config.products!.items ?? [])];
+              const j = i + dir;
+              if (j < 0 || j >= items.length) return;
+              [items[i], items[j]] = [items[j]!, items[i]!];
+              onChange({
+                ...config,
+                products: { ...config.products!, items },
+              });
+            };
+            return (
+              <ExpandableItemRow
+                key={`prod-${i}`}
+                summary={p.name || `Product ${i + 1}`}
+                summarySecondary={`${config.products!.currency ?? '€'}${p.price ?? ''}${
+                  p.category ? ` · ${p.category}` : ''
+                }`}
+                featured={p.featured ?? false}
+                onToggleFeatured={() => updateProduct({ featured: !p.featured })}
+                onMoveUp={i > 0 ? () => moveProduct(-1) : undefined}
+                onMoveDown={
+                  i < (config.products!.items?.length ?? 0) - 1
+                    ? () => moveProduct(1)
+                    : undefined
+                }
+                onRemove={() =>
+                  onChange({
+                    ...config,
+                    products: {
+                      ...config.products!,
+                      items: (config.products!.items ?? []).filter((_, j) => j !== i),
+                    },
+                  })
+                }
+              >
+                <LabelledField label="Name">
+                  <Input
+                    value={p.name ?? ''}
+                    onChange={(e) => updateProduct({ name: e.target.value })}
+                    placeholder="Victoria sponge"
+                    maxLength={80}
+                  />
+                </LabelledField>
+                <LabelledField label="Description (optional)">
+                  <Textarea
+                    value={p.description ?? ''}
+                    onChange={(e) => updateProduct({ description: e.target.value })}
+                    placeholder="What the product is"
+                    rows={2}
+                    maxLength={300}
+                  />
+                </LabelledField>
+                <FieldGrid>
+                  <LabelledField label="Price">
+                    <Input
+                      value={p.price ?? ''}
+                      onChange={(e) => updateProduct({ price: e.target.value })}
+                      placeholder="18.50"
+                      maxLength={20}
+                    />
+                  </LabelledField>
+                  <LabelledField label="Category (optional)">
+                    {(config.products!.categories ?? []).length > 0 ? (
+                      <select
+                        value={p.category ?? ''}
+                        onChange={(e) =>
+                          updateProduct({
+                            category: e.target.value || undefined,
+                          })
+                        }
+                        className="h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-xs"
+                      >
+                        <option value="">—</option>
+                        {(config.products!.categories ?? []).map((c) => (
+                          <option key={c} value={c}>
+                            {c}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <Input
+                        value={p.category ?? ''}
+                        onChange={(e) => updateProduct({ category: e.target.value })}
+                        placeholder="Cakes"
+                        maxLength={60}
+                      />
+                    )}
+                  </LabelledField>
+                </FieldGrid>
+                <FieldGrid>
+                  <LabelledField label="Badge (optional)" hint="New / Sale">
+                    <Input
+                      value={p.badge ?? ''}
+                      onChange={(e) => updateProduct({ badge: e.target.value })}
+                      placeholder="New"
+                      maxLength={20}
+                    />
+                  </LabelledField>
+                  <LabelledField label="CTA label">
+                    <Input
+                      value={p.ctaLabel ?? ''}
+                      onChange={(e) => updateProduct({ ctaLabel: e.target.value })}
+                      placeholder="Order"
+                      maxLength={30}
+                    />
+                  </LabelledField>
+                </FieldGrid>
+                <LabelledField label="Link (optional)" hint="URL to buy/enquire">
+                  <Input
+                    type="url"
+                    value={p.href ?? ''}
+                    onChange={(e) => updateProduct({ href: e.target.value })}
+                    placeholder="https://..."
+                    maxLength={500}
+                  />
+                </LabelledField>
+              </ExpandableItemRow>
+            );
+          })}
         </ArrayBlock>
       ) : null}
 
@@ -4040,29 +5877,123 @@ function ItemsEditor({
           addLabel="Add project"
           emptyHint="No projects yet."
         >
-          {(config.portfolio.projects ?? []).map((p, i) => (
-            <ItemRow
-              key={`port-${i}`}
-              primary={p.title}
-              secondary={`${(p.imageIndices?.length ?? 0) + (p.imageUrls?.length ?? 0)} images · ${(p.tags ?? []).join(', ')}`}
-              onRemove={() =>
-                onChange({
-                  ...config,
-                  portfolio: {
-                    ...config.portfolio!,
-                    projects: (config.portfolio!.projects ?? []).filter((_, j) => j !== i),
-                  },
-                })
-              }
-            />
-          ))}
+          {(config.portfolio.projects ?? []).map((p, i) => {
+            const updateProject = (
+              patch: Partial<
+                NonNullable<
+                  NonNullable<WebsiteConfig['portfolio']>['projects']
+                >[number]
+              >,
+            ) => {
+              const projects = [...(config.portfolio!.projects ?? [])];
+              projects[i] = { ...projects[i]!, ...patch };
+              onChange({
+                ...config,
+                portfolio: { ...config.portfolio!, projects },
+              });
+            };
+            const moveProject = (dir: -1 | 1) => {
+              const projects = [...(config.portfolio!.projects ?? [])];
+              const j = i + dir;
+              if (j < 0 || j >= projects.length) return;
+              [projects[i], projects[j]] = [projects[j]!, projects[i]!];
+              onChange({
+                ...config,
+                portfolio: { ...config.portfolio!, projects },
+              });
+            };
+            // Edit imageIndices as a comma-separated list to keep the UI
+            // simple. The Images tab is still the canonical picker for
+            // individual images; this field is for quick reordering or
+            // bulk edits.
+            const imageIndicesRaw = (p.imageIndices ?? []).join(', ');
+            return (
+              <ExpandableItemRow
+                key={`port-${i}`}
+                summary={p.title || `Project ${i + 1}`}
+                summarySecondary={`${
+                  (p.imageIndices?.length ?? 0) + (p.imageUrls?.length ?? 0)
+                } images · ${(p.tags ?? []).join(', ')}`}
+                featured={p.featured ?? false}
+                onToggleFeatured={() => updateProject({ featured: !p.featured })}
+                onMoveUp={i > 0 ? () => moveProject(-1) : undefined}
+                onMoveDown={
+                  i < (config.portfolio!.projects?.length ?? 0) - 1
+                    ? () => moveProject(1)
+                    : undefined
+                }
+                onRemove={() =>
+                  onChange({
+                    ...config,
+                    portfolio: {
+                      ...config.portfolio!,
+                      projects: (config.portfolio!.projects ?? []).filter(
+                        (_, j) => j !== i,
+                      ),
+                    },
+                  })
+                }
+              >
+                <LabelledField label="Title">
+                  <Input
+                    value={p.title ?? ''}
+                    onChange={(e) => updateProject({ title: e.target.value })}
+                    placeholder="Dublin kitchen refit"
+                    maxLength={100}
+                  />
+                </LabelledField>
+                <LabelledField label="Summary (card teaser)">
+                  <Input
+                    value={p.summary ?? ''}
+                    onChange={(e) => updateProject({ summary: e.target.value })}
+                    placeholder="One-line teaser shown on the card"
+                    maxLength={150}
+                  />
+                </LabelledField>
+                <LabelledField label="Description (shown when expanded)">
+                  <Textarea
+                    value={p.description ?? ''}
+                    onChange={(e) => updateProject({ description: e.target.value })}
+                    placeholder="The full story — client goals, what we did, the result"
+                    rows={3}
+                    maxLength={1000}
+                  />
+                </LabelledField>
+                <LabelledField
+                  label="Image indices"
+                  hint="comma-separated, from Images tab"
+                >
+                  <Input
+                    value={imageIndicesRaw}
+                    onChange={(e) => {
+                      const next = e.target.value
+                        .split(',')
+                        .map((s) => s.trim())
+                        .filter(Boolean)
+                        .map(Number)
+                        .filter((n) => Number.isFinite(n) && n >= 0);
+                      updateProject({ imageIndices: next });
+                    }}
+                    placeholder="0, 1, 2"
+                  />
+                </LabelledField>
+                <TagListField
+                  label="Tags"
+                  tags={p.tags ?? []}
+                  max={6}
+                  placeholder="2024, Dublin, residential"
+                  onChange={(tags) => updateProject({ tags })}
+                />
+              </ExpandableItemRow>
+            );
+          })}
         </ArrayBlock>
       ) : null}
 
       {/* Process steps */}
       {config.process ? (
         <ArrayBlock
-          icon={<List className="h-3.5 w-3.5" />}
+          icon={<Workflow className="h-3.5 w-3.5" />}
           label="Process steps"
           count={config.process.steps?.length ?? 0}
           onAdd={() =>
@@ -4080,29 +6011,93 @@ function ItemsEditor({
           addLabel="Add step"
           emptyHint="No steps yet."
         >
-          {(config.process.steps ?? []).map((s, i) => (
-            <ItemRow
-              key={`proc-${i}`}
-              primary={`${i + 1}. ${s.title}`}
-              secondary={s.description ?? ''}
-              onRemove={() =>
-                onChange({
-                  ...config,
-                  process: {
-                    ...config.process!,
-                    steps: (config.process!.steps ?? []).filter((_, j) => j !== i),
-                  },
-                })
-              }
-            />
-          ))}
+          {(config.process.steps ?? []).map((s, i) => {
+            const updateStep = (
+              patch: Partial<
+                NonNullable<WebsiteConfig['process']>['steps'][number]
+              >,
+            ) => {
+              const steps = [...(config.process!.steps ?? [])];
+              steps[i] = { ...steps[i]!, ...patch };
+              onChange({
+                ...config,
+                process: { ...config.process!, steps },
+              });
+            };
+            const moveStep = (dir: -1 | 1) => {
+              const steps = [...(config.process!.steps ?? [])];
+              const j = i + dir;
+              if (j < 0 || j >= steps.length) return;
+              [steps[i], steps[j]] = [steps[j]!, steps[i]!];
+              onChange({
+                ...config,
+                process: { ...config.process!, steps },
+              });
+            };
+            return (
+              <ExpandableItemRow
+                key={`proc-${i}`}
+                summary={`${i + 1}. ${s.title || 'Step'}`}
+                summarySecondary={s.description ?? ''}
+                onMoveUp={i > 0 ? () => moveStep(-1) : undefined}
+                onMoveDown={
+                  i < (config.process!.steps?.length ?? 0) - 1
+                    ? () => moveStep(1)
+                    : undefined
+                }
+                onRemove={() =>
+                  onChange({
+                    ...config,
+                    process: {
+                      ...config.process!,
+                      steps: (config.process!.steps ?? []).filter(
+                        (_, j) => j !== i,
+                      ),
+                    },
+                  })
+                }
+              >
+                <LabelledField label="Step title">
+                  <Input
+                    value={s.title ?? ''}
+                    onChange={(e) => updateStep({ title: e.target.value })}
+                    placeholder="Call us"
+                    maxLength={80}
+                  />
+                </LabelledField>
+                <LabelledField label="Description">
+                  <Textarea
+                    value={s.description ?? ''}
+                    onChange={(e) => updateStep({ description: e.target.value })}
+                    placeholder="What happens in this step"
+                    rows={2}
+                    maxLength={300}
+                  />
+                </LabelledField>
+                <LabelledField label="Icon (optional)">
+                  <select
+                    value={s.icon ?? ''}
+                    onChange={(e) => updateStep({ icon: e.target.value || undefined })}
+                    className="h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-xs"
+                  >
+                    <option value="">(none)</option>
+                    {AVAILABLE_ICONS.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                </LabelledField>
+              </ExpandableItemRow>
+            );
+          })}
         </ArrayBlock>
       ) : null}
 
       {/* Pricing tiers */}
       {config.pricingTiers ? (
         <ArrayBlock
-          icon={<Star className="h-3.5 w-3.5" />}
+          icon={<Tags className="h-3.5 w-3.5" />}
           label="Pricing tiers"
           count={config.pricingTiers.tiers?.length ?? 0}
           onAdd={() => {
@@ -4131,22 +6126,134 @@ function ItemsEditor({
           addLabel="Add tier"
           emptyHint="No tiers yet."
         >
-          {(config.pricingTiers.tiers ?? []).map((t, i) => (
-            <ItemRow
-              key={`tier-${i}`}
-              primary={t.name}
-              secondary={`${t.price ?? ''}${t.period ?? ''} · ${(t.features ?? []).length} features`}
-              onRemove={() =>
+          <LabelledField label="Currency" hint="€ / $ / £">
+            <Input
+              value={config.pricingTiers.currency ?? '€'}
+              onChange={(e) =>
                 onChange({
                   ...config,
                   pricingTiers: {
                     ...config.pricingTiers!,
-                    tiers: (config.pricingTiers!.tiers ?? []).filter((_, j) => j !== i),
+                    currency: e.target.value.slice(0, 4),
                   },
                 })
               }
+              maxLength={4}
+              className="max-w-[80px]"
             />
-          ))}
+          </LabelledField>
+          {(config.pricingTiers.tiers ?? []).map((t, i) => {
+            const updateTier = (
+              patch: Partial<
+                NonNullable<WebsiteConfig['pricingTiers']>['tiers'][number]
+              >,
+            ) => {
+              const tiers = [...(config.pricingTiers!.tiers ?? [])];
+              tiers[i] = { ...tiers[i]!, ...patch };
+              onChange({
+                ...config,
+                pricingTiers: { ...config.pricingTiers!, tiers },
+              });
+            };
+            const moveTier = (dir: -1 | 1) => {
+              const tiers = [...(config.pricingTiers!.tiers ?? [])];
+              const j = i + dir;
+              if (j < 0 || j >= tiers.length) return;
+              [tiers[i], tiers[j]] = [tiers[j]!, tiers[i]!];
+              onChange({
+                ...config,
+                pricingTiers: { ...config.pricingTiers!, tiers },
+              });
+            };
+            return (
+              <ExpandableItemRow
+                key={`tier-${i}`}
+                summary={t.name || `Tier ${i + 1}`}
+                summarySecondary={`${config.pricingTiers!.currency ?? '€'}${t.price ?? ''}${
+                  t.period ?? ''
+                } · ${(t.features ?? []).length} features`}
+                featured={t.highlighted ?? false}
+                onToggleFeatured={() => updateTier({ highlighted: !t.highlighted })}
+                onMoveUp={i > 0 ? () => moveTier(-1) : undefined}
+                onMoveDown={
+                  i < (config.pricingTiers!.tiers?.length ?? 0) - 1
+                    ? () => moveTier(1)
+                    : undefined
+                }
+                onRemove={() =>
+                  onChange({
+                    ...config,
+                    pricingTiers: {
+                      ...config.pricingTiers!,
+                      tiers: (config.pricingTiers!.tiers ?? []).filter(
+                        (_, j) => j !== i,
+                      ),
+                    },
+                  })
+                }
+              >
+                <LabelledField label="Tier name">
+                  <Input
+                    value={t.name ?? ''}
+                    onChange={(e) => updateTier({ name: e.target.value })}
+                    placeholder="Silver"
+                    maxLength={60}
+                  />
+                </LabelledField>
+                <FieldGrid>
+                  <LabelledField label="Price" hint="number or 'from X'">
+                    <Input
+                      value={t.price ?? ''}
+                      onChange={(e) => updateTier({ price: e.target.value })}
+                      placeholder="49"
+                      maxLength={20}
+                    />
+                  </LabelledField>
+                  <LabelledField label="Period">
+                    <Input
+                      value={t.period ?? ''}
+                      onChange={(e) => updateTier({ period: e.target.value })}
+                      placeholder="/month"
+                      maxLength={30}
+                    />
+                  </LabelledField>
+                </FieldGrid>
+                <LabelledField label="Short description">
+                  <Input
+                    value={t.description ?? ''}
+                    onChange={(e) => updateTier({ description: e.target.value })}
+                    placeholder="What this tier is for"
+                    maxLength={200}
+                  />
+                </LabelledField>
+                <TagListField
+                  label="Features"
+                  tags={t.features ?? []}
+                  max={12}
+                  placeholder="Add a feature and press Enter"
+                  onChange={(features) => updateTier({ features })}
+                />
+                <FieldGrid>
+                  <LabelledField label="CTA label">
+                    <Input
+                      value={t.ctaLabel ?? ''}
+                      onChange={(e) => updateTier({ ctaLabel: e.target.value })}
+                      placeholder="Choose Silver"
+                      maxLength={40}
+                    />
+                  </LabelledField>
+                  <LabelledField label="CTA link">
+                    <Input
+                      value={t.ctaHref ?? ''}
+                      onChange={(e) => updateTier({ ctaHref: e.target.value })}
+                      placeholder="#contact"
+                      maxLength={300}
+                    />
+                  </LabelledField>
+                </FieldGrid>
+              </ExpandableItemRow>
+            );
+          })}
         </ArrayBlock>
       ) : null}
 
@@ -4168,22 +6275,103 @@ function ItemsEditor({
           addLabel="Add logo"
           emptyHint="No logos yet."
         >
-          {(config.logoStrip.logos ?? []).map((l, i) => (
-            <ItemRow
-              key={`logo-${i}`}
-              primary={l.name}
-              secondary={l.imageUrl || (typeof l.imageIndex === 'number' ? `image [${l.imageIndex}]` : 'no image')}
-              onRemove={() =>
-                onChange({
-                  ...config,
-                  logoStrip: {
-                    ...config.logoStrip!,
-                    logos: (config.logoStrip!.logos ?? []).filter((_, j) => j !== i),
-                  },
-                })
-              }
-            />
-          ))}
+          {(config.logoStrip.logos ?? []).map((l, i) => {
+            const updateLogo = (
+              patch: Partial<
+                NonNullable<WebsiteConfig['logoStrip']>['logos'][number]
+              >,
+            ) => {
+              const logos = [...(config.logoStrip!.logos ?? [])];
+              logos[i] = { ...logos[i]!, ...patch };
+              onChange({
+                ...config,
+                logoStrip: { ...config.logoStrip!, logos },
+              });
+            };
+            const moveLogo = (dir: -1 | 1) => {
+              const logos = [...(config.logoStrip!.logos ?? [])];
+              const j = i + dir;
+              if (j < 0 || j >= logos.length) return;
+              [logos[i], logos[j]] = [logos[j]!, logos[i]!];
+              onChange({
+                ...config,
+                logoStrip: { ...config.logoStrip!, logos },
+              });
+            };
+            return (
+              <ExpandableItemRow
+                key={`logo-${i}`}
+                summary={l.name || `Logo ${i + 1}`}
+                summarySecondary={
+                  l.imageUrl ||
+                  (typeof l.imageIndex === 'number' ? `image [${l.imageIndex}]` : 'no image')
+                }
+                onMoveUp={i > 0 ? () => moveLogo(-1) : undefined}
+                onMoveDown={
+                  i < (config.logoStrip!.logos?.length ?? 0) - 1
+                    ? () => moveLogo(1)
+                    : undefined
+                }
+                onRemove={() =>
+                  onChange({
+                    ...config,
+                    logoStrip: {
+                      ...config.logoStrip!,
+                      logos: (config.logoStrip!.logos ?? []).filter(
+                        (_, j) => j !== i,
+                      ),
+                    },
+                  })
+                }
+              >
+                <LabelledField label="Logo name">
+                  <Input
+                    value={l.name ?? ''}
+                    onChange={(e) => updateLogo({ name: e.target.value })}
+                    placeholder="Irish Times"
+                    maxLength={80}
+                  />
+                </LabelledField>
+                <FieldGrid>
+                  <LabelledField
+                    label="Image index"
+                    hint="from Images tab"
+                  >
+                    <Input
+                      type="number"
+                      min={0}
+                      value={l.imageIndex ?? ''}
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        updateLogo({
+                          imageIndex: raw === '' ? undefined : Number(raw),
+                        });
+                      }}
+                      placeholder="0"
+                    />
+                  </LabelledField>
+                  <LabelledField label="Or image URL">
+                    <Input
+                      type="url"
+                      value={l.imageUrl ?? ''}
+                      onChange={(e) => updateLogo({ imageUrl: e.target.value })}
+                      placeholder="https://..."
+                      maxLength={500}
+                    />
+                  </LabelledField>
+                </FieldGrid>
+                <LabelledField label="Link (optional)">
+                  <Input
+                    type="url"
+                    value={l.href ?? ''}
+                    onChange={(e) => updateLogo({ href: e.target.value })}
+                    placeholder="https://..."
+                    maxLength={500}
+                  />
+                </LabelledField>
+              </ExpandableItemRow>
+            );
+          })}
         </ArrayBlock>
       ) : null}
     </div>
@@ -4238,36 +6426,250 @@ function ArrayBlock({
   );
 }
 
-/** A single row inside an ArrayBlock. Shows primary + secondary text and a delete button. */
-function ItemRow({
-  primary,
-  secondary,
+/**
+ * Expandable row that shows the summary in collapsed mode and a form with
+ * the item's fields when opened. Replaces the plain `ItemRow` for
+ * sections where the agency needs to edit per-item values (stat number,
+ * review text, price, schedule time, etc.) without leaving the editor
+ * panel.
+ *
+ * Collapsed view is a single-line pill (primary + secondary) with an
+ * expand chevron + delete button. Expanded view reveals the passed
+ * `fields` children in a clean stacked form.
+ *
+ * Each row is independently controlled — the parent doesn't need to
+ * track which rows are open. Toggling defaults to closed; the caller
+ * can pass `defaultOpen` to open a row on mount (useful when a fresh
+ * item was just added).
+ */
+function ExpandableItemRow({
+  summary,
+  summarySecondary,
+  featured,
+  onToggleFeatured,
   onRemove,
   children,
+  defaultOpen,
+  dragHandle,
+  onMoveUp,
+  onMoveDown,
 }: {
-  primary: string;
-  secondary?: string;
+  summary: string;
+  summarySecondary?: string;
+  /** When defined, a star toggle appears. Undefined = no toggle. */
+  featured?: boolean;
+  onToggleFeatured?: () => void;
   onRemove: () => void;
-  children?: React.ReactNode;
+  children: React.ReactNode;
+  defaultOpen?: boolean;
+  dragHandle?: React.ReactNode;
+  /** Optional row reorder callbacks — when both are supplied we render up/down buttons. */
+  onMoveUp?: () => void;
+  onMoveDown?: () => void;
+}) {
+  const [open, setOpen] = useState(!!defaultOpen);
+  return (
+    <div
+      className={`rounded-xl border bg-white transition-all ${
+        open ? 'border-[#1D9CA1]/40 shadow-sm' : 'border-slate-200'
+      }`}
+    >
+      {/* Summary header */}
+      <div className="flex items-stretch">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex flex-1 items-center gap-1.5 px-2.5 py-2 text-left min-w-0"
+          aria-expanded={open}
+        >
+          {dragHandle}
+          <ChevronDown
+            className={`h-3 w-3 shrink-0 text-slate-400 transition-transform ${
+              open ? 'rotate-0' : '-rotate-90'
+            }`}
+          />
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-xs font-medium text-slate-900">
+              {summary || <span className="text-slate-400">Untitled</span>}
+            </div>
+            {summarySecondary ? (
+              <div className="truncate text-[10px] text-slate-500">
+                {summarySecondary}
+              </div>
+            ) : null}
+          </div>
+          {featured ? (
+            <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-semibold text-amber-800">
+              Featured
+            </span>
+          ) : null}
+        </button>
+        <div className="flex items-center gap-0.5 pr-1.5">
+          {onMoveUp ? (
+            <button
+              type="button"
+              onClick={onMoveUp}
+              className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+              aria-label="Move up"
+              title="Move up"
+            >
+              <ChevronUp className="h-3 w-3" />
+            </button>
+          ) : null}
+          {onMoveDown ? (
+            <button
+              type="button"
+              onClick={onMoveDown}
+              className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+              aria-label="Move down"
+              title="Move down"
+            >
+              <ChevronDown className="h-3 w-3" />
+            </button>
+          ) : null}
+          {onToggleFeatured ? (
+            <button
+              type="button"
+              onClick={onToggleFeatured}
+              className={`rounded p-1 transition-colors ${
+                featured
+                  ? 'text-amber-500 hover:bg-amber-50'
+                  : 'text-slate-400 hover:bg-slate-100 hover:text-slate-700'
+              }`}
+              aria-label={featured ? 'Unfeature' : 'Feature'}
+              title={featured ? 'Unfeature this item' : 'Feature this item'}
+            >
+              <Star
+                className="h-3 w-3"
+                fill={featured ? 'currentColor' : 'none'}
+              />
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={onRemove}
+            className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-500"
+            aria-label="Remove"
+            title="Remove"
+          >
+            <Trash2 className="h-3 w-3" />
+          </button>
+        </div>
+      </div>
+
+      {/* Expanded fields */}
+      {open ? (
+        <div className="space-y-2 border-t border-slate-100 bg-slate-50/60 px-3 py-3">
+          {children}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Labelled inline text field. Thin wrapper around `Input` that stacks a
+ * small caption above the input — used inside expandable rows where
+ * every field needs a label so "123" doesn't look like a random number.
+ */
+function LabelledField({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: React.ReactNode;
 }) {
   return (
-    <div className="flex items-start gap-2 rounded-xl border border-slate-200 bg-white px-2.5 py-2">
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-xs font-medium text-slate-900">{primary}</div>
-        {secondary ? (
-          <div className="truncate text-[10px] text-slate-500">{secondary}</div>
-        ) : null}
-        {children}
+    <label className="block">
+      <div className="flex items-baseline justify-between">
+        <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+          {label}
+        </span>
+        {hint ? <span className="text-[9px] text-slate-400">{hint}</span> : null}
       </div>
-      <button
-        type="button"
-        onClick={onRemove}
-        className="rounded-lg p-1 text-slate-400 hover:bg-red-50 hover:text-red-500"
-        aria-label="Remove"
-      >
-        <Trash2 className="h-3.5 w-3.5" />
-      </button>
-    </div>
+      <div className="mt-0.5">{children}</div>
+    </label>
+  );
+}
+
+/** Two-column row used inside expandable field forms. */
+function FieldGrid({ children }: { children: React.ReactNode }) {
+  return <div className="grid grid-cols-2 gap-2">{children}</div>;
+}
+
+/**
+ * Editable tag list — renders the tag strings as chips with an inline
+ * input for adding a new tag on Enter. Used for specialties, FAQ tags,
+ * menu item tags, portfolio tags.
+ */
+function TagListField({
+  label,
+  tags,
+  max = 10,
+  onChange,
+  placeholder = 'Add tag and press Enter',
+}: {
+  label: string;
+  tags: string[];
+  max?: number;
+  onChange: (next: string[]) => void;
+  placeholder?: string;
+}) {
+  const [draft, setDraft] = useState('');
+  const commit = () => {
+    const clean = draft.trim().slice(0, 60);
+    if (!clean) return;
+    if (tags.includes(clean)) {
+      setDraft('');
+      return;
+    }
+    if (tags.length >= max) {
+      toast.info(`Max ${max} tags`);
+      return;
+    }
+    onChange([...tags, clean]);
+    setDraft('');
+  };
+  return (
+    <LabelledField label={label} hint={`${tags.length}/${max}`}>
+      <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2 py-1.5">
+        {tags.map((t, i) => (
+          <span
+            key={`${t}-${i}`}
+            className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-700"
+          >
+            {t}
+            <button
+              type="button"
+              onClick={() => onChange(tags.filter((_, j) => j !== i))}
+              className="rounded-full p-0.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700"
+              aria-label={`Remove ${t}`}
+            >
+              <X className="h-2.5 w-2.5" />
+            </button>
+          </span>
+        ))}
+        <input
+          type="text"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ',') {
+              e.preventDefault();
+              commit();
+            }
+            if (e.key === 'Backspace' && !draft && tags.length > 0) {
+              onChange(tags.slice(0, -1));
+            }
+          }}
+          onBlur={() => draft.trim() && commit()}
+          placeholder={tags.length === 0 ? placeholder : 'Add…'}
+          className="min-w-[80px] flex-1 border-none bg-transparent text-[11px] outline-none placeholder:text-slate-400"
+        />
+      </div>
+    </LabelledField>
   );
 }
 
@@ -4921,7 +7323,7 @@ const CUSTOM_VARIANTS: Array<{
 /**
  * Structural editor for `customSections` — append to the Items tab.
  * Agencies add a new section, pick one of four layout variants, then
- * the text fields edit inline in the preview.
+ * edit the heading/body + per-item content inline below.
  */
 export function CustomSectionsEditor({
   config,
@@ -4957,24 +7359,20 @@ export function CustomSectionsEditor({
                 body: 'The quote goes here.',
                 caption: '— Author',
               };
+
+    const nextSections = [...sections, newSection];
+    const nextLayout = (config.layout ?? []).includes('custom')
+      ? config.layout
+      : [
+          ...(config.layout ?? []).filter((k) => k !== 'footer'),
+          'custom' as const,
+          'footer' as const,
+        ];
     onChange({
       ...config,
-      customSections: [...sections, newSection],
+      customSections: nextSections,
+      layout: nextLayout,
     });
-    // Also add 'custom' to the layout if not already there, so the section
-    // actually renders. If custom is already in the layout, it already
-    // renders all entries in customSections.
-    if (!(config.layout ?? []).includes('custom')) {
-      onChange({
-        ...config,
-        customSections: [...sections, newSection],
-        layout: [
-          ...(config.layout ?? []).filter((k) => k !== 'footer'),
-          'custom',
-          'footer',
-        ],
-      });
-    }
   };
 
   return (
@@ -4999,28 +7397,289 @@ export function CustomSectionsEditor({
           </button>
         ))}
       </div>
-      {sections.map((s, i) => (
-        <ItemRow
-          key={i}
-          primary={s.heading || CUSTOM_VARIANTS.find((v) => v.value === s.variant)?.label || 'Section'}
-          secondary={`${s.variant} · ${(s.items?.length ?? 0)} ${s.items?.length === 1 ? 'item' : 'items'}`}
-          onRemove={async () => {
-            if (
-              !(await confirmDialog({
-                title: 'Remove this custom section?',
-                description: s.heading ?? s.variant,
-                confirmLabel: 'Remove',
-                danger: true,
-              }))
-            )
-              return;
-            onChange({
-              ...config,
-              customSections: sections.filter((_, j) => j !== i),
-            });
-          }}
-        />
-      ))}
+      {sections.map((s, i) => {
+        const updateSection = (patch: Partial<NonNullable<WebsiteConfig['customSections']>[number]>) => {
+          const next = [...sections];
+          next[i] = { ...next[i]!, ...patch };
+          onChange({ ...config, customSections: next });
+        };
+        const moveSection = (dir: -1 | 1) => {
+          const next = [...sections];
+          const j = i + dir;
+          if (j < 0 || j >= next.length) return;
+          [next[i], next[j]] = [next[j]!, next[i]!];
+          onChange({ ...config, customSections: next });
+        };
+        return (
+          <ExpandableItemRow
+            key={`cs-${i}`}
+            summary={
+              s.heading ||
+              CUSTOM_VARIANTS.find((v) => v.value === s.variant)?.label ||
+              'Section'
+            }
+            summarySecondary={`${s.variant} · ${s.items?.length ?? 0} ${
+              s.items?.length === 1 ? 'item' : 'items'
+            }`}
+            onMoveUp={i > 0 ? () => moveSection(-1) : undefined}
+            onMoveDown={i < sections.length - 1 ? () => moveSection(1) : undefined}
+            onRemove={async () => {
+              if (
+                !(await confirmDialog({
+                  title: 'Remove this custom section?',
+                  description: s.heading ?? s.variant,
+                  confirmLabel: 'Remove',
+                  danger: true,
+                }))
+              )
+                return;
+              onChange({
+                ...config,
+                customSections: sections.filter((_, j) => j !== i),
+              });
+            }}
+          >
+            <FieldGrid>
+              <LabelledField label="Variant">
+                <select
+                  value={s.variant}
+                  onChange={(e) =>
+                    updateSection({
+                      variant: e.target
+                        .value as NonNullable<WebsiteConfig['customSections']>[number]['variant'],
+                    })
+                  }
+                  className="h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-xs"
+                >
+                  {CUSTOM_VARIANTS.map((v) => (
+                    <option key={v.value} value={v.value}>
+                      {v.label}
+                    </option>
+                  ))}
+                </select>
+              </LabelledField>
+              <LabelledField label="Background">
+                <select
+                  value={s.background ?? 'white'}
+                  onChange={(e) =>
+                    updateSection({
+                      background: e.target.value as 'white' | 'slate' | 'brand',
+                    })
+                  }
+                  className="h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-xs"
+                >
+                  <option value="white">White</option>
+                  <option value="slate">Slate</option>
+                  <option value="brand">Brand</option>
+                </select>
+              </LabelledField>
+            </FieldGrid>
+            <LabelledField label="Eyebrow (optional)">
+              <Input
+                value={s.eyebrow ?? ''}
+                onChange={(e) => updateSection({ eyebrow: e.target.value })}
+                placeholder="Short kicker"
+                maxLength={60}
+              />
+            </LabelledField>
+            {s.variant !== 'pull-quote' ? (
+              <LabelledField label="Heading">
+                <Input
+                  value={s.heading ?? ''}
+                  onChange={(e) => updateSection({ heading: e.target.value })}
+                  placeholder="Section heading"
+                  maxLength={120}
+                />
+              </LabelledField>
+            ) : null}
+            <LabelledField
+              label={s.variant === 'pull-quote' ? 'Quote' : 'Body copy'}
+              hint={s.variant === 'pull-quote' ? 'the quote itself' : 'shown under the heading'}
+            >
+              <Textarea
+                value={s.body ?? ''}
+                onChange={(e) => updateSection({ body: e.target.value })}
+                rows={s.variant === 'pull-quote' ? 3 : 2}
+                placeholder={
+                  s.variant === 'pull-quote'
+                    ? '"The quote goes here."'
+                    : 'Body copy'
+                }
+                maxLength={600}
+              />
+            </LabelledField>
+            {s.variant === 'pull-quote' ? (
+              <LabelledField label="Attribution">
+                <Input
+                  value={s.caption ?? ''}
+                  onChange={(e) => updateSection({ caption: e.target.value })}
+                  placeholder="— Sarah, owner"
+                  maxLength={150}
+                />
+              </LabelledField>
+            ) : null}
+            {s.variant === 'image-text-split' ? (
+              <LabelledField label="Image side">
+                <div className="flex gap-1.5">
+                  {(['left', 'right'] as const).map((side) => (
+                    <button
+                      key={side}
+                      type="button"
+                      onClick={() => updateSection({ imageSide: side })}
+                      className={`flex-1 rounded-md border px-2.5 py-1 text-[11px] font-medium capitalize transition-colors ${
+                        (s.imageSide ?? 'left') === side
+                          ? 'border-[#1D9CA1] bg-[#1D9CA1] text-white'
+                          : 'border-slate-200 bg-white text-slate-700 hover:border-slate-400'
+                      }`}
+                    >
+                      {side}
+                    </button>
+                  ))}
+                </div>
+              </LabelledField>
+            ) : null}
+
+            {/* Items editor for section variants that have them */}
+            {s.variant !== 'pull-quote' ? (
+              <div className="rounded-lg border border-slate-200 bg-white p-2">
+                <div className="mb-1.5 flex items-center justify-between">
+                  <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+                    Items · {s.items?.length ?? 0}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateSection({
+                        items: [...(s.items ?? []), {}],
+                      })
+                    }
+                    className="inline-flex items-center gap-0.5 text-[10px] font-medium text-[#1D9CA1] hover:underline"
+                  >
+                    <Plus className="h-2.5 w-2.5" />
+                    Add item
+                  </button>
+                </div>
+                <div className="space-y-1">
+                  {(s.items ?? []).map((item, ii) => {
+                    const updateItem = (
+                      patch: Partial<
+                        NonNullable<
+                          NonNullable<WebsiteConfig['customSections']>[number]['items']
+                        >[number]
+                      >,
+                    ) => {
+                      const items = [...(s.items ?? [])];
+                      items[ii] = { ...items[ii]!, ...patch };
+                      updateSection({ items });
+                    };
+                    return (
+                      <ExpandableItemRow
+                        key={`cs-${i}-item-${ii}`}
+                        summary={
+                          item.title ||
+                          item.caption ||
+                          (typeof item.imageIndex === 'number'
+                            ? `Image [${item.imageIndex}]`
+                            : `Item ${ii + 1}`)
+                        }
+                        summarySecondary={item.description ?? ''}
+                        onRemove={() =>
+                          updateSection({
+                            items: (s.items ?? []).filter((_, k) => k !== ii),
+                          })
+                        }
+                      >
+                        {s.variant === 'feature-row' ? (
+                          <>
+                            <LabelledField label="Title">
+                              <Input
+                                value={item.title ?? ''}
+                                onChange={(e) =>
+                                  updateItem({ title: e.target.value })
+                                }
+                                maxLength={80}
+                              />
+                            </LabelledField>
+                            <LabelledField label="Description">
+                              <Textarea
+                                value={item.description ?? ''}
+                                onChange={(e) =>
+                                  updateItem({ description: e.target.value })
+                                }
+                                rows={2}
+                                maxLength={200}
+                              />
+                            </LabelledField>
+                            <LabelledField label="Icon">
+                              <select
+                                value={item.icon ?? ''}
+                                onChange={(e) =>
+                                  updateItem({ icon: e.target.value || undefined })
+                                }
+                                className="h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-xs"
+                              >
+                                <option value="">(none)</option>
+                                {AVAILABLE_ICONS.map((name) => (
+                                  <option key={name} value={name}>
+                                    {name}
+                                  </option>
+                                ))}
+                              </select>
+                            </LabelledField>
+                          </>
+                        ) : (
+                          <>
+                            <FieldGrid>
+                              <LabelledField
+                                label="Image index"
+                                hint="from Images tab"
+                              >
+                                <Input
+                                  type="number"
+                                  min={0}
+                                  value={item.imageIndex ?? ''}
+                                  onChange={(e) =>
+                                    updateItem({
+                                      imageIndex:
+                                        e.target.value === ''
+                                          ? undefined
+                                          : Number(e.target.value),
+                                    })
+                                  }
+                                  placeholder="0"
+                                />
+                              </LabelledField>
+                              <LabelledField label="Or URL">
+                                <Input
+                                  type="url"
+                                  value={item.imageUrl ?? ''}
+                                  onChange={(e) =>
+                                    updateItem({ imageUrl: e.target.value })
+                                  }
+                                  placeholder="https://..."
+                                />
+                              </LabelledField>
+                            </FieldGrid>
+                            <LabelledField label="Caption (optional)">
+                              <Input
+                                value={item.caption ?? ''}
+                                onChange={(e) =>
+                                  updateItem({ caption: e.target.value })
+                                }
+                                maxLength={150}
+                              />
+                            </LabelledField>
+                          </>
+                        )}
+                      </ExpandableItemRow>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
+          </ExpandableItemRow>
+        );
+      })}
     </ArrayBlock>
   );
 }
@@ -5822,6 +8481,10 @@ const ILLUSTRATION_MOTIONS: Array<{
  *   - Tweak side (left/right) and size (0.5–1.5×).
  *   - Upload a custom SVG/PNG to override the built-in style.
  *   - Store a prompt alongside the illustration for future regeneration.
+ *   - Ask the AI to tweak the illustration in natural language
+ *     ("make it bigger on the left", "swap to a coffee cup", "try
+ *     tilt-3d") — this uses the same `editWebsiteWithAI` pipeline as
+ *     the main site editor chat so the prompt context is consistent.
  *   - Clear the illustration entirely.
  *
  * Uploads use `api.uploadImages` with an `illustration` tag so they land
@@ -5839,6 +8502,22 @@ function IllustrationEditor({
   const illustration: HeroIllustration | undefined = config.hero?.illustration;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+
+  // Conversational AI tweak state. When the agency types "make it
+  // bigger on the left and swap to a coffee cup", we round-trip the
+  // current config through `editWebsiteWithAI` which already has
+  // illustration-specific rules baked into its prompt (see
+  // apps/api/src/services/websites.ts → editWebsiteWithAI). Keeping
+  // this inline with the illustration controls avoids the "scroll
+  // down, find the AI chat, describe the same thing" tax.
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [aiBusy, setAiBusy] = useState(false);
+
+  // Bespoke illustration generation state. Separate from aiPrompt so
+  // the tweaks chat and the generate-from-scratch brief don't collide.
+  // Generating runs through fal.ai and sets hero.illustration.customUrl.
+  const [bespokeBrief, setBespokeBrief] = useState('');
+  const [generating, setGenerating] = useState(false);
 
   const setField = (patch: Partial<HeroIllustration>) => {
     const next: HeroIllustration = {
@@ -5903,6 +8582,126 @@ function IllustrationEditor({
     }
   };
 
+  /**
+   * Conversational tweaks. Takes a natural-language instruction ("swap
+   * to a coffee cup and move it to the left"), prefixes it so Claude
+   * scopes the edit to the hero illustration specifically, and routes
+   * through the same `editWebsiteWithAI` endpoint as the main site AI
+   * chat. The endpoint's system prompt already knows every illustration
+   * field (see prompts.ts → editWebsiteWithAI), so the instruction
+   * translates into precise config updates.
+   */
+  const askAIToImprove = async (rawInstruction: string) => {
+    const instruction = rawInstruction.trim();
+    if (!instruction) return;
+    if (!clientId) {
+      toast.error('Pick a client first');
+      return;
+    }
+    setAiBusy(true);
+    try {
+      const scopedInstruction = `Update the hero illustration (hero.illustration). ${instruction}`;
+      const result = await api.editWebsiteWithAI({
+        clientId,
+        currentConfig: config as unknown as Record<string, unknown>,
+        instruction: scopedInstruction,
+      });
+      onChange(result.config);
+      setAiPrompt('');
+      toast.success('Illustration updated', result.summary ?? 'Applied your changes.');
+    } catch (e) {
+      toast.error('AI tweak failed', (e as Error).message);
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
+  /** One-shot prompts shown as quick-tap chips above the AI textarea. */
+  const AI_PRESETS: Array<{ label: string; instruction: string }> = [
+    { label: 'Bigger', instruction: 'Make the hero illustration a bit bigger.' },
+    { label: 'Smaller', instruction: 'Make the hero illustration a bit smaller.' },
+    { label: 'Move left', instruction: 'Move the hero illustration to the left side.' },
+    { label: 'Move right', instruction: 'Move the hero illustration to the right side.' },
+    { label: 'Try tilt-3D', instruction: 'Change the illustration motion to tilt-3d so it follows the cursor.' },
+    { label: 'Less motion', instruction: 'Use a calmer motion like float or parallax instead of launch.' },
+    {
+      label: 'Match the industry',
+      instruction:
+        'Pick the built-in illustration style that best fits this business and apply it.',
+    },
+    { label: 'Remove it', instruction: 'Remove the hero illustration entirely.' },
+  ];
+
+  /**
+   * Generate a bespoke illustration from a natural-language brief. Goes
+   * through the new `/api/v1/automation/generate-hero-illustration`
+   * endpoint which pipes the brief through fal.ai and writes the
+   * resulting image URL into `hero.illustration.customUrl`. Unlike the
+   * tweaks above (which only pick from 15 presets), this produces a
+   * fresh bespoke illustration.
+   */
+  const generateBespoke = async (brief: string) => {
+    const cleaned = brief.trim();
+    if (cleaned.length < 6) {
+      toast.info('Describe what you want', 'A short sentence is plenty.');
+      return;
+    }
+    if (!clientId) {
+      toast.error('Pick a client first');
+      return;
+    }
+    setGenerating(true);
+    try {
+      const result = await api.generateHeroIllustration({
+        clientId,
+        brief: cleaned,
+      });
+      // Update the local config so the preview updates immediately.
+      // The server has already persisted the change to the client row.
+      setField({
+        customUrl: result.imageUrl,
+        prompt: cleaned,
+        // Switching to a custom URL drops the built-in style from the
+        // renderer's source resolution; we keep motion / side / scale.
+        style: undefined,
+      });
+      setBespokeBrief('');
+      toast.success(
+        'Illustration generated',
+        result.fromMock
+          ? 'Using placeholder image (fal.ai not configured).'
+          : 'Custom illustration applied to the hero.',
+      );
+    } catch (e) {
+      toast.error('Generation failed', (e as Error).message);
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const BESPOKE_EXAMPLES: Array<{ label: string; brief: string }> = [
+    {
+      label: 'Espresso cup',
+      brief:
+        'An espresso cup with steam rising, stylised and isolated on transparent background.',
+    },
+    {
+      label: 'Wrench',
+      brief:
+        'A clean vector wrench with subtle gradient, floating at an angle.',
+    },
+    {
+      label: 'House',
+      brief:
+        'A minimal modern house with warm lighting in the windows.',
+    },
+    {
+      label: 'Dumbbell',
+      brief:
+        'A sleek dumbbell with motion lines, stylised flat vector.',
+    },
+  ];
+
   // Surface a warning when the current hero variant + image will cause
   // the renderer to suppress the illustration. Mirrors the logic in
   // `SiteHero` so the hint stays in sync with the actual render.
@@ -5965,6 +8764,48 @@ function IllustrationEditor({
         shows a large photo on the same side.
       </p>
 
+      {/* Empty-state CTA. When there's no illustration yet, surface both
+          the "pick a style" shortcut and an AI shortcut so the agency
+          doesn't have to enable then immediately reconfigure. */}
+      {!illustration ? (
+        <div className="rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 p-3 text-center">
+          <Sparkles className="mx-auto h-5 w-5 text-[#1D9CA1]" />
+          <p className="mt-1.5 text-xs font-semibold text-slate-900">
+            No illustration yet
+          </p>
+          <p className="mt-0.5 text-[10px] text-slate-500">
+            Add a brand-tinted scroll-animated object to the hero.
+          </p>
+          <div className="mt-2.5 flex flex-wrap justify-center gap-1.5">
+            <button
+              type="button"
+              onClick={enable}
+              className="inline-flex items-center gap-1 rounded-full bg-[#1D9CA1] px-3 py-1 text-[11px] font-semibold text-white transition-colors hover:bg-[#158087]"
+            >
+              <Plus className="h-3 w-3" />
+              Add for this industry
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                askAIToImprove(
+                  'Enable the hero illustration. Pick the built-in style that best fits this business, choose a motion preset that matches the brand tone, and place it on the right side.',
+                )
+              }
+              disabled={aiBusy || !clientId}
+              className="inline-flex items-center gap-1 rounded-full border border-[#1D9CA1]/30 bg-white px-3 py-1 text-[11px] font-semibold text-[#1D9CA1] transition-colors hover:bg-[#1D9CA1]/5 disabled:opacity-50"
+            >
+              {aiBusy ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <Sparkles className="h-3 w-3" />
+              )}
+              Ask AI to pick
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       {/* Conflict warning — shown when the current hero variant hides
           the illustration so the agency isn't left wondering why the
           preview is empty. */}
@@ -6022,7 +8863,19 @@ function IllustrationEditor({
               </div>
               <button
                 type="button"
-                onClick={() => setField({ customUrl: undefined })}
+                onClick={() => {
+                  // Fall back to a template-appropriate built-in style
+                  // when dropping the custom URL — without this the
+                  // renderer would have neither a customUrl nor a style
+                  // and render nothing.
+                  const template = config.template ?? 'service';
+                  const fallbackStyle =
+                    DEFAULT_ILLUSTRATION_BY_TEMPLATE[template] ?? 'rocket';
+                  setField({
+                    customUrl: undefined,
+                    style: illustration.style ?? fallbackStyle,
+                  });
+                }}
                 className="rounded-md px-2 py-1 text-[10px] text-slate-500 hover:bg-slate-100"
               >
                 Use built-in
@@ -6153,6 +9006,185 @@ function IllustrationEditor({
               rows={2}
               className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] text-slate-700 placeholder:text-slate-400 focus:border-[#1D9CA1] focus:outline-none focus:ring-1 focus:ring-[#1D9CA1]/30"
             />
+          </div>
+
+          {/* Ask AI — conversational tweaks scoped to the illustration.
+              Sits at the bottom of the panel so it doesn't crowd the
+              direct-manipulation controls above, but stays inline so the
+              agency doesn't have to scroll to a separate chat. */}
+          <div className="rounded-xl border border-[#1D9CA1]/20 bg-[#1D9CA1]/5 p-3">
+            <div className="flex items-center justify-between">
+              <p className="flex items-center gap-1.5 text-[11px] font-semibold text-[#1D9CA1]">
+                <Sparkles className="h-3 w-3" />
+                Ask AI to tweak it
+              </p>
+              {aiBusy ? (
+                <span className="flex items-center gap-1 text-[10px] font-medium text-[#1D9CA1]">
+                  <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                  Thinking…
+                </span>
+              ) : null}
+            </div>
+            <p className="mt-1 text-[10px] text-slate-600">
+              Say what to change in plain English. Changes apply live.
+            </p>
+
+            {/* Quick-tap presets */}
+            <div className="mt-2 flex flex-wrap gap-1">
+              {AI_PRESETS.map((p) => (
+                <button
+                  key={p.label}
+                  type="button"
+                  disabled={aiBusy}
+                  onClick={() => askAIToImprove(p.instruction)}
+                  className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-medium text-slate-700 transition-colors hover:border-[#1D9CA1] hover:text-[#1D9CA1] disabled:opacity-50"
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-2 flex items-start gap-1.5">
+              <textarea
+                value={aiPrompt}
+                onChange={(e) => setAiPrompt(e.target.value)}
+                placeholder="e.g. 'swap to a wrench and put it on the left with a gentle drift'"
+                rows={2}
+                disabled={aiBusy}
+                onKeyDown={(e) => {
+                  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !aiBusy) {
+                    e.preventDefault();
+                    askAIToImprove(aiPrompt);
+                  }
+                }}
+                className="flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] text-slate-700 placeholder:text-slate-400 focus:border-[#1D9CA1] focus:outline-none focus:ring-1 focus:ring-[#1D9CA1]/30 disabled:opacity-50"
+              />
+              <button
+                type="button"
+                onClick={() => askAIToImprove(aiPrompt)}
+                disabled={aiBusy || !aiPrompt.trim()}
+                className="flex h-8 shrink-0 items-center gap-1 self-start rounded-lg bg-[#1D9CA1] px-2.5 text-[11px] font-semibold text-white transition-colors hover:bg-[#158087] disabled:opacity-50"
+                title="Apply (⌘/Ctrl + Enter)"
+              >
+                {aiBusy ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <Send className="h-3 w-3" />
+                )}
+                Apply
+              </button>
+            </div>
+          </div>
+
+          {/* Generate bespoke illustration — calls fal.ai with a brief,
+              drops the resulting URL into hero.illustration.customUrl.
+              Different from the tweaks above: this creates a NEW
+              illustration from scratch rather than picking from the
+              preset library. */}
+          <div className="rounded-xl border border-violet-200 bg-violet-50/60 p-3">
+            <div className="flex items-center justify-between">
+              <p className="flex items-center gap-1.5 text-[11px] font-semibold text-violet-700">
+                <Wand2 className="h-3 w-3" />
+                Generate a bespoke illustration
+              </p>
+              {generating ? (
+                <span className="flex items-center gap-1 text-[10px] font-medium text-violet-700">
+                  <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                  Drawing…
+                </span>
+              ) : null}
+            </div>
+            <p className="mt-1 text-[10px] text-slate-600">
+              Describe what you want and we&apos;ll draw a custom illustration
+              in your brand colours. Replaces the preset style when ready.
+            </p>
+
+            {/* Quick-tap examples */}
+            <div className="mt-2 flex flex-wrap gap-1">
+              {BESPOKE_EXAMPLES.map((ex) => (
+                <button
+                  key={ex.label}
+                  type="button"
+                  disabled={generating}
+                  onClick={() => setBespokeBrief(ex.brief)}
+                  className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-medium text-slate-700 transition-colors hover:border-violet-500 hover:text-violet-700 disabled:opacity-50"
+                >
+                  {ex.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-2 flex items-start gap-1.5">
+              <textarea
+                value={bespokeBrief}
+                onChange={(e) => setBespokeBrief(e.target.value)}
+                placeholder="e.g. 'a 3D isometric barber chair with a brass foot-rest, in our brand teal'"
+                rows={2}
+                disabled={generating}
+                onKeyDown={(e) => {
+                  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !generating) {
+                    e.preventDefault();
+                    generateBespoke(bespokeBrief);
+                  }
+                }}
+                className="flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] text-slate-700 placeholder:text-slate-400 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500/30 disabled:opacity-50"
+              />
+              <button
+                type="button"
+                onClick={() => generateBespoke(bespokeBrief)}
+                disabled={generating || bespokeBrief.trim().length < 6}
+                className="flex h-8 shrink-0 items-center gap-1 self-start rounded-lg bg-violet-600 px-2.5 text-[11px] font-semibold text-white transition-colors hover:bg-violet-700 disabled:opacity-50"
+                title="Generate (⌘/Ctrl + Enter)"
+              >
+                {generating ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <Wand2 className="h-3 w-3" />
+                )}
+                Generate
+              </button>
+            </div>
+
+            {/* Regen / reset helpers. Shown when a custom URL is set so
+                the agency can quickly roll again with the same brief or
+                revert to a built-in style. */}
+            {illustration.customUrl ? (
+              <div className="mt-2 flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() =>
+                    generateBespoke(
+                      illustration.prompt || 'A stylised illustration for this business',
+                    )
+                  }
+                  disabled={generating}
+                  className="inline-flex items-center gap-1 rounded-full border border-violet-200 bg-white px-2 py-0.5 text-[10px] font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50"
+                  title="Regenerate with the same brief"
+                >
+                  <RotateCcw className="h-2.5 w-2.5" />
+                  Roll again
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    // Fall back to the template-appropriate built-in style
+                    // when clearing the custom URL. Going to `undefined`
+                    // for both would make the renderer show nothing.
+                    const template = config.template ?? 'service';
+                    const fallbackStyle =
+                      DEFAULT_ILLUSTRATION_BY_TEMPLATE[template] ?? 'rocket';
+                    setField({
+                      customUrl: undefined,
+                      style: illustration.style ?? fallbackStyle,
+                    });
+                  }}
+                  disabled={generating}
+                  className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Back to built-in
+                </button>
+              </div>
+            ) : null}
           </div>
         </div>
       ) : null}

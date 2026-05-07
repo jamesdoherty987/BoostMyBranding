@@ -31,6 +31,7 @@ import { SitePortfolio } from './blocks/SitePortfolio';
 import { SiteProcess } from './blocks/SiteProcess';
 import { SitePricingTiers } from './blocks/SitePricingTiers';
 import { SiteAnnouncement } from './blocks/SiteAnnouncement';
+import { SectionBackgroundLayer } from './SectionBackgroundLayer';
 import { SiteLogoStrip } from './blocks/SiteLogoStrip';
 import { SiteVideo } from './blocks/SiteVideo';
 import { SiteNewsletter } from './blocks/SiteNewsletter';
@@ -81,7 +82,10 @@ interface SiteRendererProps {
    * The host wires this to `editWebsiteWithAI` and returns a short
    * human-readable summary of what changed. Only runs in edit mode.
    */
-  onAIEdit?: (instruction: string) => Promise<string>;
+  onAIEdit?: (
+    instruction: string,
+    options?: { model?: 'opus' | 'sonnet' | 'haiku' },
+  ) => Promise<string>;
   /**
    * Which page to render for a multipage site. Defaults to `'home'`. When
    * the config has no `pages` array (single-page site), this is ignored.
@@ -205,7 +209,23 @@ export function SiteRenderer({
         {/* Announcement bar — always renders first (above the nav) when
             present, regardless of block order in `layout`. */}
         <SiteAnnouncement config={pageConfig} />
-        {page.layout.map((key) => blocks[key] ?? null)}
+        {page.layout.map((key) => {
+          const block = blocks[key];
+          if (!block) return null;
+          const bg = pageConfig.sectionBackgrounds?.[key];
+          // `nav`, `hero`, `footer` get skipped — nav/footer don't need
+          // decorative backgrounds, and hero has its own dedicated
+          // background via `hero.variant`.
+          if (!bg || bg.kind === 'none' || key === 'nav' || key === 'hero' || key === 'footer') {
+            return block;
+          }
+          return (
+            <div key={`sb-${key}`} className="relative isolate">
+              <SectionBackgroundLayer background={bg} />
+              {block}
+            </div>
+          );
+        })}
         {/* Sticky mobile CTA — renders only on phones, auto-hides in preview */}
         <SiteMobileCta config={pageConfig} />
         {/* Floating "Ask AI" chat — only rendered when edit mode is on and

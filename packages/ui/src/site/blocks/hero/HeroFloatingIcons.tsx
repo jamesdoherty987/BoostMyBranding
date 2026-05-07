@@ -35,6 +35,8 @@ const FLOATING_ICON_DEFAULTS: Record<SiteTemplate, string[]> = {
   legal: ['Shield', 'CheckCircle2', 'Award', 'Users'],
   nonprofit: ['HeartPulse', 'Users', 'Leaf', 'Sun', 'Star', '❤️'],
   tech: ['Zap', 'Globe', 'Sparkles', 'CheckCircle2', '⚡', '💻'],
+  events: ['Sparkles', 'HeartPulse', 'Star', 'Camera', '💐', '🥂', '✨', '💍'],
+  homeservices: ['Hammer', 'Wrench', 'Home', 'Leaf', 'Shield', '🛠️', '🏠'],
 };
 
 interface HeroFloatingIconsProps {

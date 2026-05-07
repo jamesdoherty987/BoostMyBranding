@@ -73,9 +73,16 @@ export interface SiteContextValue {
    * The host wires this to the `editWebsiteWithAI` API and returns a short
    * summary of what changed (or throws with a clear error message).
    *
+   * Optionally accepts a model key so the chat can honour the user's
+   * model picker selection. The host decides which model to pass through
+   * to the API.
+   *
    * Only runs in edit mode. Leave undefined to hide the floating chat.
    */
-  onAIEdit?: (instruction: string) => Promise<string>;
+  onAIEdit?: (
+    instruction: string,
+    options?: { model?: 'opus' | 'sonnet' | 'haiku' },
+  ) => Promise<string>;
 }
 
 export const SiteContext = createContext<SiteContextValue>({

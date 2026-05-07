@@ -38,7 +38,7 @@ export async function withRetry<T>(fn: () => Promise<T>, opts: RetryOptions = {}
 }
 
 /** Default: retry on network errors, 5xx, 429, and timeouts. */
-function isRetryable(err: unknown): boolean {
+export function isDefaultRetryable(err: unknown): boolean {
   const anyErr = err as any;
   const status: number | undefined = anyErr?.status ?? anyErr?.statusCode ?? anyErr?.response?.status;
   const code: string | undefined = anyErr?.code ?? anyErr?.name;
@@ -47,6 +47,9 @@ function isRetryable(err: unknown): boolean {
   if (anyErr?.message && /timeout|rate limit|overloaded/i.test(anyErr.message)) return true;
   return false;
 }
+
+/** Kept as the internal alias used by withRetry's default. */
+const isRetryable = isDefaultRetryable;
 
 /** Fire-and-forget: returns immediately, logs errors. */
 export function fireAndForget(label: string, fn: () => Promise<unknown>) {

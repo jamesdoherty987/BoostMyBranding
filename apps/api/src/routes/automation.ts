@@ -11,11 +11,13 @@ import { runMonthlyGeneration, regenerateSinglePost, regeneratePostImage } from 
 import {
   generateWebsite,
   editWebsiteWithAI,
+  editWebsiteScopedWithAI,
   updateWebsiteField,
   saveWebsiteConfig,
   generateWebsitePage,
 } from '../services/websites.js';
 import { generateHeroImage, generateHeroIllustration } from '../services/heroImage.js';
+import { generateSvgIllustration, sanitizeSvg } from '../services/svgStudio.js';
 import { getDb, isDbConfigured, clients, posts } from '@boost/database';
 import {
   publishDue,
@@ -81,6 +83,14 @@ const generateWebsiteSchema = z.object({
   template: z.enum(SITE_TEMPLATES).nullish(),
   /** Free-text suggestions from the agency to steer the AI output. */
   suggestions: z.string().max(2000).nullish(),
+  /**
+   * Optional "surprise me" seed. Pass a fresh random string on
+   * regeneration to cycle the design-signature pick and get different
+   * variants from the template's shortlist.
+   */
+  designSeed: z.string().max(100).nullish(),
+  /** Optional model override. Defaults to Opus for full generation. */
+  model: z.enum(['opus', 'sonnet', 'haiku']).nullish(),
 
   /* Seeded business facts. These bypass Claude's invention and are
      stamped onto the final config so the rendered site matches the
@@ -125,6 +135,31 @@ const generateWebsiteSchema = z.object({
       }),
     )
     .max(10)
+    .nullish(),
+
+  /* ── Extras ──────────────────────────────────────────────────────── */
+  yearFounded: z.string().max(20).nullish(),
+  awards: z.array(z.string().max(200)).max(10).nullish(),
+  pressMentions: z
+    .array(
+      z.object({
+        outlet: z.string().min(1).max(120),
+        quote: z.string().max(400).nullish(),
+        href: z.string().url().max(500).nullish(),
+      }),
+    )
+    .max(10)
+    .nullish(),
+  certifications: z.array(z.string().max(120)).max(15).nullish(),
+  languagesSpoken: z.array(z.string().max(50)).max(15).nullish(),
+  paymentMethods: z.array(z.string().max(60)).max(15).nullish(),
+  insuranceDetails: z.string().max(500).nullish(),
+  uniqueSellingPoints: z.array(z.string().max(200)).max(10).nullish(),
+  targetAudience: z.string().max(600).nullish(),
+  competitivePositioning: z.string().max(600).nullish(),
+  inspirationLinks: z.array(z.string().max(500)).max(10).nullish(),
+  mediaTags: z
+    .record(z.string().max(500), z.array(z.string().max(40)).max(6))
     .nullish(),
 });
 
@@ -189,6 +224,7 @@ const editWebsiteSchema = z.object({
   clientId: z.string().min(1).max(100),
   currentConfig: z.record(z.any()),
   instruction: z.string().min(1).max(2000),
+  model: z.enum(['opus', 'sonnet', 'haiku']).optional(),
 });
 
 automationRouter.post(
@@ -209,6 +245,42 @@ automationRouter.post(
 );
 
 /**
+ * Scoped AI editor. Lighter alternative to `/edit-website` that only
+ * touches a single top-level slice of the config (hero, brand, pages.N,
+ * etc.). Avoids sending / receiving the full WebsiteConfig on small
+ * tweaks, which was causing `ERR_EMPTY_RESPONSE` on big configs where
+ * Claude's output got truncated.
+ */
+const editWebsiteScopedSchema = z.object({
+  clientId: z.string().min(1).max(100),
+  currentConfig: z.record(z.any()),
+  instruction: z.string().min(1).max(2000),
+  scope: z
+    .string()
+    .max(100)
+    .regex(/^[a-zA-Z_][a-zA-Z0-9_]*(\.(?:\d+|[a-zA-Z_][a-zA-Z0-9_]*))*$/, 'Invalid scope')
+    .optional(),
+  model: z.enum(['opus', 'sonnet', 'haiku']).optional(),
+});
+
+automationRouter.post(
+  '/edit-website-scoped',
+  requireAuth,
+  requireRole('agency_admin', 'agency_member'),
+  regenerationLimiter,
+  async (req, res, next) => {
+    try {
+      const args = editWebsiteScopedSchema.parse(req.body);
+      args.instruction = sanitizeUserText(args.instruction);
+      const result = await editWebsiteScopedWithAI(args);
+      res.json({ data: result });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+/**
  * AI-powered single-page generator. Takes a current site config + a
  * natural-language brief ("a Menu page with our espresso drinks") and
  * returns a fully populated new PageConfig appended to the site's
@@ -220,6 +292,7 @@ const generatePageSchema = z.object({
   currentConfig: z.record(z.any()),
   brief: z.string().min(1).max(3000),
   titleHint: z.string().max(100).optional(),
+  model: z.enum(['opus', 'sonnet', 'haiku']).optional(),
 });
 
 automationRouter.post(
@@ -427,6 +500,86 @@ automationRouter.post(
         accentColor: config?.brand?.accentColor,
       });
       res.json({ data: result });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+/**
+ * AI SVG Studio — Claude hand-writes an inline vector SVG for the
+ * hero illustration slot. Output is brand-tinted, sanitised, and
+ * persisted into `hero.illustration.customSvg`.
+ */
+const generateSvgSchema = z.object({
+  clientId: z.string().min(1).max(100),
+  brief: z.string().min(1).max(2000),
+  motion: z.string().max(40).nullish(),
+  model: z.enum(['opus', 'sonnet', 'haiku']).nullish(),
+});
+
+automationRouter.post(
+  '/generate-svg',
+  requireAuth,
+  requireRole('agency_admin', 'agency_member'),
+  regenerationLimiter,
+  async (req, res, next) => {
+    try {
+      const args = generateSvgSchema.parse(req.body);
+      const cleanedBrief = sanitizeUserText(args.brief);
+      if (!isDbConfigured()) {
+        return res.json({
+          data: {
+            svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 480"><circle cx="240" cy="240" r="160" fill="#1D9CA1"/></svg>',
+            prompt: cleanedBrief,
+            fromMock: true,
+          },
+        });
+      }
+      const db = getDb();
+      const [client] = await db
+        .select()
+        .from(clients)
+        .where(eq(clients.id, args.clientId));
+      if (!client) {
+        return res.status(404).json({
+          error: { message: 'Client not found', code: 'NOT_FOUND' },
+        });
+      }
+      const config = (client.websiteConfig ?? {}) as any;
+      const result = await generateSvgIllustration({
+        clientId: args.clientId,
+        businessName: client.businessName,
+        industry: client.industry ?? 'Local Business',
+        brief: cleanedBrief,
+        primaryColor: config?.brand?.primaryColor,
+        accentColor: config?.brand?.accentColor,
+        popColor: config?.brand?.popColor,
+        motion: args.motion ?? undefined,
+        model: args.model ?? undefined,
+      });
+      res.json({ data: result });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+/**
+ * One-shot sanitise endpoint used by the editor's "paste an SVG" flow —
+ * lets the agency paste their own markup and have us strip scripts /
+ * event handlers before persisting.
+ */
+automationRouter.post(
+  '/sanitize-svg',
+  requireAuth,
+  requireRole('agency_admin', 'agency_member'),
+  async (req, res, next) => {
+    try {
+      const { svg } = z
+        .object({ svg: z.string().min(1).max(200_000) })
+        .parse(req.body);
+      res.json({ data: { svg: sanitizeSvg(svg) } });
     } catch (e) {
       next(e);
     }

@@ -567,6 +567,16 @@ export class BoostApi {
     hasHours?: boolean;
     template?: SiteTemplate;
     suggestions?: string;
+    /**
+     * Optional seed used by the design-signature picker. Pass a fresh
+     * random string (e.g. `crypto.randomUUID()`) to regenerate with a
+     * different variant cluster — "surprise me" / "show me another
+     * look". When omitted, the business name is used so regenerations
+     * stay stable.
+     */
+    designSeed?: string;
+    /** Optional model override. Defaults to `opus`. */
+    model?: 'opus' | 'sonnet' | 'haiku';
     /* Seeded business facts — see apps/api/src/services/websites.ts */
     address?: string;
     phone?: string;
@@ -596,6 +606,20 @@ export class BoostApi {
       detail?: string;
       href?: string;
     }>;
+    /* Extras */
+    yearFounded?: string;
+    awards?: string[];
+    pressMentions?: Array<{ outlet: string; quote?: string; href?: string }>;
+    certifications?: string[];
+    languagesSpoken?: string[];
+    paymentMethods?: string[];
+    insuranceDetails?: string;
+    uniqueSellingPoints?: string[];
+    targetAudience?: string;
+    competitivePositioning?: string;
+    inspirationLinks?: string[];
+    /** Image URL → role tags (hero/gallery/about/portfolio/team/product) */
+    mediaTags?: Record<string, string[]>;
   }) {
     return this.request<{
       config: WebsiteConfig;
@@ -613,11 +637,35 @@ export class BoostApi {
     clientId: string;
     currentConfig: Record<string, any>;
     instruction: string;
+    model?: 'opus' | 'sonnet' | 'haiku';
   }) {
     return this.request<{
       config: WebsiteConfig;
       summary: string;
     }>('/api/v1/automation/edit-website', {
+      method: 'POST',
+      body: JSON.stringify(args),
+    });
+  }
+
+  /**
+   * Scoped AI edit — lighter than `editWebsiteWithAI` for when the
+   * change only touches one slice of the config (hero, brand,
+   * pages.0.hero, etc.). Avoids the round-trip of the entire config,
+   * which was causing truncation + ERR_EMPTY_RESPONSE on large sites.
+   */
+  editWebsiteScopedWithAI(args: {
+    clientId: string;
+    currentConfig: Record<string, any>;
+    instruction: string;
+    /** Dotted path, e.g. "hero.illustration", "brand", "pages.1.hero". */
+    scope?: string;
+    model?: 'opus' | 'sonnet' | 'haiku';
+  }) {
+    return this.request<{
+      config: WebsiteConfig;
+      summary: string;
+    }>('/api/v1/automation/edit-website-scoped', {
       method: 'POST',
       body: JSON.stringify(args),
     });
@@ -638,6 +686,7 @@ export class BoostApi {
     currentConfig: Record<string, any>;
     brief: string;
     titleHint?: string;
+    model?: 'opus' | 'sonnet' | 'haiku';
   }) {
     return this.request<{
       config: WebsiteConfig;
@@ -717,6 +766,38 @@ export class BoostApi {
     }>('/api/v1/automation/generate-hero-illustration', {
       method: 'POST',
       body: JSON.stringify(args),
+    });
+  }
+
+  /**
+   * AI SVG Studio — Claude hand-writes an inline SVG from the agency's
+   * brief. Saved as `hero.illustration.customSvg` so the renderer
+   * mounts it inline (supports per-shape CSS animations). Different
+   * from `generateHeroIllustration`: that returns a raster image from
+   * fal.ai; this returns crisp vector markup.
+   */
+  generateSvg(args: {
+    clientId: string;
+    brief: string;
+    motion?: string;
+    model?: 'opus' | 'sonnet' | 'haiku';
+  }) {
+    return this.request<{
+      svg: string;
+      prompt: string;
+      fromMock?: boolean;
+    }>('/api/v1/automation/generate-svg', {
+      method: 'POST',
+      body: JSON.stringify(args),
+    });
+  }
+
+  /** Sanitise raw SVG markup the agency pastes in. Strips scripts +
+   *  event handlers. */
+  sanitizeSvg(svg: string) {
+    return this.request<{ svg: string }>('/api/v1/automation/sanitize-svg', {
+      method: 'POST',
+      body: JSON.stringify({ svg }),
     });
   }
 

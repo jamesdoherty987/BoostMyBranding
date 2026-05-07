@@ -73,6 +73,8 @@ const TEMPLATES: Array<{
   { id: 'legal', name: 'Legal', description: 'Solicitors, law firms, barristers.' },
   { id: 'nonprofit', name: 'Non-profit', description: 'Charities, foundations, community.' },
   { id: 'tech', name: 'Tech & SaaS', description: 'Software, apps, startups.' },
+  { id: 'events', name: 'Events & venues', description: 'Wedding planners, venues, caterers.' },
+  { id: 'homeservices', name: 'Home improvement', description: 'Landscapers, painters, builders.' },
 ];
 
 interface PipelineStep {
@@ -151,6 +153,21 @@ export default function WebsitesPage() {
     }>,
     serviceAreas: '' as string, // comma-separated input, split on submit
     trustBadges: [] as Array<{ label: string; detail?: string; href?: string }>,
+
+    // Extras — optional nice-to-haves that make copy more specific
+    yearFounded: '',
+    awards: '' as string, // comma-separated
+    pressMentions: [] as Array<{ outlet: string; quote?: string; href?: string }>,
+    certifications: '' as string, // comma-separated
+    languagesSpoken: '' as string, // comma-separated
+    paymentMethods: '' as string, // comma-separated
+    insuranceDetails: '',
+    uniqueSellingPoints: [] as string[],
+    targetAudience: '',
+    competitivePositioning: '',
+    inspirationLinks: [] as string[],
+    /** URL → role tags (hero/gallery/about/portfolio/team/product) */
+    mediaTags: {} as Record<string, string[]>,
   });
 
   // Pick a default client once the list arrives. Also re-picks if the
@@ -167,6 +184,8 @@ export default function WebsitesPage() {
 
   const [templateOverrideOpen, setTemplateOverrideOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [extrasOpen, setExtrasOpen] = useState(false);
+  const [mediaPanelOpen, setMediaPanelOpen] = useState(false);
   const [running, setRunning] = useState(false);
   const [steps, setSteps] = useState<PipelineStep[]>(PIPELINE);
   const [config, setConfig] = useState<GeneratedConfig | null>(null);
@@ -273,7 +292,15 @@ export default function WebsitesPage() {
     .map((r) => r.fileUrl)
     .filter((u): u is string => typeof u === 'string' && u.length > 0);
 
-  const generate = async () => {
+  /**
+   * Run the full generation pipeline.
+   *
+   * `options.designSeed` — when passed, the server cycles the
+   * design-signature picker so the output uses different variants even
+   * for the same business. Used by the "Try another look" button so
+   * agencies can roll until they find a style they like.
+   */
+  const generate = async (options: { designSeed?: string } = {}) => {
     // Defensive check: a real client id is a UUID. If we ever end up with
     // a stale mock id (e.g. "c_murphy") because the clients list hasn't
     // loaded yet, surface a clear error instead of firing an API call
@@ -325,6 +352,7 @@ export default function WebsitesPage() {
         hasHours: newSite.hasHours,
         template: newSite.template, // may be undefined → Claude auto-detects
         suggestions: suggestionParts.join('\n') || undefined,
+        designSeed: options.designSeed,
         // Seeded business facts
         address: newSite.address.trim() || undefined,
         phone: newSite.phone.trim() || undefined,
@@ -349,6 +377,29 @@ export default function WebsitesPage() {
               .filter(Boolean)
           : undefined,
         trustBadges: newSite.trustBadges.length > 0 ? newSite.trustBadges : undefined,
+        // Extras
+        yearFounded: newSite.yearFounded.trim() || undefined,
+        awards: splitCsv(newSite.awards),
+        pressMentions: newSite.pressMentions.filter((p) => p.outlet.trim()).length > 0
+          ? newSite.pressMentions.filter((p) => p.outlet.trim())
+          : undefined,
+        certifications: splitCsv(newSite.certifications),
+        languagesSpoken: splitCsv(newSite.languagesSpoken),
+        paymentMethods: splitCsv(newSite.paymentMethods),
+        insuranceDetails: newSite.insuranceDetails.trim() || undefined,
+        uniqueSellingPoints: newSite.uniqueSellingPoints.filter((u) => u.trim()).length > 0
+          ? newSite.uniqueSellingPoints.filter((u) => u.trim())
+          : undefined,
+        targetAudience: newSite.targetAudience.trim() || undefined,
+        competitivePositioning: newSite.competitivePositioning.trim() || undefined,
+        inspirationLinks: newSite.inspirationLinks.filter((l) => l.trim()).length > 0
+          ? newSite.inspirationLinks.filter((l) => l.trim())
+          : undefined,
+        mediaTags: Object.entries(newSite.mediaTags).some(([, t]) => t.length > 0)
+          ? Object.fromEntries(
+              Object.entries(newSite.mediaTags).filter(([, t]) => t.length > 0),
+            )
+          : undefined,
       });
       clearInterval(tick);
       setSteps((prev) => prev.map((s) => ({ ...s, status: 'done' })));
@@ -764,15 +815,35 @@ export default function WebsitesPage() {
                 </div>
               </div>
 
-              {/* Client images preview */}
-              {clientImages.length > 0 && (
-                <div>
-                  <label className="text-xs font-medium text-slate-600">
-                    Client images ({clientImages.length} available)
-                  </label>
-                  <p className="mt-0.5 text-[11px] text-slate-400">
-                    The AI will review these and pick the best ones for the hero, gallery, and about sections.
-                  </p>
+              {/* Client images preview + media role tagging */}
+              <div className="border-t border-slate-100 pt-4">
+                <button
+                  onClick={() => setMediaPanelOpen((o) => !o)}
+                  className="flex w-full items-center justify-between text-left"
+                >
+                  <span className="text-xs font-medium text-slate-600">
+                    Client media
+                    <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
+                      {clientImages.length}
+                    </span>
+                    {Object.values(newSite.mediaTags).filter((t) => t.length > 0).length > 0 ? (
+                      <span className="ml-2 rounded-full bg-[#1D9CA1]/10 px-2 py-0.5 text-[10px] font-semibold text-[#1D9CA1]">
+                        {Object.values(newSite.mediaTags).filter((t) => t.length > 0).length} tagged
+                      </span>
+                    ) : null}
+                  </span>
+                  <ChevronDown
+                    className={`h-4 w-4 text-slate-400 transition-transform ${
+                      mediaPanelOpen ? 'rotate-180' : ''
+                    }`}
+                  />
+                </button>
+                <p className="mt-1 text-[11px] text-slate-400">
+                  Upload or pick from the client library and tag each photo for hero, gallery,
+                  about, portfolio, team, or product. Tagging nudges the AI to place that image
+                  in the right section.
+                </p>
+                {!mediaPanelOpen && clientImages.length > 0 ? (
                   <div className="mt-2 flex gap-2 overflow-x-auto rounded-xl border border-slate-200 bg-slate-50 p-2">
                     {clientImages.slice(0, 12).map((src, i) => (
                       // eslint-disable-next-line @next/next/no-img-element
@@ -789,8 +860,29 @@ export default function WebsitesPage() {
                       </div>
                     )}
                   </div>
-                </div>
-              )}
+                ) : null}
+                <AnimatePresence>
+                  {mediaPanelOpen ? (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="overflow-hidden"
+                    >
+                      <MediaTaggingGrid
+                        clientId={newSite.clientId}
+                        images={clientImages}
+                        imageRows={clientImageRows}
+                        tags={newSite.mediaTags}
+                        onTagsChange={(mediaTags) =>
+                          setNewSite((s) => ({ ...s, mediaTags }))
+                        }
+                        onUploadComplete={() => mutateClientImages()}
+                      />
+                    </motion.div>
+                  ) : null}
+                </AnimatePresence>
+              </div>
 
               <div className="flex flex-wrap items-center gap-4">
                 <label className="inline-flex items-center gap-2 text-xs text-slate-700">
@@ -857,6 +949,51 @@ export default function WebsitesPage() {
                         value={newSite}
                         onChange={(patch) => setNewSite((s) => ({ ...s, ...patch }))}
                         clientId={newSite.clientId}
+                      />
+                    </motion.div>
+                  ) : null}
+                </AnimatePresence>
+              </div>
+
+              {/* Extras — specifics that sharpen copy */}
+              <div className="border-t border-slate-100 pt-4">
+                <button
+                  onClick={() => setExtrasOpen((o) => !o)}
+                  className="flex w-full items-center justify-between text-left"
+                >
+                  <span className="text-xs font-medium text-slate-600">
+                    Extras
+                    <span className="ml-2 text-[10px] font-normal text-slate-400">
+                      founded, awards, USPs, audience, vibe
+                    </span>
+                    {extrasCompletionCount(newSite) > 0 ? (
+                      <span className="ml-2 rounded-full bg-[#FFEC3D]/30 px-2 py-0.5 text-[10px] font-semibold text-slate-700">
+                        {extrasCompletionCount(newSite)} set
+                      </span>
+                    ) : null}
+                  </span>
+                  <ChevronDown
+                    className={`h-4 w-4 text-slate-400 transition-transform ${
+                      extrasOpen ? 'rotate-180' : ''
+                    }`}
+                  />
+                </button>
+                <AnimatePresence>
+                  {extrasOpen ? (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="overflow-hidden"
+                    >
+                      <p className="mt-2 text-[11px] text-slate-500">
+                        Every field optional. The more you fill in, the more specific and
+                        credible the copy feels — "15 years in business", "winner of Best
+                        Local Trader 2024", "for busy parents who value reliability".
+                      </p>
+                      <ExtrasPanel
+                        value={newSite}
+                        onChange={(patch) => setNewSite((s) => ({ ...s, ...patch }))}
                       />
                     </motion.div>
                   ) : null}
@@ -946,7 +1083,7 @@ export default function WebsitesPage() {
                   )}
                 </div>
                 <Button
-                  onClick={generate}
+                  onClick={() => generate()}
                   loading={running}
                   size="lg"
                   disabled={running || clientsLoading || !newSite.clientId || clients.length === 0}
@@ -1197,11 +1334,28 @@ export default function WebsitesPage() {
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={generate}
+                    onClick={() => generate()}
                     disabled={running}
                   >
                     <Sparkles className="h-3 w-3" />
                     Regenerate
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() =>
+                      generate({
+                        designSeed:
+                          typeof crypto !== 'undefined' && 'randomUUID' in crypto
+                            ? crypto.randomUUID()
+                            : `${Date.now()}-${Math.random()}`,
+                      })
+                    }
+                    disabled={running}
+                    title="Regenerate with a different visual signature — same content, new look"
+                  >
+                    <Wand2 className="h-3 w-3" />
+                    Try another look
                   </Button>
                   <a
                     href={`${APP_URL}/sites/${selectedClient?.slug ?? slugify(selectedClient?.businessName ?? '')}`}
@@ -1216,7 +1370,7 @@ export default function WebsitesPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_380px]">
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
                 <Card>
                   <CardContent className="p-0 overflow-hidden">
                     {/* Browser chrome + page switcher for multipage sites */}
@@ -1296,7 +1450,7 @@ export default function WebsitesPage() {
                         editMode={editMode}
                         onFieldChange={handleFieldChange}
                         onImageClick={(ctx) => setImagePicker(ctx)}
-                        onAIEdit={async (instruction) => {
+                        onAIEdit={async (instruction, options) => {
                           if (!config || !newSite.clientId) {
                             throw new Error('No site loaded yet');
                           }
@@ -1304,6 +1458,7 @@ export default function WebsitesPage() {
                             clientId: newSite.clientId,
                             currentConfig: config as unknown as Record<string, unknown>,
                             instruction,
+                            model: options?.model,
                           });
                           setConfig(sanitizeConfig(result.config));
                           return result.summary ?? 'Done — site updated.';
@@ -1314,25 +1469,31 @@ export default function WebsitesPage() {
                   </CardContent>
                 </Card>
 
-                <SiteEditor
-                  config={config}
-                  onChange={handleConfigChange}
-                  clientId={newSite.clientId}
-                  images={clientImages}
-                  imageRows={clientImageRows}
-                  onImageLabelChange={async (id, aiDescription) => {
-                    try {
-                      await api.updateImage(id, { aiDescription });
-                      mutateClientImages();
-                    } catch (e) {
-                      toast.error('Label update failed', (e as Error).message);
-                    }
-                  }}
-                  editMode={editMode}
-                  onEditModeChange={setEditMode}
-                  activePageSlug={previewPageSlug}
-                  onActivePageSlugChange={setPreviewPageSlug}
-                />
+                {/* Editor column. Sticky on wide screens so it stays in
+                    view while scrolling through the preview. On narrow
+                    screens the grid collapses to single column and the
+                    editor stacks naturally below the preview. */}
+                <div className="lg:sticky lg:top-4 lg:self-start lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
+                  <SiteEditor
+                    config={config}
+                    onChange={handleConfigChange}
+                    clientId={newSite.clientId}
+                    images={clientImages}
+                    imageRows={clientImageRows}
+                    onImageLabelChange={async (id, aiDescription) => {
+                      try {
+                        await api.updateImage(id, { aiDescription });
+                        mutateClientImages();
+                      } catch (e) {
+                        toast.error('Label update failed', (e as Error).message);
+                      }
+                    }}
+                    editMode={editMode}
+                    onEditModeChange={setEditMode}
+                    activePageSlug={previewPageSlug}
+                    onActivePageSlugChange={setPreviewPageSlug}
+                  />
+                </div>
               </div>
 
               <details className="rounded-2xl border border-slate-200 bg-white p-4">
@@ -1601,6 +1762,44 @@ function detailsCompletionCount(v: {
   if (v.team.length > 0) n++;
   if (v.serviceAreas.trim()) n++;
   if (v.trustBadges.length > 0) n++;
+  return n;
+}
+
+/** Split a comma-separated string into trimmed, non-empty parts or return undefined. */
+function splitCsv(v: string): string[] | undefined {
+  const parts = v
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return parts.length > 0 ? parts : undefined;
+}
+
+/** Count of "extras" fields filled in — for the badge in the collapsed panel. */
+function extrasCompletionCount(v: {
+  yearFounded: string;
+  awards: string;
+  pressMentions: Array<{ outlet: string }>;
+  certifications: string;
+  languagesSpoken: string;
+  paymentMethods: string;
+  insuranceDetails: string;
+  uniqueSellingPoints: string[];
+  targetAudience: string;
+  competitivePositioning: string;
+  inspirationLinks: string[];
+}): number {
+  let n = 0;
+  if (v.yearFounded.trim()) n++;
+  if (v.awards.trim()) n++;
+  if (v.pressMentions.some((p) => p.outlet.trim())) n++;
+  if (v.certifications.trim()) n++;
+  if (v.languagesSpoken.trim()) n++;
+  if (v.paymentMethods.trim()) n++;
+  if (v.insuranceDetails.trim()) n++;
+  if (v.uniqueSellingPoints.some((u) => u.trim())) n++;
+  if (v.targetAudience.trim()) n++;
+  if (v.competitivePositioning.trim()) n++;
+  if (v.inspirationLinks.some((l) => l.trim())) n++;
   return n;
 }
 
@@ -2010,6 +2209,557 @@ function TeamMemberRow({
           <Trash2 className="h-3.5 w-3.5" />
         </button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Optional "Extras" panel. Every field optional — the more the agency
+ * fills in, the more specific and credible the generated copy gets.
+ * These never overwrite AI output directly; they're passed as
+ * authoritative facts in the Claude prompt.
+ */
+function ExtrasPanel({
+  value,
+  onChange,
+}: {
+  value: {
+    yearFounded: string;
+    awards: string;
+    pressMentions: Array<{ outlet: string; quote?: string; href?: string }>;
+    certifications: string;
+    languagesSpoken: string;
+    paymentMethods: string;
+    insuranceDetails: string;
+    uniqueSellingPoints: string[];
+    targetAudience: string;
+    competitivePositioning: string;
+    inspirationLinks: string[];
+  };
+  onChange: (patch: Partial<typeof value>) => void;
+}) {
+  const addUsp = () => onChange({ uniqueSellingPoints: [...value.uniqueSellingPoints, ''] });
+  const setUsp = (i: number, next: string) => {
+    const arr = [...value.uniqueSellingPoints];
+    arr[i] = next;
+    onChange({ uniqueSellingPoints: arr });
+  };
+  const removeUsp = (i: number) =>
+    onChange({ uniqueSellingPoints: value.uniqueSellingPoints.filter((_, j) => j !== i) });
+
+  const addLink = () => onChange({ inspirationLinks: [...value.inspirationLinks, ''] });
+  const setLink = (i: number, next: string) => {
+    const arr = [...value.inspirationLinks];
+    arr[i] = next;
+    onChange({ inspirationLinks: arr });
+  };
+  const removeLink = (i: number) =>
+    onChange({ inspirationLinks: value.inspirationLinks.filter((_, j) => j !== i) });
+
+  const addPress = () =>
+    onChange({ pressMentions: [...value.pressMentions, { outlet: '' }] });
+  const setPress = (i: number, patch: Partial<{ outlet: string; quote?: string; href?: string }>) => {
+    const arr = [...value.pressMentions];
+    arr[i] = { ...arr[i]!, ...patch };
+    onChange({ pressMentions: arr });
+  };
+  const removePress = (i: number) =>
+    onChange({ pressMentions: value.pressMentions.filter((_, j) => j !== i) });
+
+  return (
+    <div className="mt-3 space-y-4">
+      <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+            Year founded
+          </p>
+          <Input
+            value={value.yearFounded}
+            onChange={(e) => onChange({ yearFounded: e.target.value })}
+            placeholder="2008"
+            className="mt-1 h-9 text-xs"
+            maxLength={8}
+          />
+        </div>
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+            Insurance / coverage
+          </p>
+          <Input
+            value={value.insuranceDetails}
+            onChange={(e) => onChange({ insuranceDetails: e.target.value })}
+            placeholder="£5M public liability, Allianz"
+            className="mt-1 h-9 text-xs"
+          />
+        </div>
+      </div>
+
+      <div>
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+          Awards / recognitions
+          <span className="ml-2 font-normal text-slate-400">comma-separated</span>
+        </p>
+        <Input
+          value={value.awards}
+          onChange={(e) => onChange({ awards: e.target.value })}
+          placeholder="Best Local Trader 2024, Top Rated Pro"
+          className="mt-1 h-9 text-xs"
+        />
+      </div>
+
+      <div>
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+          Certifications / memberships
+          <span className="ml-2 font-normal text-slate-400">comma-separated</span>
+        </p>
+        <Input
+          value={value.certifications}
+          onChange={(e) => onChange({ certifications: e.target.value })}
+          placeholder="Gas Safe, NICEIC, City & Guilds"
+          className="mt-1 h-9 text-xs"
+        />
+      </div>
+
+      <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+            Languages spoken
+            <span className="ml-2 font-normal text-slate-400">comma-separated</span>
+          </p>
+          <Input
+            value={value.languagesSpoken}
+            onChange={(e) => onChange({ languagesSpoken: e.target.value })}
+            placeholder="English, Irish, Polish"
+            className="mt-1 h-9 text-xs"
+          />
+        </div>
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+            Payment methods
+            <span className="ml-2 font-normal text-slate-400">comma-separated</span>
+          </p>
+          <Input
+            value={value.paymentMethods}
+            onChange={(e) => onChange({ paymentMethods: e.target.value })}
+            placeholder="Cash, card, bank transfer, invoice"
+            className="mt-1 h-9 text-xs"
+          />
+        </div>
+      </div>
+
+      {/* USPs */}
+      <div>
+        <div className="flex items-center justify-between">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+            Unique selling points
+            {value.uniqueSellingPoints.length > 0 ? (
+              <span className="ml-2 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">
+                {value.uniqueSellingPoints.length}
+              </span>
+            ) : null}
+          </p>
+          <button
+            type="button"
+            onClick={addUsp}
+            className="flex items-center gap-1 rounded-full border border-dashed border-slate-300 px-2 py-0.5 text-[10px] font-medium text-slate-600 hover:border-[#1D9CA1] hover:text-[#1D9CA1]"
+          >
+            <Sparkles className="h-2.5 w-2.5" />
+            Add USP
+          </button>
+        </div>
+        {value.uniqueSellingPoints.length === 0 ? (
+          <p className="mt-1 text-[11px] text-slate-400">
+            Short punchy differentiators — "24/7 call-outs", "no job too small",
+            "female-led team", "10-year workmanship guarantee".
+          </p>
+        ) : (
+          <div className="mt-2 space-y-1.5">
+            {value.uniqueSellingPoints.map((u, i) => (
+              <div key={i} className="flex items-center gap-1.5">
+                <Input
+                  value={u}
+                  onChange={(e) => setUsp(i, e.target.value)}
+                  placeholder={`USP ${i + 1}`}
+                  className="h-8 flex-1 text-xs"
+                />
+                <button
+                  type="button"
+                  onClick={() => removeUsp(i)}
+                  className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-500"
+                  aria-label="Remove USP"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Press */}
+      <div>
+        <div className="flex items-center justify-between">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+            Press / media mentions
+            {value.pressMentions.length > 0 ? (
+              <span className="ml-2 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">
+                {value.pressMentions.length}
+              </span>
+            ) : null}
+          </p>
+          <button
+            type="button"
+            onClick={addPress}
+            className="flex items-center gap-1 rounded-full border border-dashed border-slate-300 px-2 py-0.5 text-[10px] font-medium text-slate-600 hover:border-[#1D9CA1] hover:text-[#1D9CA1]"
+          >
+            <Sparkles className="h-2.5 w-2.5" />
+            Add mention
+          </button>
+        </div>
+        {value.pressMentions.length === 0 ? (
+          <p className="mt-1 text-[11px] text-slate-400">
+            Outlets that covered the business. Quote optional.
+          </p>
+        ) : (
+          <div className="mt-2 space-y-1.5">
+            {value.pressMentions.map((p, i) => (
+              <div
+                key={i}
+                className="grid grid-cols-1 items-start gap-1 rounded-xl border border-slate-200 bg-white p-2 md:grid-cols-[1fr_1.4fr_auto]"
+              >
+                <Input
+                  value={p.outlet}
+                  onChange={(e) => setPress(i, { outlet: e.target.value })}
+                  placeholder="RTE News"
+                  className="h-8 text-xs"
+                />
+                <Input
+                  value={p.quote ?? ''}
+                  onChange={(e) => setPress(i, { quote: e.target.value })}
+                  placeholder="Optional short quote"
+                  className="h-8 text-xs"
+                />
+                <button
+                  type="button"
+                  onClick={() => removePress(i)}
+                  className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-500"
+                  aria-label="Remove mention"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Positioning */}
+      <div>
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+          Target audience
+        </p>
+        <Textarea
+          value={value.targetAudience}
+          onChange={(e) => onChange({ targetAudience: e.target.value })}
+          placeholder="Busy professionals in south Dublin who value reliability over cheapness."
+          rows={2}
+          className="mt-1 text-xs no-zoom"
+        />
+      </div>
+      <div>
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+          Competitive positioning
+        </p>
+        <Textarea
+          value={value.competitivePositioning}
+          onChange={(e) => onChange({ competitivePositioning: e.target.value })}
+          placeholder="The premium local option — slightly higher prices, same-day service, fully-insured guarantee."
+          rows={2}
+          className="mt-1 text-xs no-zoom"
+        />
+      </div>
+
+      {/* Inspiration */}
+      <div>
+        <div className="flex items-center justify-between">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+            Inspiration links
+            {value.inspirationLinks.length > 0 ? (
+              <span className="ml-2 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">
+                {value.inspirationLinks.length}
+              </span>
+            ) : null}
+          </p>
+          <button
+            type="button"
+            onClick={addLink}
+            className="flex items-center gap-1 rounded-full border border-dashed border-slate-300 px-2 py-0.5 text-[10px] font-medium text-slate-600 hover:border-[#1D9CA1] hover:text-[#1D9CA1]"
+          >
+            <Sparkles className="h-2.5 w-2.5" />
+            Add link
+          </button>
+        </div>
+        {value.inspirationLinks.length === 0 ? (
+          <p className="mt-1 text-[11px] text-slate-400">
+            Other sites whose vibe you want to echo. The AI reads these as style cues,
+            never copies their copy.
+          </p>
+        ) : (
+          <div className="mt-2 space-y-1.5">
+            {value.inspirationLinks.map((l, i) => (
+              <div key={i} className="flex items-center gap-1.5">
+                <Input
+                  value={l}
+                  onChange={(e) => setLink(i, e.target.value)}
+                  placeholder="https://example.com"
+                  className="h-8 flex-1 text-xs"
+                  type="url"
+                />
+                <button
+                  type="button"
+                  onClick={() => removeLink(i)}
+                  className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-500"
+                  aria-label="Remove link"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Media tagging grid. Shows every client image; agency can toggle role
+ * tags (hero / gallery / about / portfolio / team / product) per image.
+ * Supports drag-drop upload inline so new photos can be added without
+ * leaving the generation form.
+ */
+const MEDIA_ROLE_TAGS = ['hero', 'gallery', 'about', 'portfolio', 'team', 'product'] as const;
+type MediaRoleTag = (typeof MEDIA_ROLE_TAGS)[number];
+
+function MediaTaggingGrid({
+  clientId,
+  images,
+  imageRows,
+  tags,
+  onTagsChange,
+  onUploadComplete,
+}: {
+  clientId: string;
+  images: string[];
+  imageRows: Array<{
+    id: string;
+    fileUrl: string;
+    fileName?: string | null;
+    aiDescription?: string | null;
+  }>;
+  tags: Record<string, string[]>;
+  onTagsChange: (next: Record<string, string[]>) => void;
+  onUploadComplete: () => void;
+}) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [filter, setFilter] = useState<'all' | MediaRoleTag | 'untagged'>('all');
+
+  const toggleTag = (url: string, tag: MediaRoleTag) => {
+    const current = tags[url] ?? [];
+    const next = current.includes(tag)
+      ? current.filter((t) => t !== tag)
+      : [...current, tag];
+    const merged: Record<string, string[]> = { ...tags };
+    if (next.length > 0) merged[url] = next;
+    else delete merged[url];
+    onTagsChange(merged);
+  };
+
+  const handleFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    if (!clientId) {
+      toast.error('Pick a client first');
+      return;
+    }
+    const valid: File[] = [];
+    for (const f of Array.from(files)) {
+      if (!f.type.startsWith('image/')) continue;
+      if (f.size > 10 * 1024 * 1024) {
+        toast.error('Too large', `${f.name} is over 10MB.`);
+        continue;
+      }
+      valid.push(f);
+    }
+    if (valid.length === 0) return;
+    setUploading(true);
+    try {
+      await api.uploadImages(clientId, valid, []);
+      toast.success(`Uploaded ${valid.length} ${valid.length === 1 ? 'image' : 'images'}`);
+      onUploadComplete();
+    } catch (e) {
+      toast.error('Upload failed', (e as Error).message);
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  };
+
+  const shown = images.filter((url) => {
+    if (filter === 'all') return true;
+    const arr = tags[url] ?? [];
+    if (filter === 'untagged') return arr.length === 0;
+    return arr.includes(filter);
+  });
+
+  return (
+    <div className="mt-3 space-y-3">
+      {/* Filter chips + upload */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <button
+          onClick={() => setFilter('all')}
+          className={`rounded-full px-2.5 py-0.5 text-[10px] font-medium transition-colors ${
+            filter === 'all'
+              ? 'bg-slate-900 text-white'
+              : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+          }`}
+        >
+          All ({images.length})
+        </button>
+        <button
+          onClick={() => setFilter('untagged')}
+          className={`rounded-full px-2.5 py-0.5 text-[10px] font-medium transition-colors ${
+            filter === 'untagged'
+              ? 'bg-slate-900 text-white'
+              : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+          }`}
+        >
+          Untagged ({images.filter((u) => !((tags[u]?.length ?? 0) > 0)).length})
+        </button>
+        {MEDIA_ROLE_TAGS.map((tag) => {
+          const count = images.filter((u) => tags[u]?.includes(tag)).length;
+          return (
+            <button
+              key={tag}
+              onClick={() => setFilter(tag)}
+              className={`rounded-full px-2.5 py-0.5 text-[10px] font-medium capitalize transition-colors ${
+                filter === tag
+                  ? 'bg-[#1D9CA1] text-white'
+                  : count > 0
+                    ? 'bg-[#1D9CA1]/10 text-[#1D9CA1] hover:bg-[#1D9CA1]/20'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              {tag} {count > 0 ? `(${count})` : ''}
+            </button>
+          );
+        })}
+        <div className="ml-auto">
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            disabled={uploading || !clientId}
+            className="inline-flex items-center gap-1 rounded-full bg-gradient-cta px-3 py-1 text-[11px] font-semibold text-white shadow-sm transition-opacity hover:opacity-90 disabled:opacity-50"
+          >
+            {uploading ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <Upload className="h-3 w-3" />
+            )}
+            {uploading ? 'Uploading…' : 'Upload'}
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            multiple
+            hidden
+            onChange={(e) => handleFiles(e.target.files)}
+          />
+        </div>
+      </div>
+
+      {/* Grid */}
+      {shown.length === 0 ? (
+        <div
+          onDragOver={(e) => {
+            e.preventDefault();
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            handleFiles(e.dataTransfer.files);
+          }}
+          className="flex min-h-[120px] flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 p-4 text-center text-xs text-slate-500"
+        >
+          <ImageIcon className="h-6 w-6 text-slate-300" />
+          <p>
+            {filter === 'all'
+              ? 'No images yet — drop files here or click Upload.'
+              : `No images tagged "${filter}" yet.`}
+          </p>
+        </div>
+      ) : (
+        <div
+          onDragOver={(e) => {
+            e.preventDefault();
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            handleFiles(e.dataTransfer.files);
+          }}
+          className="grid grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2 sm:grid-cols-3 lg:grid-cols-4"
+        >
+          {shown.map((url) => {
+            const row = imageRows.find((r) => r.fileUrl === url);
+            const roleTags = (tags[url] ?? []) as MediaRoleTag[];
+            return (
+              <div
+                key={url}
+                className="overflow-hidden rounded-lg border border-slate-200 bg-white"
+              >
+                <div className="relative aspect-square w-full">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={url}
+                    alt={row?.aiDescription ?? ''}
+                    className="h-full w-full object-cover"
+                  />
+                  {roleTags.length > 0 ? (
+                    <div className="absolute inset-x-1 bottom-1 flex flex-wrap gap-0.5">
+                      {roleTags.map((t) => (
+                        <span
+                          key={t}
+                          className="rounded-full bg-[#1D9CA1] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-white shadow"
+                        >
+                          {t}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+                <div className="flex flex-wrap gap-0.5 p-1.5">
+                  {MEDIA_ROLE_TAGS.map((t) => {
+                    const active = roleTags.includes(t);
+                    return (
+                      <button
+                        key={t}
+                        onClick={() => toggleTag(url, t)}
+                        className={`rounded-full px-1.5 py-0.5 text-[9px] font-medium capitalize transition-colors ${
+                          active
+                            ? 'bg-[#1D9CA1] text-white'
+                            : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                        }`}
+                      >
+                        {t}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

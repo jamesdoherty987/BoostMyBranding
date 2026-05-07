@@ -86,6 +86,11 @@ export function RocketMark({ size = 32, className }: RocketMarkProps) {
       height={size}
       priority
       unoptimized
+      // Next warns when a CSS-sized <Image> locks one dimension but not
+      // the other. Forcing both to `auto` lets any `className` override
+      // (e.g. `h-12`) scale the image proportionally without tripping
+      // the warning.
+      style={{ width: 'auto', height: 'auto' }}
       className={cn('object-contain', className)}
     />
   );

@@ -383,13 +383,22 @@ export function websiteConfigPrompt(vars: {
    * config after the AI pass, so invented variants are overwritten.
    */
   seededFacts?: string;
+  /**
+   * Pre-selected "design signature" for this business — a curated
+   * recommendation of which variants to use so the output has a distinct
+   * industry flavor rather than the same generic look. Picked from the
+   * TEMPLATE_PERSONALITY map + randomised by business name so two cafes
+   * don't render identically. Formatted as a multi-line block Claude
+   * reads as authoritative style direction.
+   */
+  designSignature?: string;
 }) {
   return `You are a senior brand & web designer + copywriter. Generate a complete, high-quality website config JSON for "${vars.businessName}", a ${vars.industry} business.
 
 BUSINESS DESCRIPTION:
 ${vars.description}
 
-${vars.existingMarkdown ? `EXISTING SITE CONTENT (for voice + facts):\n${vars.existingMarkdown}\n` : ''}${vars.services?.length ? `KNOWN SERVICES: ${vars.services.join(', ')}\n` : ''}${vars.imageDescriptions ? `AVAILABLE IMAGES:\n${vars.imageDescriptions}\n` : ''}${vars.mediaProfile ? `\nMEDIA PROFILE (authoritative counts — use these to gate which image-heavy blocks you emit):\n${vars.mediaProfile}\n` : ''}${vars.template ? `TEMPLATE HINT (may override if a different one fits better): ${vars.template}\n` : ''}${vars.suggestions ? `AGENCY SUGGESTIONS:\n${vars.suggestions}\n` : ''}${vars.seededFacts ? `\nAUTHORITATIVE BUSINESS FACTS (use these exactly — do NOT invent or paraphrase the values. These are ground truth from the agency):\n${vars.seededFacts}\n` : ''}
+${vars.existingMarkdown ? `EXISTING SITE CONTENT (for voice + facts):\n${vars.existingMarkdown}\n` : ''}${vars.services?.length ? `KNOWN SERVICES: ${vars.services.join(', ')}\n` : ''}${vars.imageDescriptions ? `AVAILABLE IMAGES:\n${vars.imageDescriptions}\n` : ''}${vars.mediaProfile ? `\nMEDIA PROFILE (authoritative counts — use these to gate which image-heavy blocks you emit):\n${vars.mediaProfile}\n` : ''}${vars.template ? `TEMPLATE HINT (may override if a different one fits better): ${vars.template}\n` : ''}${vars.designSignature ? `\n${vars.designSignature}\n` : ''}${vars.suggestions ? `AGENCY SUGGESTIONS:\n${vars.suggestions}\n` : ''}${vars.seededFacts ? `\nAUTHORITATIVE BUSINESS FACTS (use these exactly — do NOT invent or paraphrase the values. These are ground truth from the agency):\n${vars.seededFacts}\n` : ''}
 
 ════════════════════════════════════════════════════════════════════
 SECTION GATING — READ FIRST, THESE OVERRIDE EVERYTHING ELSE
@@ -421,6 +430,65 @@ hero.illustration and is always safe to include — the renderer picks
 a sensible default for the industry when you leave it unset.
 
 ════════════════════════════════════════════════════════════════════
+DESIGN INTENT — MAKE IT DISTINCTIVE, NOT GENERIC
+════════════════════════════════════════════════════════════════════
+
+Every site you generate must have a CLEAR VISUAL SIGNATURE that fits
+the industry. Two plumbers should not look like two cafes. Two cafes
+should not look like each other.
+
+USE THE DESIGN SIGNATURE block above (if provided) as authoritative:
+  - Pick one of the listed "recommended hero variants" — NEVER default
+    to parallax-layers or spotlight for everything.
+  - Use the listed "services style" for servicesSection.variant.
+  - Use the listed "gallery style" for gallery.variant.
+  - Use the listed "reviews style" for reviewsSection.variant.
+  - Use the listed "CTA style" for cta.variant.
+  - Use the listed "process style" for process.variant.
+  - Use the listed "stats style" for statsSection.variant.
+  - Use the listed "team style" for team.variant.
+  - Use the listed "contact style" for contact.variant.
+  - Use the listed "FAQ style" for faqSection.variant.
+  - Use the listed "headline effect" for hero.headlineEffect (and if
+    flip-words, populate hero.flipWords with 3-5 alternatives).
+  - Build around the listed "signature feature" — this is the ONE
+    visually bold thing the site should lean into.
+
+PUSH PARALLAX, 3D, AND SCROLL-DRIVEN FEATURES. The renderer supports
+them all — use them to make sites feel alive:
+  - parallax-layers hero (split copy + image with layered scroll)
+  - 3d-marquee gallery (tilted wall of images, rotating on hover)
+  - 3d-cards services (tilt on pointer)
+  - sticky-scroll services (reveal one at a time as you scroll)
+  - wobble services (cards tilt on hover)
+  - animated-testimonials (3D stack of testimonials)
+  - boxes hero (animated interactive grid, great for tech)
+  - lamp hero (dramatic overhead spotlight)
+  - vortex hero (swirling particles)
+  - draggable reviews (physics-y cards the user can throw around)
+  - compare gallery (before/after slider, great for trades + beauty)
+  - timeline process (vertical scroll-drawn animated timeline)
+  - container-scroll / parallax galleries
+
+DO NOT pick the same variants for every site of the same template.
+Use the business name as a seed — a business called "Murphy's" and
+"The Gas Lantern" with the same template should render with different
+hero variants from the shortlist.
+
+BRAND COLOURS — match the industry's visual signature:
+  - Pick colours from the DESIGN SIGNATURE palette hints.
+  - Unless the agency specifically asked for something else, lean
+    into the signature palette (electric blues for fitness, warm
+    terracotta for food, deep navy + gold for legal, etc.).
+  - Pop colours are allowed and encouraged for playful templates
+    (retail, food, nonprofit) and for "one accent" treatments on
+    otherwise monochrome sites.
+
+PLAIN is the enemy. A site that uses 3 out of 20 available visual
+features is missing the point. Small local businesses WANT their site
+to feel modern and distinctive — not another bootstrap template.
+
+════════════════════════════════════════════════════════════════════
 
 Return ONLY valid JSON in this exact shape:
 {
@@ -448,7 +516,7 @@ Return ONLY valid JSON in this exact shape:
     "ctaPrimary": { "label": "<action verb>", "href": "<#section or url>" },
     "ctaSecondary": { "label": "...", "href": "..." },
     "imageIndex": <index from AVAILABLE IMAGES, or null if none suit the hero>,
-    "variant": "<spotlight|beams|floating-icons|parallax-layers|gradient-mesh|aurora|wavy|sparkles|hero-highlight|dither|multicolor|full-bg-image|two-column-image|meteors|vortex|lamp|shooting-stars|boxes|ripple>",
+    "variant": "<REQUIRED: use the recommended hero variant from the DESIGN SIGNATURE. One of: spotlight, beams, floating-icons, parallax-layers, gradient-mesh, aurora, wavy, sparkles, hero-highlight, dither, multicolor, full-bg-image, two-column-image, meteors, vortex, lamp, shooting-stars, boxes, ripple>",
     "floatingIcons": ["<6-8 Lucide icon names OR emoji strings — only when variant is floating-icons>"],
     "cutouts": [
       {
@@ -484,7 +552,7 @@ Return ONLY valid JSON in this exact shape:
     "secondaryImageIndex": <index from AVAILABLE IMAGES for the small accent tile beside the main about photo, or null — pick a second distinct usable photo>,
     "secondaryImageUrl": null
   },
-  "servicesSection": { "eyebrow": "<short uppercase kicker, e.g. 'What we do'>", "heading": "<punchy, e.g. 'Every job, done properly.'>", "tagline": "<1 short sentence under the heading>" },
+  "servicesSection": { "eyebrow": "<short uppercase kicker, e.g. 'What we do'>", "heading": "<punchy, e.g. 'Every job, done properly.'>", "tagline": "<1 short sentence under the heading>", "variant": "<REQUIRED: pick from the design signature. One of: cards, bento, sticky-scroll, hover-effect, 3d-cards, wobble, glare, expandable>" },
   "services": [
     {
       "title": "...",
@@ -495,9 +563,10 @@ Return ONLY valid JSON in this exact shape:
   "gallery": {
     "eyebrow": "<optional eyebrow, e.g. 'Gallery'>",
     "heading": "<optional, e.g. 'A look around.'>",
-    "imageIndices": [<indices from AVAILABLE IMAGES above>]
+    "imageIndices": [<indices from AVAILABLE IMAGES above>],
+    "variant": "<REQUIRED: pick from the design signature. One of: grid, focus-cards, parallax, apple-carousel, 3d-marquee, layout-grid, compare, direction-aware>"
   },
-  "reviewsSection": { "eyebrow": "<short kicker, e.g. 'Reviews', 'Loved locally'>", "heading": "<e.g. 'What customers say.'>" },
+  "reviewsSection": { "eyebrow": "<short kicker, e.g. 'Reviews', 'Loved locally'>", "heading": "<e.g. 'What customers say.'>", "variant": "<REQUIRED: pick from the design signature. One of: grid, marquee, carousel, masonry, draggable, stack, animated-testimonials>" },
   "reviews": [
     { "text": "<realistic-sounding testimonial>", "author": "<first name + last initial>", "rating": 5 }
   ],
@@ -974,7 +1043,9 @@ export function websitePagePrompt(vars: {
   /** Slugs already in use — Claude must pick a unique slug for the new page. */
   existingSlugs: string[];
 }) {
-  return `You are a senior web designer & copywriter adding ONE new page to an existing website. You have the full current site config for context so the new page matches the brand voice, colour palette, and structure.
+  return `You are a senior web designer & copywriter adding ONE new page to an existing website.
+
+This is CRITICAL: the new page must feel LIKE A COMPLETELY DIFFERENT PAGE from the homepage. Not "the homepage with different text". Different structure, different primary blocks, different visual rhythm.
 
 BUSINESS: "${vars.businessName}" (${vars.industry})
 
@@ -984,8 +1055,32 @@ ${vars.titleHint ? `\nTITLE HINT (may override if a better one fits): ${vars.tit
 SLUGS ALREADY IN USE (cannot be reused): ${vars.existingSlugs.join(', ')}
 
 ${vars.imageDescriptions ? `AVAILABLE IMAGES (reference by index):\n${vars.imageDescriptions}\n` : ''}
-CURRENT SITE CONFIG (for brand voice / services / team / style reference — DO NOT copy home page content verbatim; the new page must have its own copy that fits the brief):
+CURRENT SITE CONFIG (for brand voice / services / team / palette consistency only — DO NOT copy any content):
 ${vars.currentConfigJson}
+
+════════════════════════════════════════════════════════════════════
+PAGE SHAPE — HOW SUB-PAGES SHOULD DIFFER FROM THE HOMEPAGE
+════════════════════════════════════════════════════════════════════
+
+The homepage is a sales pitch — hero + every possible block to convince a
+new visitor. A sub-page is the OPPOSITE: visitors arrived because they
+care about ONE thing. Let them get it fast.
+
+DEFAULT: NO HERO SECTION on sub-pages. Sub-pages lead straight with the
+primary content block. A Menu page leads with the Menu. A Pricing page
+leads with the pricing table. An FAQ page leads with the FAQ.
+
+Only include a hero when the page needs emotional framing before the
+content makes sense — About / Team / Portfolio benefit from a short
+narrative hero; Menu / Prices / Shop / FAQ / Services / Service Areas /
+Schedule do not.
+
+When you DO include a hero, use a COMPACT variant that's obviously
+different from the homepage hero:
+  - "spotlight" or "hero-highlight" for copy-led About / Team pages
+  - NEVER reuse the homepage hero's variant / visual signature
+  - Skip fancy variants (parallax-layers, full-bg-image, meteors, lamp)
+    — those are for the homepage; sub-pages use restrained variants
 
 ════════════════════════════════════════════════════════════════════
 OUTPUT — JSON only. Return a SINGLE PageConfig object — nothing else.
@@ -998,18 +1093,18 @@ OUTPUT — JSON only. Return a SINGLE PageConfig object — nothing else.
     "title": "<SEO page title, ≤60 chars, e.g. 'Menu — ${vars.businessName}'>",
     "description": "<SEO meta description, ≤160 chars>"
   },
-  "layout": ["nav","hero","<block>","<block>","contact","footer"],
+  "layout": ["nav","<primary block>","<supporting block>","footer"],
   "hero": {
-    "eyebrow": "<optional 2-4 word kicker specific to this page, e.g. 'Our work', 'Meet the team'. OMIT the field when no good kicker fits.>",
-    "headline": "<Page-specific headline, 5-10 words, benefit-led. Last 2 words auto-highlight. DIFFERENT from the home page headline — this page has its own message.>",
-    "subheadline": "<1-2 sentences, specific to this page.>",
-    "ctaPrimary": { "label": "<action verb>", "href": "<#contact or relevant section>" },
-    "ctaSecondary": { "label": "<optional>", "href": "<optional>" },
-    "variant": "<optional: override the site's hero.variant for this page only. Default = reuse the home variant. Prefer 'two-column-image' or 'parallax-layers' when this page has a strong photo; 'spotlight' or 'hero-highlight' for copy-led sub-pages like About / Pricing.>",
-    "imageIndex": <optional image index for the hero, or null>
+    <OMIT the hero object entirely when the page doesn't need one. When included, use a COMPACT variant like "spotlight" or "hero-highlight" — NOT the homepage's variant.>
+    "eyebrow": "<optional 2-4 word kicker>",
+    "headline": "<Page-specific headline, 5-10 words>",
+    "subheadline": "<1-2 sentences>",
+    "ctaPrimary": { "label": "<action verb>", "href": "#contact" },
+    "variant": "<spotlight|hero-highlight|ripple — keep it restrained>",
+    "imageIndex": <optional image index, or null>
   },
   "blocks": {
-    <POPULATE the per-page overrides for whatever blocks appear in layout. Example: if layout includes 'menu', include a "menu" object. If layout includes 'team', include a "team" object. Data shape for each block is IDENTICAL to the root WebsiteConfig shape — same field names. See the current site config above for reference.>
+    <POPULATE the per-page overrides for whatever blocks appear in layout. Every block key that appears in "layout" MUST have data here or on the homepage — the renderer falls back to root data for anything not overridden. Data shape matches the root WebsiteConfig shape.>
   }
 }
 
@@ -1017,44 +1112,57 @@ OUTPUT — JSON only. Return a SINGLE PageConfig object — nothing else.
 RULES
 ════════════════════════════════════════════════════════════════════
 
-1. LAYOUT — pick blocks that FIT THE PAGE. Not everything from home.
-   - A "Menu" page → ["nav","hero","menu","gallery","cta","contact","footer"]
-   - An "About" page → ["nav","hero","about","stats","team","reviews","cta","footer"]
-   - A "Team" page → ["nav","hero","team","reviews","contact","footer"]
-   - A "Practice Areas" page (legal) → ["nav","hero","services","faq","cta","contact","footer"]
-   - A "Pricing" page → ["nav","hero","pricingTiers","faq","cta","contact","footer"] or ["nav","hero","priceList","faq","cta","contact","footer"]
-   - A "Shop" page → ["nav","hero","products","faq","contact","footer"]
-   - A "Gallery" / "Portfolio" page → ["nav","hero","portfolio","cta","contact","footer"] or ["nav","hero","beforeAfter","gallery","cta","contact","footer"]
-   - A "Services" page → ["nav","hero","services","process","faq","cta","contact","footer"]
-   - A "Schedule" / "Classes" page → ["nav","hero","schedule","cta","contact","footer"]
-   - A "Service Areas" page → ["nav","hero","serviceAreas","reviews","cta","contact","footer"]
-   - An "FAQ" page → ["nav","hero","faq","cta","contact","footer"]
-   - A generic "Info" / custom page → ["nav","hero","custom","cta","contact","footer"] and populate customSections in blocks.
-   - ALWAYS start with "nav" and end with "footer".
+1. LAYOUT — lead with the primary content, no ceremony.
 
-2. COPY — write real, page-specific content. Do not reuse the home hero headline / subhead. Do not say "coming soon". Do not leave empty strings in required fields. Every field the layout asks for must be populated with real copy.
+   HERO-LESS LAYOUTS (preferred for most sub-pages — lead straight with the content):
+   - A "Menu" page → ["nav","menu","gallery","cta","footer"]
+   - A "Pricing" page → ["nav","pricingTiers","faq","cta","footer"] or ["nav","priceList","faq","cta","footer"]
+   - A "Shop" page → ["nav","products","faq","footer"]
+   - An "FAQ" page → ["nav","faq","cta","footer"]
+   - A "Service Areas" page → ["nav","serviceAreas","reviews","cta","footer"]
+   - A "Schedule" / "Classes" page → ["nav","schedule","cta","footer"]
+   - A "Services" page → ["nav","services","process","faq","cta","footer"]
 
-3. BLOCKS overrides — only include block data in "blocks" for the blocks that appear in "layout" AND need content different from / additional to the home page's data.
-   - For a Menu page, you MUST include a full "menu" object (3-6 categories, 3+ items each).
-   - For a Team page, you MUST include a full "team" object with all members.
-   - For a Portfolio page, you MUST include a "portfolio" object with 3-6 projects.
-   - For a Shop page, populate "products".
-   - For a Pricing page, populate "pricingTiers" or "priceList" depending on the business model.
-   - When a block repeats home content as-is (e.g. "contact" is identical on every page), OMIT it from "blocks" — the renderer falls back to the root config for anything not overridden.
+   LAYOUTS WITH A COMPACT HERO (only when the page needs narrative framing):
+   - An "About" page → ["nav","hero","about","stats","team","reviews","footer"]
+   - A "Team" page → ["nav","hero","team","reviews","footer"]
+   - A "Portfolio" / "Gallery" page → ["nav","hero","portfolio","cta","footer"] or ["nav","hero","beforeAfter","gallery","cta","footer"]
+   - A generic "Info" / custom page → ["nav","hero","custom","cta","footer"] + populate customSections.
 
-4. IMAGE GUIDANCE — only reference indices that exist in AVAILABLE IMAGES. If you need images for a gallery/portfolio/products and there aren't enough in the library, pick the variant/layout that works with what's available (e.g. use "services" cards with icons instead of "products" with image tiles).
+   ALWAYS start with "nav" and end with "footer".
 
-5. SLUG — must be URL-safe, lowercase, dashed. Cannot match any value in the existing-slugs list above. Examples: 'menu', 'our-menu', 'about', 'about-us', 'team', 'our-team', 'practice-areas', 'pricing', 'prices', 'shop', 'gallery', 'portfolio', 'services', 'faq'.
+   NEVER replicate the homepage layout. The sub-page must be STRUCTURALLY DIFFERENT — fewer blocks, focused purpose, skip the "pitch the business" blocks (stats, reviews, about, cta-strip) unless they genuinely support the page's purpose.
 
-6. TITLE — short and human. Fits the nav at small sizes. "Menu" not "Have a look at our menu". "Team" not "Meet our amazing team". Title Case preferred.
+2. COPY — write REAL, page-specific content.
+   - Do not reuse the homepage hero headline / subhead even as inspiration.
+   - Do not reuse homepage service descriptions verbatim.
+   - Do not say "coming soon" or leave placeholder text.
+   - Every field the layout asks for must be populated with real, on-brand copy.
 
-7. BRAND VOICE — re-read the current config's tone / heading style before writing. If the home page uses warm short headings, use warm short headings here too. If the home page uses punchy one-sentence subheadings, use punchy one-sentence subheadings here.
+3. BLOCKS overrides — populate content for EVERY block in "layout".
+   - Menu page → "menu" object with 3-6 categories, 3+ items each.
+   - Team page → "team" object with all members (include bios).
+   - Portfolio page → "portfolio" object with 3-6 projects.
+   - Shop page → "products" object.
+   - Pricing page → "pricingTiers" or "priceList" depending on the business model.
+   - Services page → EXPANDED "services" array (more items than the home page teaser) + "process" block with 3-4 steps.
+   - Service Areas page → "serviceAreas" object with actual town names (pull from homepage if populated).
+   - FAQ page → expanded "faq" array (8-12 honest Q&As, wider than the homepage teaser).
+   - Schedule page → "schedule" with a real weekly grid.
+   - About page → "about" with longer narrative body (3-4 paragraphs) + optional bullets.
+   - When a block repeats the home content as-is (rare — contact / nav / footer only), OMIT it from "blocks" and the renderer falls back.
 
-8. CTAs — point at something on THIS page or on the home page's contact section. Use "#contact" for the contact anchor. If the new page has a contact block in its layout, "#contact" still works (it scrolls to the block on this page).
+4. VISUAL VARIANTS — pick variants that make this page feel distinct from the home.
+   - Set *.variant fields to values that DIFFER from whatever the homepage uses. For example, if the home uses servicesSection.variant "cards", the services page should use "sticky-scroll" or "expandable" so the two pages don't feel identical.
+   - Lean into scroll-driven features on sub-pages: sticky-scroll services, timeline process, animated-testimonials, 3d-marquee galleries, focus-cards galleries.
 
-9. HERO VARIANT — pick a variant that fits this page's personality. Sub-pages commonly use smaller, text-focused heroes (spotlight, hero-highlight, two-column-image) rather than the full flashy home-page hero. Omit the field to inherit the home variant.
+5. IMAGE GUIDANCE — only reference indices that exist in AVAILABLE IMAGES. If the page needs images and there aren't enough, pick a layout that doesn't require them.
 
-10. Return ONLY the JSON PageConfig. No preamble, no code fences, no trailing commentary.`;
+6. SLUG — URL-safe, lowercase, dashed. NOT 'home'. Not in the existing-slugs list. Examples: 'menu', 'about', 'about-us', 'team', 'practice-areas', 'pricing', 'shop', 'gallery', 'portfolio', 'services', 'faq'.
+
+7. TITLE — short and human. Fits in the nav at small sizes. "Menu" not "Have a look at our menu". Title Case.
+
+8. Return ONLY the JSON PageConfig. No preamble, no code fences, no trailing commentary.`;
 }
 
 /**

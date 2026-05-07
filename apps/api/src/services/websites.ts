@@ -30,12 +30,14 @@ import {
   HERO_VARIANTS,
   DEFAULT_ILLUSTRATION_BY_TEMPLATE,
   ILLUSTRATION_STYLES,
+  TEMPLATE_PERSONALITY,
+  hashString,
   slugify,
 } from '@boost/core';
 import { generateJSON } from './claude.js';
 import { scrapeWebsite } from './scraper.js';
 import { websiteConfigPrompt } from './prompts.js';
-import { withRetry } from './retry.js';
+import { withRetry, isDefaultRetryable } from './retry.js';
 import { broadcast } from './realtime.js';
 import { generateHeroImage } from './heroImage.js';
 import { features } from '../env.js';
@@ -57,6 +59,20 @@ export interface GenerateWebsiteArgs {
    * used. Set to false in tests or when the agency explicitly skips it.
    */
   generateHeroImage?: boolean;
+  /**
+   * Optional override for the design-signature seed. By default we hash
+   * the business name so regenerations are stable. Pass a different
+   * string (e.g. Date.now().toString()) when the agency wants a fresh
+   * look — "surprise me" / "try another style".
+   */
+  designSeed?: string;
+
+  /**
+   * Optional model override. Defaults to Opus for full-site generation
+   * (best quality for a one-time, high-stakes operation). Override to
+   * Sonnet / Haiku for speed / cost savings.
+   */
+  model?: 'opus' | 'sonnet' | 'haiku';
 
   /* ── Seeded business facts ──────────────────────────────────────────
    * Passed through to Claude as known-good data it must use verbatim
@@ -102,6 +118,38 @@ export interface GenerateWebsiteArgs {
     detail?: string;
     href?: string;
   }>;
+
+  /* ── Extras — "nice to have" facts that make copy more specific ───── */
+
+  /** Year the business was founded. Drives "Serving since …" style copy. */
+  yearFounded?: string;
+  /** Awards / recognitions received. Free-form short labels. */
+  awards?: string[];
+  /** Press / media mentions (outlet names, optionally with URLs). */
+  pressMentions?: Array<{ outlet: string; quote?: string; href?: string }>;
+  /** Certifications / professional memberships separate from trust badges. */
+  certifications?: string[];
+  /** Languages the business speaks with customers. */
+  languagesSpoken?: string[];
+  /** Accepted payment methods. */
+  paymentMethods?: string[];
+  /** Insurance coverage summary. */
+  insuranceDetails?: string;
+  /** Unique selling points — short punchy differentiators. */
+  uniqueSellingPoints?: string[];
+  /** Who the business targets (persona description). */
+  targetAudience?: string;
+  /** How the business positions vs competitors (one or two sentences). */
+  competitivePositioning?: string;
+  /** Vibe / inspiration links — other sites or moodboards to echo. */
+  inspirationLinks?: string[];
+  /**
+   * Per-image role tagging. Maps an image URL from the client's library
+   * to one or more role tags ("hero", "gallery", "about", "portfolio",
+   * "team", "product") so the generator knows where to place each one.
+   * When empty, the AI distributes images freely.
+   */
+  mediaTags?: Record<string, string[]>;
 }
 
 export async function generateWebsite(args: GenerateWebsiteArgs) {
@@ -168,6 +216,16 @@ export async function generateWebsite(args: GenerateWebsiteArgs) {
   // Template still passed as a HINT — Claude is free to pick a better one.
   const templateHint = args.template ?? inferTemplate(client.industry);
 
+  // Build a template-specific design signature so every site has a
+  // distinct visual flavour. Two plumbers shouldn't look identical —
+  // the hash picks different hero variants for different business names
+  // from the curated per-template shortlists. Pass `designSeed` to
+  // force a new pick on regeneration ("surprise me").
+  const designSignature = buildDesignSignature(
+    templateHint,
+    args.designSeed || client.businessName,
+  );
+
   // 3. Generate config. Retryable because Claude occasionally returns malformed JSON.
   const prompt = websiteConfigPrompt({
     businessName: client.businessName,
@@ -184,12 +242,20 @@ export async function generateWebsite(args: GenerateWebsiteArgs) {
     mediaProfile: mediaProfileSummary,
     template: templateHint,
     suggestions: args.suggestions,
-    seededFacts: buildSeededFacts(args),
+    seededFacts: buildSeededFacts(args, (url) => {
+      const idx = images.findIndex((img) => img.fileUrl === url);
+      return idx >= 0 ? idx : undefined;
+    }),
+    designSignature,
   });
 
   const raw = await withRetry(
-    () => generateJSON<Partial<WebsiteConfig>>(prompt, { model: 'sonnet', maxTokens: 5120 }),
-    { label: `website_config:${client.id}`, attempts: 3 },
+    () => generateJSON<Partial<WebsiteConfig>>(prompt, { model: args.model ?? 'opus', maxTokens: 16384 }),
+    {
+      label: `website_config:${client.id}`,
+      attempts: 3,
+      retryOn: (err) => err instanceof SyntaxError || isDefaultRetryable(err),
+    },
   );
 
   // Claude picks the template — fall back to the hint if it didn't.
@@ -262,6 +328,14 @@ export async function editWebsiteWithAI(args: {
   clientId: string;
   currentConfig: Record<string, any>;
   instruction: string;
+  /**
+   * Which Claude model to use. Defaults to `opus` for the full-config
+   * editor because the instruction space is huge and Opus handles
+   * nuanced edits better. Callers can override (e.g. pass `sonnet`
+   * for a faster / cheaper response when the agency wants speed over
+   * absolute quality).
+   */
+  model?: 'opus' | 'sonnet' | 'haiku';
 }): Promise<{ config: WebsiteConfig; summary: string }> {
   const configJson = JSON.stringify(args.currentConfig, null, 2);
 
@@ -288,14 +362,19 @@ RULES:
 - If asked to change the team block's overall card style ("use minimal cards for the whole team"), set team.variant. Individual member overrides still win.
 - If asked to change the hero style, update brand.heroStyle.
 - If asked to change the hero look/variant, update hero.variant to one of: spotlight, beams, floating-icons, parallax-layers, gradient-mesh, aurora, wavy, sparkles, hero-highlight, dither, multicolor, full-bg-image, two-column-image, meteors, vortex, lamp, shooting-stars, boxes, ripple.
-- If asked to change the hero illustration / prop / scroll object / "flying thing" / "rocket-like object", update hero.illustration. Shape: { style, motion, side, scale, customUrl?, prompt? }.
-  - style (pick one that matches the business): rocket, wrench, coffee-cup, dumbbell, scissors, leaf, house, tooth, pencil, gavel, camera, car, paw, briefcase, shopping-bag.
-  - motion (pick the feel): launch (rocket-style upward flight on scroll), float (gentle bob), drift (diagonal on scroll), orbit (continuous circling), tilt-3d (mouse-follow 3D tilt), parallax (moderate scroll-Y), none (static).
+- If asked to change the hero illustration / prop / scroll object / "flying thing" / "rocket-like object", update hero.illustration. Shape: { hidden?, style, motion, side, scale, motionSpeed?, motionIntensity?, customUrl?, customSvg?, prompt? }.
+  - hidden: set to true when the user asks to HIDE / TURN OFF / DISABLE the illustration without deleting it. Set to false (or omit) to show it.
+  - style (pick one that matches the business): rocket, wrench, coffee-cup, dumbbell, scissors, leaf, house, tooth, pencil, gavel, camera, car, paw, briefcase, shopping-bag, espresso, croissant, pizza-slice, wine-glass, cocktail, ice-cream, cupcake, chef-hat, hair-dryer, lipstick, nail-polish, candle, flower, kettlebell, running-shoe, yoga-pose, stethoscope, pill, heart-pulse, dna, key, couch, lamp, hammer, toolbox, paint-brush, gear, drill, motorcycle, delivery-van, laptop, atom, cpu, gift-box, diamond, book, graduation-cap, apple, palette, film-reel, music-note, tree, mountain, sun, wave, orb, cube-iso, prism, spiral.
+  - motion (pick the feel): launch (rocket-style upward flight on scroll), float (gentle bob), drift (diagonal on scroll), orbit (continuous circling), tilt-3d (mouse-follow 3D tilt), parallax (moderate scroll-Y), pulse (gentle breathing scale), spin (slow rotation — best for round shapes like gears, dna, orb), sway (metronome rotation), wobble (playful jiggle), bounce (rhythmic vertical bounce), shake (occasional horizontal shake, attention-grabbing), zoom-in (scroll-driven scale-up), flip-y (Y-axis flip on mount), reveal (cinematic slide-up with fade), fade-in (scroll-driven opacity), slide-in (enters from off-canvas), none (static).
   - side: left or right. Default right.
   - scale: 0.5 to 1.5 multiplier. Default 1.
+  - motionSpeed: 0.25 to 4 multiplier. 1 = default; >1 faster; <1 slower. Only affects keyframe presets (float, orbit, pulse, spin, sway, wobble, bounce).
+  - motionIntensity: 0.1 to 3 multiplier. 1 = default; >1 bigger travel; <1 subtler. Applies to all presets.
   - customUrl: set ONLY if the agency explicitly uploaded an image. Don't invent URLs. When set, style is ignored.
+  - customSvg: inline SVG markup — set ONLY if the agency pasted/generated one via the SVG Studio. Don't invent markup; changing it here directly is fine for shape tweaks but cannot be created from thin air.
   - prompt: short brief stored alongside the illustration so later edits can reference it.
-- If asked to GENERATE a brand-new bespoke illustration ("draw me a donut for the hero", "generate a new illustration of X"), set hero.illustration.prompt to a descriptive brief (so the dedicated Illustration editor picks it up) AND pick the nearest built-in style from the list above as a fallback. Also mention in the summary that the user should click "Generate" in the Illustration editor to actually render the bespoke image. Do NOT invent a customUrl — image generation is a separate endpoint.
+- If asked to HIDE or TURN OFF the illustration (without fully deleting), set hero.illustration.hidden to true. If asked to SHOW or TURN ON again, set it to false.
+- If asked to GENERATE a brand-new bespoke illustration ("draw me a donut for the hero", "generate a new illustration of X", "make it more realistic"), set hero.illustration.prompt to a descriptive brief (so the dedicated Illustration editor picks it up) AND pick the nearest built-in style from the list above as a fallback. Also mention in the summary that the user should click "Generate" in the Illustration editor to actually render the bespoke image. Do NOT invent a customUrl — image generation is a separate endpoint.
 - If asked to remove the hero illustration, set hero.illustration to null (or remove the field entirely).
 - If asked for a typewriter / typing / flipping-words / generative text effect on the headline, set hero.headlineEffect to one of: typewriter (types character-by-character), flip-words (last word cycles — also populate hero.flipWords with 2-5 alternatives), generate (words fade in one-by-one). Clear this field to go back to the static gradient headline.
 - If asked to change the testimonials style, update reviewsSection.variant to one of: grid (default), marquee (auto-scroll), carousel (one at a time with avatars), masonry, draggable (physical drag-around cards), stack (cycling card-stack), animated-testimonials.
@@ -339,6 +418,8 @@ RULES:
 - If asked to make the design "more minimal" / "more energetic" / "more premium", adjust brand.tone (warm / professional / playful / premium) AND pick a hero variant + colour palette that matches (premium → spotlight/lamp + navy/gold; playful → multicolor/boxes + brighter palette; minimal → hero-highlight/spotlight + neutral palette).
 - If asked to regenerate the AI hero PHOTO / background image / "hero photo" (different from the SVG illustration above), set hero.aiImagePrompt to a new descriptive prompt and leave hero.aiImageUrl null — the backend regenerates the actual image separately. Don't invent URLs.
 - If asked to feature ALL items in a block ("feature every review"), set every item's .featured to true. If asked to unfeature everything, set every .featured to false.
+- If asked to add a decorative background to a specific SECTION (not the hero — hero has its own variant system) like "add a grid background to the services section", "put dots behind the reviews", "add particles to the FAQ", "meteors behind the CTA", update "sectionBackgrounds" — a map of block key → { kind, opacity?, tint? }. Valid kinds: none, grid, dots, noise, gradient, mesh, particles, sparkles, meteors, beams, ripple, shooting-stars. The tint defaults to the brand primary — only set it when the user explicitly asks for a colour ("purple particles behind the team"). The opacity is 0–1; sensible defaults are already baked in so you usually just set the kind. Block keys to target: services, about, gallery, reviews, faq, contact, menu, priceList, team, schedule, serviceAreas, beforeAfter, trustBadges, cta, products, portfolio, process, pricingTiers, logoStrip, video, newsletter, custom.
+- If asked to REMOVE a section background ("take off the grid from the services"), set sectionBackgrounds.<block>.kind to "none" OR delete the entry entirely.
 - Keep the same JSON structure — don't add or remove top-level keys.
 - The summary should be concise and specific, e.g. "Changed primary color to navy blue and made the hero dark."`;
 
@@ -352,11 +433,36 @@ RULES:
 
   const result = await withRetry(
     () => generateJSON<{ config: Partial<WebsiteConfig>; summary: string }>(prompt, {
-      model: 'sonnet',
-      maxTokens: 5120,
+      // Default to Opus (best quality for nuanced edits across the full
+      // config). Callers can override to Sonnet / Haiku for faster /
+      // cheaper edits when the instruction is small.
+      model: args.model ?? 'opus',
+      // Max output for claude-opus-4-7. Full WebsiteConfigs with a
+      // populated menu / team / reviews can easily exceed 5k tokens and
+      // get truncated, which throws `JSON.parse` downstream.
+      maxTokens: 16384,
       temperature: 0.3,
     }),
-    { label: `edit_website:${args.clientId}`, attempts: 2 },
+    {
+      label: `edit_website:${args.clientId}`,
+      attempts: 3,
+      // JSON.parse SyntaxErrors from truncated Claude output are
+      // worth retrying — they resolve on the next attempt because
+      // Claude's output is non-deterministic and often fits the
+      // token budget on a second try.
+      retryOn: (err) => {
+        const anyErr = err as any;
+        if (err instanceof SyntaxError) return true;
+        const status: number | undefined = anyErr?.status ?? anyErr?.response?.status;
+        const code: string | undefined = anyErr?.code ?? anyErr?.name;
+        if (status) return status === 429 || (status >= 500 && status < 600);
+        if (code === 'ETIMEDOUT' || code === 'ECONNRESET' || code === 'AbortError') return true;
+        if (anyErr?.message && /timeout|rate limit|overloaded/i.test(anyErr.message)) {
+          return true;
+        }
+        return false;
+      },
+    },
   );
 
   const template = (result.config?.template ?? args.currentConfig.template ?? 'service') as SiteTemplate;
@@ -399,6 +505,8 @@ export async function generateWebsitePage(args: {
   brief: string;
   /** Optional agency-provided title hint (e.g. "Menu"). Claude may override. */
   titleHint?: string;
+  /** Optional model override. Defaults to `opus` — page generation is one-time + high stakes. */
+  model?: 'opus' | 'sonnet' | 'haiku';
 }): Promise<{
   config: WebsiteConfig;
   page: NonNullable<WebsiteConfig['pages']>[number];
@@ -501,9 +609,13 @@ export async function generateWebsitePage(args: {
     () =>
       generateJSON<Partial<NonNullable<WebsiteConfig['pages']>[number]>>(
         prompt,
-        { model: 'sonnet', maxTokens: 5120, temperature: 0.4 },
+        { model: args.model ?? 'opus', maxTokens: 16384, temperature: 0.6 },
       ),
-    { label: `generate_page:${client.id}`, attempts: 2 },
+    {
+      label: `generate_page:${client.id}`,
+      attempts: 3,
+      retryOn: (err) => err instanceof SyntaxError || isDefaultRetryable(err),
+    },
   );
 
   const page = validateGeneratedPage(rawPage, existingSlugs);
@@ -1064,6 +1176,17 @@ function normalizeIllustration(
     'orbit',
     'tilt-3d',
     'parallax',
+    'pulse',
+    'spin',
+    'sway',
+    'wobble',
+    'zoom-in',
+    'flip-y',
+    'bounce',
+    'shake',
+    'reveal',
+    'fade-in',
+    'slide-in',
     'none',
   ];
 
@@ -1096,7 +1219,38 @@ function normalizeIllustration(
   const prompt =
     typeof raw?.prompt === 'string' ? raw.prompt.slice(0, 500) : undefined;
 
-  return { style, motion, side, scale, customUrl, prompt };
+  const hidden = raw?.hidden === true ? true : undefined;
+
+  const motionSpeed =
+    typeof raw?.motionSpeed === 'number' && Number.isFinite(raw.motionSpeed)
+      ? Math.max(0.25, Math.min(4, raw.motionSpeed))
+      : undefined;
+
+  const motionIntensity =
+    typeof raw?.motionIntensity === 'number' && Number.isFinite(raw.motionIntensity)
+      ? Math.max(0.1, Math.min(3, raw.motionIntensity))
+      : undefined;
+
+  // customSvg is sanitised when it enters the system via /generate-svg
+  // and /sanitize-svg. We accept whatever the DB already has — it's
+  // trusted because we put it there. Length cap as a simple guard.
+  const customSvg =
+    typeof raw?.customSvg === 'string' && raw.customSvg.trim().length > 0
+      ? raw.customSvg.slice(0, 200_000)
+      : undefined;
+
+  return {
+    hidden,
+    style,
+    motion,
+    side,
+    scale,
+    customUrl,
+    prompt,
+    motionSpeed,
+    motionIntensity,
+    customSvg,
+  };
 }
 
 /**
@@ -1226,6 +1380,15 @@ function inferTemplate(industry: string | null | undefined): SiteTemplate {
   if (/fitness|gym|coach|yoga|pilates|crossfit|bootcamp|personal.?train/.test(i)) return 'fitness';
   if (/law|solicitor|attorney|legal|barrister|court/.test(i)) return 'legal';
   if (/accounting|consult|agency|finance|insurance|advisory|audit|bookkeep/.test(i)) return 'professional';
+  // Events templates — wedding planners, event venues, caterers. Check
+  // BEFORE retail so a "wedding boutique" catches events first. Also
+  // catches "venue" / "florist" when paired with wedding keywords.
+  if (/wedding|event.?plan|venue|florist.*wedding|celebrant|dj|band.*hire|marquee/.test(i))
+    return 'events';
+  // Home services — landscapers, painters, roofers, builders. Check
+  // BEFORE `service` / `retail` so these get their own personality.
+  if (/landscap|garden|paint|roof|build(er|ing)?|plast|carpen|floor|kitchen.?fit|bathroom.?fit|tile|extension/.test(i))
+    return 'homeservices';
   if (/retail|shop|store|boutique|ecommerce|fashion|clothing|gift/.test(i)) return 'retail';
   if (/medical|dental|doctor|clinic|physio|therapy|chiro|health.?care/.test(i)) return 'medical';
   if (/design|photo|art|creative|studio|music|film|video|brand/.test(i)) return 'creative';
@@ -1254,6 +1417,8 @@ const TEMPLATE_DEFAULTS: Record<SiteTemplate, { primary: string; accent: string 
   legal: { primary: '#1e3a8a', accent: '#b45309' },
   nonprofit: { primary: '#059669', accent: '#f59e0b' },
   tech: { primary: '#4338ca', accent: '#06b6d4' },
+  events: { primary: '#7c2d12', accent: '#f5d0a9' },
+  homeservices: { primary: '#166534', accent: '#f59e0b' },
 };
 
 /**
@@ -1366,6 +1531,105 @@ function formatMediaProfile(profile: MediaProfile): string {
 }
 
 /**
+ * Build the "DESIGN SIGNATURE" block for the prompt from the template
+ * personality map. Adds a per-business seed so two sites with the same
+ * template pick DIFFERENT hero variants from the curated shortlist —
+ * "Murphy's Plumbing" gets parallax-layers, "Swift Gas" gets
+ * two-column-image. The rest of the signature (services style, gallery
+ * style, stats style, etc.) is template-wide so every plumber's site
+ * still feels like a plumber's site.
+ *
+ * Returns undefined when the template isn't in the map (shouldn't happen
+ * given the map covers every SiteTemplate, but kept defensive).
+ */
+function buildDesignSignature(
+  template: SiteTemplate,
+  businessName: string,
+): string | undefined {
+  const personality = TEMPLATE_PERSONALITY[template];
+  if (!personality) return undefined;
+
+  const seed = hashString(businessName || template);
+
+  // Seeded pick helper — same business name always maps to the same
+  // variant so regenerations stay stable, but different businesses get
+  // different looks.
+  const pick = <T,>(options: readonly T[], salt: number): T =>
+    options[(seed + salt) % options.length]!;
+
+  const heroVariant = pick(personality.heroVariants, 0);
+  const servicesVariant = pick(personality.servicesVariants, 1);
+  const galleryVariant = pick(personality.galleryVariants, 2);
+  const reviewsVariant = pick(personality.reviewsVariants, 3);
+  const ctaVariant = pick(personality.ctaVariants, 4);
+
+  // "Mood" rotations — additional seeded choices that push the site
+  // further from generic. Three moods per template ensure two sites
+  // with the same template but different names actually LOOK
+  // different, not just in hero variant but in overall feel.
+  const MOODS: Array<{
+    name: string;
+    directive: string;
+  }> = [
+    {
+      name: 'bold',
+      directive:
+        'Lean into strong pop colours, dense use of motion, big typography, and a "confident local legend" tone. Use "bento" or "3d-cards" variants where available. Pick a dark heroStyle when the palette supports it.',
+    },
+    {
+      name: 'warm-editorial',
+      directive:
+        'Lean into calm, editorial layouts. Generous whitespace, softer saturation, long-form copy in about, and a "trusted neighbour" tone. Favour "sticky-scroll", "focus-cards", and "animated-testimonials" variants. Use "typewriter" or "generate" headline effects.',
+    },
+    {
+      name: 'playful-modern',
+      directive:
+        'Lean into motion and surprise. Use "multicolor" / "boxes" / "vortex" heroes when shortlisted, "draggable" or "masonry" reviews, "apple-carousel" or "3d-marquee" galleries. Use "flip-words" headline effects. Add a small announcement bar for seasonal energy if it makes sense.',
+    },
+  ];
+  const mood = MOODS[seed % MOODS.length]!;
+
+  return `DESIGN SIGNATURE — treat this as authoritative style direction. Use these variants for THIS specific business. The seeded picks below are computed from the business name, so different clients of the same template will ALWAYS get different picks. Do NOT substitute your own "safer" choices.
+
+── VARIANT PICKS (copy these into the matching .variant fields) ──
+Hero variant:                   ${heroVariant}
+servicesSection.variant:        ${servicesVariant}
+gallery.variant:                ${galleryVariant}
+reviewsSection.variant:         ${reviewsVariant}
+cta.variant:                    ${ctaVariant}
+process.variant:                ${personality.processVariant}
+statsSection.variant:           ${personality.statsVariant}
+team.variant:                   ${personality.teamVariant}
+contact.variant:                ${personality.contactVariant}
+faqSection.variant:             ${personality.faqVariant}
+hero.headlineEffect:            ${personality.headlineEffect}${
+    personality.headlineEffect === 'flip-words'
+      ? ' (populate hero.flipWords with 3-5 alternatives for the last word)'
+      : ''
+  }
+
+── SIGNATURE VISUAL FEATURE ──
+${personality.signature}
+This is the "wow" moment of the site. Build the layout around it so it gets prime real estate — don't bury it below 6 other blocks. Skip blocks that would distract from it.
+
+── PALETTE DIRECTION ──
+${personality.paletteHints}
+
+── BRAND TONE ──
+${personality.toneWords}
+
+── MOOD (${mood.name}) ──
+${mood.directive}
+
+── ANTI-BOILERPLATE ──
+Plain is the enemy. Sites that use 3 out of 20 available visual features are indistinguishable from bootstrap templates. For THIS business:
+- Use the variant picks above verbatim. Do not substitute "cards" or "grid" for "bento" or "3d-marquee" because those feel safer.
+- If the brief fits, add AT LEAST ONE scroll-driven or 3D block (3d-marquee gallery, sticky-scroll services, animated-testimonials reviews, timeline process, container-scroll moment).
+- Two cafes should not look the same. Two plumbers should not look the same. A cafe called "The Gas Lantern" and a cafe called "Murphy's" should feel like entirely different brands even though they're both food-template.
+- Avoid the default cards-grid-marquee-accordion combo unless the design signature explicitly recommends it.`;
+}
+
+/**
  * Turn the seeded-facts subset of `GenerateWebsiteArgs` into a
  * human-readable block Claude can consume as authoritative context.
  * These aren't suggestions — they're facts the agency has typed in.
@@ -1373,7 +1637,10 @@ function formatMediaProfile(profile: MediaProfile): string {
  * Returns undefined when nothing was seeded so we don't pad the prompt
  * with an empty section.
  */
-function buildSeededFacts(args: GenerateWebsiteArgs): string | undefined {
+function buildSeededFacts(
+  args: GenerateWebsiteArgs,
+  resolveImageIndex?: (url: string) => number | undefined,
+): string | undefined {
   const lines: string[] = [];
   if (args.address) lines.push(`Address: ${args.address}`);
   if (args.phone) lines.push(`Phone: ${args.phone}`);
@@ -1416,6 +1683,67 @@ function buildSeededFacts(args: GenerateWebsiteArgs): string | undefined {
           .map((b) => `  - ${b.label}${b.detail ? ` — ${b.detail}` : ''}`)
           .join('\n'),
     );
+  }
+
+  if (args.yearFounded) lines.push(`Year founded: ${args.yearFounded}`);
+  if (args.awards && args.awards.length > 0) {
+    lines.push(`Awards / recognitions:\n` + args.awards.map((a) => `  - ${a}`).join('\n'));
+  }
+  if (args.pressMentions && args.pressMentions.length > 0) {
+    lines.push(
+      `Press / media mentions:\n` +
+        args.pressMentions
+          .map((p) => `  - ${p.outlet}${p.quote ? `: "${p.quote}"` : ''}`)
+          .join('\n'),
+    );
+  }
+  if (args.certifications && args.certifications.length > 0) {
+    lines.push(`Certifications: ${args.certifications.join(', ')}`);
+  }
+  if (args.languagesSpoken && args.languagesSpoken.length > 0) {
+    lines.push(`Languages spoken: ${args.languagesSpoken.join(', ')}`);
+  }
+  if (args.paymentMethods && args.paymentMethods.length > 0) {
+    lines.push(`Payment methods accepted: ${args.paymentMethods.join(', ')}`);
+  }
+  if (args.insuranceDetails) lines.push(`Insurance: ${args.insuranceDetails}`);
+  if (args.uniqueSellingPoints && args.uniqueSellingPoints.length > 0) {
+    lines.push(
+      `Unique selling points (emphasise these):\n` +
+        args.uniqueSellingPoints.map((u) => `  - ${u}`).join('\n'),
+    );
+  }
+  if (args.targetAudience) lines.push(`Target audience: ${args.targetAudience}`);
+  if (args.competitivePositioning) {
+    lines.push(`Competitive positioning: ${args.competitivePositioning}`);
+  }
+  if (args.inspirationLinks && args.inspirationLinks.length > 0) {
+    lines.push(
+      `Inspiration / vibe references (echo their tone, not their copy):\n` +
+        args.inspirationLinks.map((l) => `  - ${l}`).join('\n'),
+    );
+  }
+  if (args.mediaTags && Object.keys(args.mediaTags).length > 0) {
+    // Map URL → agency-supplied role tags. When we've been handed the
+    // full image list upstream we can resolve the URL back to its
+    // `[idx]` slot in the AVAILABLE IMAGES block so Claude has a direct
+    // reference. Otherwise (index unknown) we still emit the URL so
+    // the prompt has the tagging intent, just less precisely.
+    const tagLines = Object.entries(args.mediaTags)
+      .filter(([, tags]) => tags.length > 0)
+      .map(([url, tags]) => {
+        const idx = resolveImageIndex
+          ? resolveImageIndex(url)
+          : undefined;
+        const prefix = typeof idx === 'number' ? `[${idx}] ` : '';
+        return `  - ${prefix}${url}  →  ${tags.join(', ')}`;
+      });
+    if (tagLines.length > 0) {
+      lines.push(
+        `Agency-tagged media roles (place each image in the tagged section; [idx] references AVAILABLE IMAGES above):\n` +
+          tagLines.join('\n'),
+      );
+    }
   }
 
   return lines.length > 0 ? lines.join('\n\n') : undefined;
@@ -1645,4 +1973,348 @@ function demoConfig(name: string, industry: string, template: SiteTemplate): Web
     },
     navigation: ['Home', 'Services', 'About', 'Reviews', 'Contact'],
   };
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════ */
+/* Scoped AI edits — cheap, targeted updates to a single top-level key  */
+/* ═══════════════════════════════════════════════════════════════════ */
+
+/**
+ * Return value of a scoped AI edit. Only the changed slice of the config
+ * comes back from Claude, and the caller gets the already-merged full
+ * config alongside.
+ */
+export interface ScopedEditResult {
+  /** The merged config after applying the patch. */
+  config: WebsiteConfig;
+  /** Short, human-readable summary of what changed. */
+  summary: string;
+}
+
+/**
+ * AI-driven patch to a single top-level config key (e.g. "hero",
+ * "brand", "pages.0.hero"). Unlike `editWebsiteWithAI` — which asks
+ * Claude to return the ENTIRE WebsiteConfig on every tweak and often
+ * exceeds the output token budget on big sites — this builds a compact
+ * prompt scoped to one slice of the config and returns just that slice.
+ *
+ * The endpoint still persists the full merged config so callers don't
+ * have to reason about partial updates.
+ *
+ * Used by:
+ *   - The floating "Ask AI" chat in the preview (scope="root")
+ *   - The illustration editor's inline tweaks (scope="hero.illustration")
+ *
+ * When `scope` is undefined we fall back to the full `editWebsiteWithAI`
+ * path — for very broad instructions ("redesign the whole site") the
+ * scoped path isn't expressive enough.
+ */
+export async function editWebsiteScopedWithAI(args: {
+  clientId: string;
+  currentConfig: Record<string, any>;
+  instruction: string;
+  /** Path into the config to scope the edit. "hero", "brand", "hero.illustration", etc. Undefined = full-config fallback. */
+  scope?: string;
+  /** Optional model override. Defaults to `sonnet` — scoped edits are small/cheap. */
+  model?: 'opus' | 'sonnet' | 'haiku';
+}): Promise<ScopedEditResult> {
+  // Very broad instructions ("redesign the site", "make it dark") need
+  // the full config path — scoped prompts would produce incoherent
+  // edits. We sniff for those keywords and delegate upstream.
+  const broadKeywords = /(redesign|overhaul|completely|from scratch|rebuild)/i;
+  if (!args.scope || broadKeywords.test(args.instruction)) {
+    return editWebsiteWithAI(args);
+  }
+
+  // Illustration-specific routing. When the agency asks to draw / render
+  // / make a MORE REALISTIC version, they want a new bespoke illustration
+  // rendered via fal.ai — NOT a different preset style (there's no
+  // "realistic" preset). Detect that intent and route to the image
+  // generator so the AI can actually produce what the user described.
+  if (args.scope === 'hero.illustration') {
+    const wantsBespoke =
+      /(realistic|photorealistic|photo[- ]?real|render|draw|make.*photo|more.*detail|3d render|sketch|painted|illustrated|detailed|custom image|bespoke|hand[- ]?drawn)/i.test(
+        args.instruction,
+      );
+    if (wantsBespoke) {
+      return routeToBespokeIllustration(args);
+    }
+  }
+
+  const scope = args.scope;
+  const scopedValue = getPath(args.currentConfig, scope);
+
+  // When the slice doesn't exist yet, build the prompt with an empty
+  // placeholder so Claude creates a new object rather than trying to
+  // reference something that isn't there. This makes "enable the hero
+  // illustration" work as a first-time creation from the scoped endpoint.
+  const effectiveCurrent = scopedValue ?? {};
+  const compactCurrent = JSON.stringify(effectiveCurrent, null, 2);
+  const brandHint =
+    args.currentConfig?.brand && typeof args.currentConfig.brand === 'object'
+      ? `Brand palette: primary ${args.currentConfig.brand.primaryColor ?? '?'}, accent ${args.currentConfig.brand.accentColor ?? '?'}, tone ${args.currentConfig.brand.tone ?? '?'}.`
+      : '';
+
+  const prompt = `You are a website editor AI. The agency wants to tweak the "${scope}" slice of the site config.
+
+CURRENT VALUE AT "${scope}":
+${compactCurrent}
+
+${brandHint}
+
+INSTRUCTION: ${args.instruction}
+
+Apply the change and return ONLY valid JSON with this exact shape:
+{
+  "value": <the full updated value that replaces the current "${scope}" slice — same JSON shape as the current value>,
+  "summary": "<1-2 sentence description of what you changed>"
+}
+
+Rules:
+- Preserve all existing fields you weren't asked to change.
+- Never invent URLs or data that the agency didn't mention.
+- When the instruction refers to hero.illustration fields (style, motion, side, scale, motionSpeed, motionIntensity, customUrl, customSvg, prompt), the list of valid values is:
+  - style: rocket, wrench, coffee-cup, dumbbell, scissors, leaf, house, tooth, pencil, gavel, camera, car, paw, briefcase, shopping-bag, espresso, croissant, pizza-slice, wine-glass, cocktail, ice-cream, cupcake, chef-hat, hair-dryer, lipstick, nail-polish, candle, flower, kettlebell, running-shoe, yoga-pose, stethoscope, pill, heart-pulse, dna, key, couch, lamp, hammer, toolbox, paint-brush, gear, drill, motorcycle, delivery-van, laptop, atom, cpu, gift-box, diamond, book, graduation-cap, apple, palette, film-reel, music-note, tree, mountain, sun, wave, orb, cube-iso, prism, spiral
+  - motion: launch, float, drift, orbit, tilt-3d, parallax, pulse, spin, sway, wobble, bounce, shake, zoom-in, flip-y, reveal, fade-in, slide-in, none
+  - side: left, right
+  - scale: number 0.5..1.5
+  - motionSpeed: number 0.25..4 (1 = default, higher = faster)
+  - motionIntensity: number 0.1..3 (1 = default, higher = bigger travel)
+- When the instruction asks to remove the slice entirely, return {"value": null, "summary": "..."}.
+- Keep the same JSON shape — don't add new top-level keys to the value.`;
+
+  if (!features.claude) {
+    return {
+      config: args.currentConfig as WebsiteConfig,
+      summary: `Mock mode: would apply "${args.instruction}" to "${scope}".`,
+    };
+  }
+
+  const result = await withRetry(
+    () =>
+      generateJSON<{ value: unknown; summary: string }>(prompt, {
+        // Default to Sonnet for scoped edits — fast and cheap for small
+        // patches. The agency can override to Opus via the chat model
+        // picker when a particular edit needs more reasoning.
+        model: args.model ?? 'sonnet',
+        maxTokens: 2048,
+        temperature: 0.3,
+      }),
+    {
+      label: `scoped_edit:${args.clientId}:${scope}`,
+      attempts: 3,
+      retryOn: (err) => err instanceof SyntaxError || isDefaultRetryable(err),
+    },
+  );
+
+  // Merge the scoped value back into the full config. `null` means remove.
+  const merged = structuredClone(args.currentConfig) as Record<string, any>;
+  setPath(merged, scope.split('.'), result.value);
+
+  // Normalize the result using the template from the merged config so
+  // sanitize/defaults stay consistent with fresh generations.
+  const template = (merged.template ?? 'service') as SiteTemplate;
+  const normalized = normalizeConfig(merged as Partial<WebsiteConfig>, template);
+
+  if (isDbConfigured()) {
+    const db = getDb();
+    await db
+      .update(clients)
+      .set({ websiteConfig: normalized as any, websiteGeneratedAt: new Date() })
+      .where(eq(clients.id, args.clientId));
+  }
+
+  return {
+    config: normalized,
+    summary: result.summary?.slice(0, 500) ?? 'Updated.',
+  };
+}
+
+/**
+ * Read a dotted path out of a nested object. Returns `undefined` when
+ * any segment is missing. Mirrors the writer (`setPath`) above.
+ */
+function getPath(target: unknown, path: string): unknown {
+  const segments = path.split('.').filter(Boolean);
+  let cursor: any = target;
+  for (const seg of segments) {
+    if (cursor == null || typeof cursor !== 'object') return undefined;
+    cursor = cursor[seg];
+  }
+  return cursor;
+}
+
+
+/**
+ * Route an illustration-scope instruction that asks for bespoke artwork
+ * to the fal.ai-backed `generateHeroIllustration` endpoint. Also parses
+ * any motion / side / scale hints out of the same instruction so the
+ * agency can say "make the coffee cup more realistic and have it move
+ * on scroll" in a single message.
+ *
+ * Returns in the same shape as `editWebsiteScopedWithAI` so the caller
+ * doesn't know (or need to know) we routed through a different pipeline.
+ */
+async function routeToBespokeIllustration(args: {
+  clientId: string;
+  currentConfig: Record<string, any>;
+  instruction: string;
+}): Promise<ScopedEditResult> {
+  const { generateHeroIllustration } = await import('./heroImage.js');
+
+  // Pull a brief out of the instruction. When the user's message is
+  // short (like "make it more realistic"), combine it with the current
+  // style hint so Claude's image-prompt writer has something to work
+  // with. When the user's message is descriptive on its own, use it
+  // directly.
+  const currentIllustration = (args.currentConfig.hero?.illustration ?? {}) as {
+    style?: string;
+    prompt?: string;
+  };
+  const styleHint = currentIllustration.style
+    ? `a ${currentIllustration.style.replace(/-/g, ' ')}`
+    : 'a stylised brand object';
+  const existingPrompt = currentIllustration.prompt ?? '';
+  const brief = args.instruction.length > 40
+    ? args.instruction
+    : `${existingPrompt ? existingPrompt + '. ' : ''}${styleHint} — ${args.instruction}`;
+
+  const businessName = await getBusinessName(args.clientId);
+  const industry = await getIndustry(args.clientId);
+
+  // Kick off the image generation (this also persists hero.illustration
+  // with the new customUrl on the client row).
+  const genResult = await generateHeroIllustration({
+    clientId: args.clientId,
+    businessName,
+    industry,
+    brief,
+    primaryColor: args.currentConfig.brand?.primaryColor,
+    accentColor: args.currentConfig.brand?.accentColor,
+  });
+
+  // Parse motion / side / scale hints from the same instruction — the
+  // user often asks for multiple things at once.
+  const motionParsed = parseMotionHint(args.instruction);
+  const sideParsed = parseSideHint(args.instruction);
+  const scaleParsed = parseScaleHint(args.instruction);
+
+  // Re-read the fresh config from the DB (generateHeroIllustration
+  // already persisted the customUrl) so we stack our motion/side/scale
+  // patch on top without stomping it.
+  if (!isDbConfigured()) {
+    // Mock path — just build a best-effort response.
+    return {
+      config: args.currentConfig as WebsiteConfig,
+      summary: `Generated a new bespoke illustration: "${brief.slice(0, 80)}${brief.length > 80 ? '…' : ''}"`,
+    };
+  }
+  const db = getDb();
+  const [row] = await db
+    .select({ websiteConfig: clients.websiteConfig })
+    .from(clients)
+    .where(eq(clients.id, args.clientId));
+  const refreshed = (row?.websiteConfig ?? args.currentConfig) as Partial<WebsiteConfig>;
+
+  const mergedIllustration = {
+    ...(refreshed.hero?.illustration ?? {}),
+    ...(motionParsed ? { motion: motionParsed } : {}),
+    ...(sideParsed ? { side: sideParsed } : {}),
+    ...(scaleParsed != null ? { scale: scaleParsed } : {}),
+  };
+
+  const next: Partial<WebsiteConfig> = {
+    ...refreshed,
+    hero: {
+      ...(refreshed.hero ?? {
+        headline: '',
+        subheadline: '',
+        imageIndex: null,
+        ctaPrimary: { label: '', href: '' },
+      }),
+      illustration: mergedIllustration,
+    } as WebsiteConfig['hero'],
+  };
+
+  const template = (refreshed.template ?? 'service') as SiteTemplate;
+  const normalized = normalizeConfig(next, template);
+
+  await db
+    .update(clients)
+    .set({ websiteConfig: normalized as any, websiteGeneratedAt: new Date() })
+    .where(eq(clients.id, args.clientId));
+
+  const parts: string[] = [];
+  parts.push('Generated a bespoke illustration');
+  if (motionParsed) parts.push(`motion → ${motionParsed}`);
+  if (sideParsed) parts.push(`side → ${sideParsed}`);
+  if (scaleParsed != null) parts.push(`size → ${scaleParsed.toFixed(2)}×`);
+  parts.push(genResult.fromMock ? '(mock image — fal.ai not configured)' : '');
+
+  return {
+    config: normalized,
+    summary: parts.filter(Boolean).join(' · '),
+  };
+}
+
+/** Parse motion hints out of freeform text. */
+function parseMotionHint(text: string): HeroIllustrationMotion | undefined {
+  const t = text.toLowerCase();
+  if (/tilt[- ]?3d|3d tilt|mouse follow|follow.*cursor/.test(t)) return 'tilt-3d';
+  if (/launch|rocket|fly up|shoot up/.test(t)) return 'launch';
+  if (/parallax|scroll[- ]?driven|moves? on scroll|scroll motion|scroll effect/.test(t))
+    return 'parallax';
+  if (/\bdrift|diagonal/.test(t)) return 'drift';
+  if (/orbit|circul/.test(t)) return 'orbit';
+  if (/\bfloat|gentle bob|bob|hover/.test(t)) return 'float';
+  if (/no motion|static|stop moving|don'?t move|stay still/.test(t)) return 'none';
+  return undefined;
+}
+
+/** Parse side hints ("move it left"). */
+function parseSideHint(text: string): 'left' | 'right' | undefined {
+  const t = text.toLowerCase();
+  if (/on the right|to the right|right side|right hand/.test(t)) return 'right';
+  if (/on the left|to the left|left side|left hand/.test(t)) return 'left';
+  return undefined;
+}
+
+/** Parse scale hints ("bigger / smaller / twice as big"). */
+function parseScaleHint(text: string): number | undefined {
+  const t = text.toLowerCase();
+  if (/much bigger|way bigger|massive/.test(t)) return 1.4;
+  if (/bigger|larger|increase/.test(t)) return 1.2;
+  if (/much smaller|tiny/.test(t)) return 0.6;
+  if (/smaller|shrink/.test(t)) return 0.85;
+  const m = t.match(/(\d+(?:\.\d+)?)\s*(?:x|times|multiplier|scale)/);
+  if (m) {
+    const n = Number(m[1]);
+    if (Number.isFinite(n) && n >= 0.3 && n <= 2.0) {
+      return Math.max(0.5, Math.min(1.5, n));
+    }
+  }
+  return undefined;
+}
+
+/** Fetch the client's business name. Used by routeToBespokeIllustration. */
+async function getBusinessName(clientId: string): Promise<string> {
+  if (!isDbConfigured()) return 'Business';
+  const db = getDb();
+  const [row] = await db
+    .select({ businessName: clients.businessName })
+    .from(clients)
+    .where(eq(clients.id, clientId));
+  return row?.businessName ?? 'Business';
+}
+
+/** Fetch the client's industry. Used by routeToBespokeIllustration. */
+async function getIndustry(clientId: string): Promise<string> {
+  if (!isDbConfigured()) return 'Local Business';
+  const db = getDb();
+  const [row] = await db
+    .select({ industry: clients.industry })
+    .from(clients)
+    .where(eq(clients.id, clientId));
+  return row?.industry ?? 'Local Business';
 }

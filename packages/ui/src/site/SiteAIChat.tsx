@@ -15,7 +15,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MessageSquare, Send, X, Sparkles, Loader2 } from 'lucide-react';
+import { MessageSquare, Send, X, Sparkles, Loader2, ChevronDown } from 'lucide-react';
+import { AI_MODELS, defaultModelFor, type AiModelKey } from '@boost/core';
 import { useSiteContext } from './context';
 
 interface Message {
@@ -56,6 +57,23 @@ export function SiteAIChat() {
   const [input, setInput] = useState('');
   const [history, setHistory] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
+  // Agency picks the model. Defaults to the "edit" default (Sonnet) —
+  // live-edit chat runs constantly, so balanced speed/cost beats the
+  // heaviest model. Persisted in localStorage so the choice sticks
+  // across reloads.
+  const [model, setModel] = useState<AiModelKey>(() => {
+    if (typeof window === 'undefined') return defaultModelFor('edit');
+    const stored = window.localStorage.getItem('bmb:ai-chat-model');
+    if (stored === 'opus' || stored === 'sonnet' || stored === 'haiku') {
+      return stored;
+    }
+    return defaultModelFor('edit');
+  });
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem('bmb:ai-chat-model', model);
+  }, [model]);
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -90,7 +108,9 @@ export function SiteAIChat() {
     setInput('');
     setLoading(true);
     try {
-      const summary = await onAIEdit(text);
+      // Pass the selected model through so the host routes the edit
+      // to the user's preferred Claude tier.
+      const summary = await onAIEdit(text, { model });
       setHistory((h) => [
         ...h,
         { role: 'ai', text: summary || 'Done — the site was updated.' },
@@ -104,6 +124,8 @@ export function SiteAIChat() {
       setLoading(false);
     }
   };
+
+  const activeModel = AI_MODELS.find((m) => m.key === model)!;
 
   return (
     <>
@@ -151,14 +173,82 @@ export function SiteAIChat() {
                   </p>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => setOpen(false)}
-                className="rounded-full p-1.5 text-white/80 hover:bg-white/10 hover:text-white"
-                aria-label="Close"
-              >
-                <X className="h-4 w-4" />
-              </button>
+              <div className="flex items-center gap-1.5">
+                {/* Model picker — dropdown above the chat so the agency
+                    can swap between Opus / Sonnet / Haiku mid-session
+                    without leaving the conversation. */}
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setModelMenuOpen((v) => !v)}
+                    className="inline-flex items-center gap-1 rounded-full bg-white/20 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-white/30"
+                    title={`Model: ${activeModel.label} (${activeModel.blurb})`}
+                    aria-expanded={modelMenuOpen}
+                    aria-haspopup="menu"
+                  >
+                    {activeModel.label}
+                    <ChevronDown className={`h-3 w-3 transition-transform ${modelMenuOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  {modelMenuOpen ? (
+                    <div
+                      role="menu"
+                      className="absolute right-0 top-full z-10 mt-1 w-56 overflow-hidden rounded-xl border border-slate-200 bg-white text-slate-900 shadow-xl"
+                    >
+                      {AI_MODELS.map((m) => (
+                        <button
+                          key={m.key}
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked={model === m.key}
+                          onClick={() => {
+                            setModel(m.key);
+                            setModelMenuOpen(false);
+                          }}
+                          className={`flex w-full items-start gap-2 px-3 py-2 text-left text-[11px] transition-colors ${
+                            model === m.key
+                              ? 'bg-[color:var(--bmb-site-primary)]/10'
+                              : 'hover:bg-slate-50'
+                          }`}
+                        >
+                          <div className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded-full border-2 border-slate-300 bg-white">
+                            {model === m.key ? (
+                              <span
+                                className="block h-full w-full rounded-full"
+                                style={{
+                                  background: 'var(--bmb-site-primary)',
+                                  border: '2px solid white',
+                                }}
+                              />
+                            ) : null}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-xs font-semibold">{m.label}</span>
+                              <span className="rounded bg-slate-100 px-1 py-0.5 text-[9px] font-medium text-slate-500">
+                                {m.cost}
+                              </span>
+                              <span className="text-[9px] font-medium text-slate-500">
+                                {m.speed}
+                              </span>
+                            </div>
+                            <p className="mt-0.5 text-[10px] text-slate-500">
+                              {m.blurb}
+                            </p>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setOpen(false)}
+                  className="rounded-full p-1.5 text-white/80 hover:bg-white/10 hover:text-white"
+                  aria-label="Close"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
             </div>
 
             {/* Messages */}

@@ -12,6 +12,8 @@ import type {
   HeroIllustrationStyle,
   HeroIllustrationMotion,
   HeroIllustration,
+  SectionBackgroundKind,
+  SectionBackground,
 } from '@boost/core';
 import {
   DEFAULT_LAYOUT,
@@ -24,8 +26,12 @@ import {
   ALL_VARIANT_TAGS,
   type VariantTag,
   ILLUSTRATION_STYLES,
+  ILLUSTRATION_CATEGORIES,
   DEFAULT_ILLUSTRATION_BY_TEMPLATE,
   defaultMotionForStyle,
+  AI_MODELS,
+  defaultModelFor,
+  type AiModelKey,
 } from '@boost/core';
 import {
   Button,
@@ -90,6 +96,7 @@ import {
   ChevronUp,
   ChevronDown,
   Lightbulb,
+  Search,
 } from 'lucide-react';
 import { api } from '@/lib/dashboard/api';
 import { sanitizeConfig } from '@boost/ui/site';
@@ -1510,6 +1517,16 @@ function SectionManager({
         </div>
       )}
 
+      {/* Per-section decorative backgrounds — grid, dots, particles,
+          mesh, etc. Applied to any block except nav / hero / footer
+          (hero has its own variant system for backgrounds; nav/footer
+          don't need decorative effects). */}
+      <SectionBackgroundsEditor
+        config={config}
+        onChange={onChange}
+        layout={layout}
+      />
+
       {/* Variant picker overlay — visible when the user clicks Add on a
           variant-capable block or the paintbrush on an existing block.
           Shows a gallery of thumbnails + descriptions. Picking one adds
@@ -1798,6 +1815,218 @@ function SectionCard({
       </div>
     </Reorder.Item>
   );
+}
+
+/* ------------------------------------------------------------------ */
+/* SectionBackgroundsEditor — decorative backgrounds per block         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Metadata for each supported background kind — drives the picker
+ * chip's label / description / preview swatch. Keep this ordered so
+ * the common effects (grid, dots) come first.
+ */
+const SECTION_BG_OPTIONS: Array<{
+  kind: SectionBackgroundKind;
+  label: string;
+  hint: string;
+}> = [
+  { kind: 'none', label: 'None', hint: 'No decorative background' },
+  { kind: 'grid', label: 'Grid', hint: 'Technical grid pattern, brand-tinted' },
+  { kind: 'dots', label: 'Dots', hint: 'Soft dot grid, magazine-style' },
+  { kind: 'noise', label: 'Noise', hint: 'Subtle film-grain texture' },
+  { kind: 'gradient', label: 'Gradient', hint: 'Soft radial gradient wash' },
+  { kind: 'mesh', label: 'Mesh', hint: 'Blurred conic gradient mesh' },
+  { kind: 'particles', label: 'Particles', hint: 'Fine dust drifting slowly' },
+  { kind: 'sparkles', label: 'Sparkles', hint: 'Larger twinkling particles' },
+  { kind: 'meteors', label: 'Meteors', hint: 'Falling meteor streaks' },
+  { kind: 'beams', label: 'Beams', hint: 'Slow rotating conic beam' },
+  { kind: 'ripple', label: 'Ripple', hint: 'Concentric pulse rings' },
+  { kind: 'shooting-stars', label: 'Shooting stars', hint: 'Streaks across the background' },
+];
+
+/**
+ * Editor for `config.sectionBackgrounds`. Shows each block currently
+ * in the active page's layout (except nav / hero / footer — those have
+ * their own background systems or don't need one) with a compact
+ * picker for the background kind + opacity + tint colour.
+ *
+ * Agencies use this to add a grid behind the services section, a
+ * particle field behind the reviews, etc. Zero-config: leaving every
+ * block on "None" keeps the site plain.
+ */
+function SectionBackgroundsEditor({
+  config,
+  onChange,
+  layout,
+}: {
+  config: WebsiteConfig;
+  onChange: (c: WebsiteConfig) => void;
+  layout: SiteBlockKey[];
+}) {
+  // Filter layout down to blocks that support a decorative background.
+  // Nav / hero / footer have their own systems; announcement is a
+  // horizontal strip that doesn't benefit from a background layer.
+  const eligibleBlocks = layout.filter(
+    (k) => k !== 'nav' && k !== 'hero' && k !== 'footer' && k !== 'announcement',
+  );
+
+  if (eligibleBlocks.length === 0) {
+    return null;
+  }
+
+  const backgrounds = config.sectionBackgrounds ?? {};
+  const configuredCount = Object.values(backgrounds).filter(
+    (b) => b && b.kind !== 'none',
+  ).length;
+
+  const updateBackground = (
+    block: SiteBlockKey,
+    next: SectionBackground | null,
+  ) => {
+    const copy = { ...(config.sectionBackgrounds ?? {}) };
+    if (next == null || next.kind === 'none') {
+      delete copy[block];
+    } else {
+      copy[block] = next;
+    }
+    onChange({
+      ...config,
+      sectionBackgrounds: Object.keys(copy).length > 0 ? copy : undefined,
+    });
+  };
+
+  return (
+    <details className="rounded-2xl border border-slate-200 bg-white">
+      <summary className="flex cursor-pointer items-center gap-2 px-3 py-2.5 text-xs font-semibold text-slate-700">
+        <Palette className="h-3.5 w-3.5 text-slate-400" />
+        Section backgrounds
+        <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">
+          {configuredCount}
+        </span>
+        <span className="ml-auto text-[10px] font-normal text-slate-400">
+          grid, dots, particles…
+        </span>
+      </summary>
+      <div className="space-y-2 border-t border-slate-100 p-3">
+        <p className="text-[11px] text-slate-500">
+          Add a decorative background behind any section — a grid behind the
+          services, particles behind the reviews, meteors behind the CTA.
+          Hero already has its own background system (change via the Hero tab).
+        </p>
+        {eligibleBlocks.map((block) => {
+          const bg = backgrounds[block];
+          return (
+            <SectionBackgroundRow
+              key={block}
+              block={block}
+              background={bg}
+              onChange={(next) => updateBackground(block, next)}
+            />
+          );
+        })}
+      </div>
+    </details>
+  );
+}
+
+/**
+ * One row inside the SectionBackgroundsEditor — shows the block name,
+ * a dropdown of available background kinds, and (when a background is
+ * selected) opacity slider + tint colour input.
+ */
+function SectionBackgroundRow({
+  block,
+  background,
+  onChange,
+}: {
+  block: SiteBlockKey;
+  background: SectionBackground | undefined;
+  onChange: (next: SectionBackground | null) => void;
+}) {
+  const kind: SectionBackgroundKind = background?.kind ?? 'none';
+  const label = BLOCK_LABELS[block] ?? block;
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-2.5">
+      <div className="flex items-center gap-2">
+        <span className="min-w-0 flex-1 truncate text-xs font-medium text-slate-900">
+          {label}
+        </span>
+        <select
+          value={kind}
+          onChange={(e) => {
+            const nextKind = e.target.value as SectionBackgroundKind;
+            if (nextKind === 'none') {
+              onChange(null);
+            } else {
+              onChange({ ...(background ?? {}), kind: nextKind });
+            }
+          }}
+          className="h-7 rounded-md border border-slate-200 bg-white px-2 text-[11px]"
+        >
+          {SECTION_BG_OPTIONS.map((o) => (
+            <option key={o.kind} value={o.kind}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      </div>
+      {kind !== 'none' && background ? (
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          <label className="block">
+            <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+              Opacity · {((background.opacity ?? 0.4) * 100).toFixed(0)}%
+            </span>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={background.opacity ?? 0.4}
+              onChange={(e) =>
+                onChange({ ...background, opacity: Number(e.target.value) })
+              }
+              className="mt-0.5 w-full"
+            />
+          </label>
+          <label className="block">
+            <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+              Tint
+            </span>
+            <div className="mt-0.5 flex items-center gap-1.5">
+              <input
+                type="color"
+                value={normaliseHex(background.tint) ?? '#1D9CA1'}
+                onChange={(e) =>
+                  onChange({ ...background, tint: e.target.value })
+                }
+                className="h-7 w-7 cursor-pointer rounded border border-slate-200"
+              />
+              <button
+                type="button"
+                onClick={() => onChange({ ...background, tint: undefined })}
+                className="rounded-full border border-slate-200 px-2 py-0.5 text-[9px] text-slate-500 hover:bg-slate-100"
+                title="Use brand primary colour"
+              >
+                Brand
+              </button>
+            </div>
+          </label>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** Coerce a tint string to a CSS hex we can feed an <input type="color">. */
+function normaliseHex(tint: string | undefined): string | undefined {
+  if (!tint) return undefined;
+  const trimmed = tint.trim();
+  if (/^#[0-9a-f]{6}$/i.test(trimmed)) return trimmed;
+  // `var(--...)` or any other non-hex value — return undefined so the
+  // color input falls back to its default.
+  return undefined;
 }
 
 /* ------------------------------------------------------------------ */
@@ -3668,6 +3897,110 @@ function ColorField({
 /* AI Chat Editor — natural language config modifications             */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Compact model picker for the AI chat surfaces. Shows the current
+ * model as a pill with a dropdown of alternatives — same component
+ * reused by the Chat tab and the Illustration editor's Ask-AI box.
+ *
+ * Closes on outside click, shows cost + speed metadata inside each
+ * menu item so agencies pick the right model for the job without
+ * needing to know the Anthropic API tier names.
+ */
+function ModelPicker({
+  value,
+  onChange,
+  align = 'right',
+}: {
+  value: AiModelKey;
+  onChange: (next: AiModelKey) => void;
+  align?: 'left' | 'right';
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const active = AI_MODELS.find((m) => m.key === value) ?? AI_MODELS[0]!;
+
+  useEffect(() => {
+    if (!open) return;
+    const onClick = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    window.addEventListener('mousedown', onClick);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', onClick);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative shrink-0">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-semibold text-slate-700 transition-colors hover:border-[#1D9CA1] hover:text-[#1D9CA1]"
+        title={`Model: ${active.label} — ${active.blurb}`}
+        aria-expanded={open}
+        aria-haspopup="menu"
+      >
+        <span className="inline-block h-1.5 w-1.5 rounded-full bg-[#1D9CA1]" />
+        {active.label}
+        <ChevronDown
+          className={`h-2.5 w-2.5 transition-transform ${open ? 'rotate-180' : ''}`}
+        />
+      </button>
+      {open ? (
+        <div
+          role="menu"
+          className={`absolute top-full z-20 mt-1 w-60 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl ${
+            align === 'left' ? 'left-0' : 'right-0'
+          }`}
+        >
+          {AI_MODELS.map((m) => (
+            <button
+              key={m.key}
+              type="button"
+              role="menuitemradio"
+              aria-checked={value === m.key}
+              onClick={() => {
+                onChange(m.key);
+                setOpen(false);
+              }}
+              className={`flex w-full items-start gap-2 px-3 py-2 text-left transition-colors ${
+                value === m.key ? 'bg-[#1D9CA1]/5' : 'hover:bg-slate-50'
+              }`}
+            >
+              <div className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded-full border-2 border-slate-300 bg-white">
+                {value === m.key ? (
+                  <span className="block h-full w-full rounded-full border-2 border-white bg-[#1D9CA1]" />
+                ) : null}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-semibold text-slate-900">
+                    {m.label}
+                  </span>
+                  <span className="rounded bg-slate-100 px-1 py-0.5 text-[9px] font-medium text-slate-500">
+                    {m.cost}
+                  </span>
+                  <span className="text-[9px] font-medium text-slate-500">
+                    {m.speed}
+                  </span>
+                </div>
+                <p className="mt-0.5 line-clamp-2 text-[10px] leading-snug text-slate-500">
+                  {m.blurb}
+                </p>
+              </div>
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function AIChatEditor({
   config,
   onChange,
@@ -3680,6 +4013,20 @@ function AIChatEditor({
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const [history, setHistory] = useState<Array<{ role: 'user' | 'ai'; text: string }>>([]);
+  // Model picker — defaults to Sonnet for edits. Persisted in
+  // localStorage so the choice sticks across reloads.
+  const [model, setModel] = useState<AiModelKey>(() => {
+    if (typeof window === 'undefined') return defaultModelFor('edit');
+    const stored = window.localStorage.getItem('bmb:ai-editor-model');
+    if (stored === 'opus' || stored === 'sonnet' || stored === 'haiku') {
+      return stored;
+    }
+    return defaultModelFor('edit');
+  });
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem('bmb:ai-editor-model', model);
+  }, [model]);
 
   const send = useCallback(async () => {
     if (!message.trim() || loading) return;
@@ -3693,6 +4040,7 @@ function AIChatEditor({
         clientId,
         currentConfig: config,
         instruction: userMsg,
+        model,
       });
       onChange(result.config);
       setHistory((h) => [
@@ -3709,13 +4057,16 @@ function AIChatEditor({
     } finally {
       setLoading(false);
     }
-  }, [message, loading, config, onChange, clientId]);
+  }, [message, loading, config, onChange, clientId, model]);
 
   return (
     <div className="space-y-3">
-      <p className="text-xs text-slate-500">
-        Tell the AI what to change. It can modify copy, colors, sections, hero style — anything.
-      </p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs text-slate-500">
+          Tell the AI what to change. It can modify copy, colors, sections, hero style — anything.
+        </p>
+        <ModelPicker value={model} onChange={setModel} />
+      </div>
 
       {/* Chat history */}
       {history.length > 0 && (
@@ -8471,6 +8822,17 @@ const ILLUSTRATION_MOTIONS: Array<{
   { value: 'drift', label: 'Drift', description: 'Diagonal drift across the hero on scroll.' },
   { value: 'orbit', label: 'Orbit', description: 'Continuous small circular motion.' },
   { value: 'tilt-3d', label: 'Tilt 3D', description: 'Follows the cursor in 3D. Desktop only.' },
+  { value: 'pulse', label: 'Pulse', description: 'Gentle scale breathing.' },
+  { value: 'spin', label: 'Spin', description: 'Slow continuous rotation. Best for round shapes.' },
+  { value: 'sway', label: 'Sway', description: 'Metronome left-right rotation.' },
+  { value: 'wobble', label: 'Wobble', description: 'Playful jiggle. Kids / playful brands.' },
+  { value: 'bounce', label: 'Bounce', description: 'Rhythmic vertical bounce.' },
+  { value: 'shake', label: 'Shake', description: 'Occasional horizontal shake.' },
+  { value: 'zoom-in', label: 'Zoom-in', description: 'Scales up as you scroll past.' },
+  { value: 'flip-y', label: 'Flip-in', description: '180° Y-axis flip on mount.' },
+  { value: 'reveal', label: 'Reveal', description: 'Cinematic slide-up + fade on scroll.' },
+  { value: 'fade-in', label: 'Fade-in', description: 'Minimal scroll-driven opacity.' },
+  { value: 'slide-in', label: 'Slide-in', description: 'Enters from off-canvas on scroll.' },
   { value: 'none', label: 'None', description: 'Static. No motion.' },
 ];
 
@@ -8512,6 +8874,20 @@ function IllustrationEditor({
   // down, find the AI chat, describe the same thing" tax.
   const [aiPrompt, setAiPrompt] = useState('');
   const [aiBusy, setAiBusy] = useState(false);
+  // Model for the scoped illustration edit. Defaults to Sonnet for
+  // scoped edits (cheap + fast); agency can override via the picker.
+  const [illustrationModel, setIllustrationModel] = useState<AiModelKey>(() => {
+    if (typeof window === 'undefined') return defaultModelFor('scoped');
+    const stored = window.localStorage.getItem('bmb:ai-illustration-model');
+    if (stored === 'opus' || stored === 'sonnet' || stored === 'haiku') {
+      return stored;
+    }
+    return defaultModelFor('scoped');
+  });
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem('bmb:ai-illustration-model', illustrationModel);
+  }, [illustrationModel]);
 
   // Bespoke illustration generation state. Separate from aiPrompt so
   // the tweaks chat and the generate-from-scratch brief don't collide.
@@ -8600,11 +8976,15 @@ function IllustrationEditor({
     }
     setAiBusy(true);
     try {
-      const scopedInstruction = `Update the hero illustration (hero.illustration). ${instruction}`;
-      const result = await api.editWebsiteWithAI({
+      // Scope the edit to hero.illustration so we send ~100 tokens of
+      // context instead of the whole config — prevents the output
+      // truncation that caused ERR_EMPTY_RESPONSE on big sites.
+      const result = await api.editWebsiteScopedWithAI({
         clientId,
         currentConfig: config as unknown as Record<string, unknown>,
-        instruction: scopedInstruction,
+        instruction,
+        scope: 'hero.illustration',
+        model: illustrationModel,
       });
       onChange(result.config);
       setAiPrompt('');
@@ -8729,9 +9109,15 @@ function IllustrationEditor({
         <p className="text-xs font-medium text-slate-600">
           Scroll-driven illustration
           {illustration ? (
-            <span className="ml-2 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
-              On
-            </span>
+            illustration.hidden ? (
+              <span className="ml-2 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+                Hidden
+              </span>
+            ) : (
+              <span className="ml-2 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
+                On
+              </span>
+            )
           ) : (
             <span className="ml-2 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">
               Off
@@ -8739,13 +9125,35 @@ function IllustrationEditor({
           )}
         </p>
         {illustration ? (
-          <button
-            type="button"
-            onClick={clear}
-            className="text-[10px] font-medium text-slate-500 hover:text-rose-600"
-          >
-            Remove
-          </button>
+          <div className="flex items-center gap-1">
+            {/* Hide / show toggle — keeps all config (style, customUrl,
+                prompt, motion) intact so the agency can flip the
+                illustration off temporarily without losing work. */}
+            <button
+              type="button"
+              onClick={() => setField({ hidden: !illustration.hidden })}
+              className={`rounded-full border px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                illustration.hidden
+                  ? 'border-amber-300 bg-amber-50 text-amber-700 hover:border-amber-400'
+                  : 'border-slate-200 bg-white text-slate-600 hover:border-slate-400'
+              }`}
+              title={
+                illustration.hidden
+                  ? 'Show the illustration again'
+                  : 'Hide the illustration without deleting its configuration'
+              }
+            >
+              {illustration.hidden ? 'Show' : 'Hide'}
+            </button>
+            <button
+              type="button"
+              onClick={clear}
+              className="text-[10px] font-medium text-slate-500 hover:text-rose-600"
+              title="Delete the illustration entirely"
+            >
+              Remove
+            </button>
+          </div>
         ) : (
           <button
             type="button"
@@ -8819,31 +9227,54 @@ function IllustrationEditor({
       {illustration ? (
         <div className="space-y-4 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
           {/* Style picker grid (built-in SVGs) */}
-          {!illustration.customUrl ? (
+          {!illustration.customUrl && !illustration.customSvg ? (
             <div>
-              <p className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-slate-500">
-                Style
-              </p>
-              <div className="grid grid-cols-5 gap-1.5">
-                {ILLUSTRATION_STYLES.map((s) => (
-                  <button
-                    key={s.id}
-                    type="button"
-                    onClick={() => setField({ style: s.id })}
-                    title={`${s.label} — ${s.description}`}
-                    className={`flex aspect-square flex-col items-center justify-center rounded-lg border text-lg transition-all ${
-                      illustration.style === s.id
-                        ? 'border-[#1D9CA1] bg-white shadow-sm ring-2 ring-[#1D9CA1]/25'
-                        : 'border-slate-200 bg-white hover:border-slate-400'
-                    }`}
-                  >
-                    <span>{s.preview}</span>
-                    <span className="mt-0.5 truncate text-[8px] font-medium text-slate-600">
-                      {s.label}
-                    </span>
-                  </button>
-                ))}
+              <div className="mb-2 flex items-center justify-between">
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+                  Style
+                  <span className="ml-2 rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-medium text-slate-500">
+                    {ILLUSTRATION_STYLES.length}
+                  </span>
+                </p>
               </div>
+              <StylePicker
+                currentStyle={illustration.style}
+                onPick={(style) => {
+                  // Picking a built-in style clears any custom SVG so
+                  // the renderer shows the selected vector.
+                  setField({ style, customSvg: undefined });
+                }}
+              />
+            </div>
+          ) : illustration.customSvg ? (
+            <div className="flex items-center gap-3 rounded-lg border border-violet-200 bg-white p-2">
+              <div
+                className="h-14 w-14 shrink-0 rounded-lg border border-slate-200 p-1 [&>svg]:h-full [&>svg]:w-full"
+                dangerouslySetInnerHTML={{ __html: illustration.customSvg }}
+              />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[11px] font-semibold text-violet-700">
+                  AI-generated SVG
+                </p>
+                <p className="truncate text-[10px] text-slate-500">
+                  {illustration.prompt ?? 'Custom vector'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const template = config.template ?? 'service';
+                  const fallbackStyle =
+                    DEFAULT_ILLUSTRATION_BY_TEMPLATE[template] ?? 'rocket';
+                  setField({
+                    customSvg: undefined,
+                    style: illustration.style ?? fallbackStyle,
+                  });
+                }}
+                className="rounded-md px-2 py-1 text-[10px] text-slate-500 hover:bg-slate-100"
+              >
+                Use built-in
+              </button>
             </div>
           ) : (
             <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-2">
@@ -8864,10 +9295,6 @@ function IllustrationEditor({
               <button
                 type="button"
                 onClick={() => {
-                  // Fall back to a template-appropriate built-in style
-                  // when dropping the custom URL — without this the
-                  // renderer would have neither a customUrl nor a style
-                  // and render nothing.
                   const template = config.template ?? 'service';
                   const fallbackStyle =
                     DEFAULT_ILLUSTRATION_BY_TEMPLATE[template] ?? 'rocket';
@@ -8962,6 +9389,58 @@ function IllustrationEditor({
             </div>
           </div>
 
+          {/* Motion speed + intensity — only meaningful once a motion
+              preset is applied. Speed multiplies keyframe duration;
+              intensity scales travel distance and angle. */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <p className="mb-1 flex items-center justify-between text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+                <span>Speed · {(illustration.motionSpeed ?? 1).toFixed(2)}×</span>
+                {illustration.motionSpeed != null && illustration.motionSpeed !== 1 ? (
+                  <button
+                    type="button"
+                    onClick={() => setField({ motionSpeed: 1 })}
+                    className="text-[9px] font-normal text-slate-400 hover:text-[#1D9CA1]"
+                  >
+                    reset
+                  </button>
+                ) : null}
+              </p>
+              <input
+                type="range"
+                min={0.25}
+                max={4}
+                step={0.05}
+                value={illustration.motionSpeed ?? 1}
+                onChange={(e) => setField({ motionSpeed: Number(e.target.value) })}
+                className="w-full"
+              />
+            </div>
+            <div>
+              <p className="mb-1 flex items-center justify-between text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+                <span>Intensity · {(illustration.motionIntensity ?? 1).toFixed(2)}×</span>
+                {illustration.motionIntensity != null && illustration.motionIntensity !== 1 ? (
+                  <button
+                    type="button"
+                    onClick={() => setField({ motionIntensity: 1 })}
+                    className="text-[9px] font-normal text-slate-400 hover:text-[#1D9CA1]"
+                  >
+                    reset
+                  </button>
+                ) : null}
+              </p>
+              <input
+                type="range"
+                min={0.1}
+                max={3}
+                step={0.05}
+                value={illustration.motionIntensity ?? 1}
+                onChange={(e) => setField({ motionIntensity: Number(e.target.value) })}
+                className="w-full"
+              />
+            </div>
+          </div>
+
           {/* Custom upload */}
           <div className="flex items-center justify-between gap-2 border-t border-slate-200 pt-3">
             <p className="text-[10px] text-slate-500">
@@ -9013,17 +9492,23 @@ function IllustrationEditor({
               direct-manipulation controls above, but stays inline so the
               agency doesn't have to scroll to a separate chat. */}
           <div className="rounded-xl border border-[#1D9CA1]/20 bg-[#1D9CA1]/5 p-3">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <p className="flex items-center gap-1.5 text-[11px] font-semibold text-[#1D9CA1]">
                 <Sparkles className="h-3 w-3" />
                 Ask AI to tweak it
               </p>
-              {aiBusy ? (
-                <span className="flex items-center gap-1 text-[10px] font-medium text-[#1D9CA1]">
-                  <Loader2 className="h-2.5 w-2.5 animate-spin" />
-                  Thinking…
-                </span>
-              ) : null}
+              <div className="flex items-center gap-1.5">
+                {aiBusy ? (
+                  <span className="flex items-center gap-1 text-[10px] font-medium text-[#1D9CA1]">
+                    <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                    Thinking…
+                  </span>
+                ) : null}
+                <ModelPicker
+                  value={illustrationModel}
+                  onChange={setIllustrationModel}
+                />
+              </div>
             </div>
             <p className="mt-1 text-[10px] text-slate-600">
               Say what to change in plain English. Changes apply live.
@@ -9186,6 +9671,374 @@ function IllustrationEditor({
               </div>
             ) : null}
           </div>
+
+          {/* SVG Studio — Claude hand-writes a bespoke vector SVG from
+              a natural-language brief. Crisper than the raster bespoke
+              above; can carry its own inline <animate> tags for shape-
+              level animation. */}
+          <SvgStudioPanel
+            clientId={clientId}
+            illustration={illustration}
+            onGenerated={(svg, brief) =>
+              setField({
+                customSvg: svg,
+                customUrl: undefined,
+                style: undefined,
+                prompt: brief,
+              })
+            }
+            onRevertToBuiltIn={() => {
+              const template = config.template ?? 'service';
+              const fallbackStyle =
+                DEFAULT_ILLUSTRATION_BY_TEMPLATE[template] ?? 'rocket';
+              setField({
+                customSvg: undefined,
+                style: illustration.style ?? fallbackStyle,
+              });
+            }}
+            motion={illustration.motion ?? defaultMotionForStyle(illustration.style)}
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+
+/* ------------------------------------------------------------------ */
+/* StylePicker — grouped-by-category picker with search               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Grouped style picker. Categories are tabs; the search input filters
+ * across every category and collapses categories with zero matches.
+ * Keeps the panel compact even with 60+ styles.
+ */
+function StylePicker({
+  currentStyle,
+  onPick,
+}: {
+  currentStyle: HeroIllustrationStyle | undefined;
+  onPick: (style: HeroIllustrationStyle) => void;
+}) {
+  const [category, setCategory] = useState<string>('all');
+  const [query, setQuery] = useState('');
+  const q = query.trim().toLowerCase();
+
+  const filtered = ILLUSTRATION_STYLES.filter((s) => {
+    if (category !== 'all' && s.category !== category) return false;
+    if (!q) return true;
+    return (
+      s.label.toLowerCase().includes(q) ||
+      s.description.toLowerCase().includes(q) ||
+      s.id.toLowerCase().includes(q)
+    );
+  });
+
+  return (
+    <div className="space-y-2">
+      {/* Search + category filter row */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <div className="relative min-w-[140px] flex-1">
+          <Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-slate-400" />
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search styles…"
+            className="h-7 w-full rounded-full border border-slate-200 bg-white pl-6 pr-2 text-[11px] text-slate-700 placeholder:text-slate-400 focus:border-[#1D9CA1] focus:outline-none"
+          />
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-1">
+        <button
+          onClick={() => setCategory('all')}
+          className={`rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors ${
+            category === 'all'
+              ? 'bg-[#1D9CA1] text-white'
+              : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+          }`}
+        >
+          All ({ILLUSTRATION_STYLES.length})
+        </button>
+        {ILLUSTRATION_CATEGORIES.map((c) => {
+          const count = ILLUSTRATION_STYLES.filter((s) => s.category === c.id).length;
+          return (
+            <button
+              key={c.id}
+              onClick={() => setCategory(c.id)}
+              className={`rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                category === c.id
+                  ? 'bg-[#1D9CA1] text-white'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              {c.label} ({count})
+            </button>
+          );
+        })}
+      </div>
+      {filtered.length === 0 ? (
+        <p className="py-6 text-center text-[11px] text-slate-400">
+          No styles match that search.
+        </p>
+      ) : (
+        <div className="grid grid-cols-5 gap-1.5">
+          {filtered.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => onPick(s.id)}
+              title={`${s.label} — ${s.description}`}
+              className={`flex aspect-square flex-col items-center justify-center rounded-lg border text-lg transition-all ${
+                currentStyle === s.id
+                  ? 'border-[#1D9CA1] bg-white shadow-sm ring-2 ring-[#1D9CA1]/25'
+                  : 'border-slate-200 bg-white hover:border-slate-400'
+              }`}
+            >
+              <span>{s.preview}</span>
+              <span className="mt-0.5 truncate px-0.5 text-[8px] font-medium text-slate-600">
+                {s.label}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* SvgStudioPanel — Claude-written vector SVG from a prompt            */
+/* ------------------------------------------------------------------ */
+
+function SvgStudioPanel({
+  clientId,
+  illustration,
+  onGenerated,
+  onRevertToBuiltIn,
+  motion,
+}: {
+  clientId: string;
+  illustration: HeroIllustration;
+  onGenerated: (svg: string, brief: string) => void;
+  onRevertToBuiltIn: () => void;
+  motion: HeroIllustrationMotion;
+}) {
+  const [brief, setBrief] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [pasting, setPasting] = useState(false);
+  const [pasteText, setPasteText] = useState('');
+  const [model, setModel] = useState<AiModelKey>(() => {
+    if (typeof window === 'undefined') return 'opus';
+    const stored = window.localStorage.getItem('bmb:ai-svg-model');
+    if (stored === 'opus' || stored === 'sonnet' || stored === 'haiku') return stored;
+    return 'opus';
+  });
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem('bmb:ai-svg-model', model);
+  }, [model]);
+
+  const presets: Array<{ label: string; brief: string }> = [
+    {
+      label: 'Brand mark',
+      brief:
+        'A bold abstract brand mark built around a flowing ribbon or overlapping circles, minimal but memorable.',
+    },
+    {
+      label: 'Craft tool',
+      brief:
+        'A hand tool that represents this business, drawn in a stylised 3D isometric style with clean edges.',
+    },
+    {
+      label: 'Spherical emblem',
+      brief:
+        'A glossy spherical emblem with a ring of light around it and a subtle inner highlight.',
+    },
+    {
+      label: 'Geometric',
+      brief:
+        'A set of layered geometric shapes (hexagons, triangles, arcs) forming an abstract composition.',
+    },
+    {
+      label: 'Mascot',
+      brief:
+        'A friendly mascot-style illustration that represents the business — round, approachable, simple.',
+    },
+  ];
+
+  const run = async (text: string) => {
+    const cleaned = text.trim();
+    if (cleaned.length < 6) {
+      toast.info('Describe what you want', 'A short sentence is plenty.');
+      return;
+    }
+    if (!clientId) {
+      toast.error('Pick a client first');
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await api.generateSvg({
+        clientId,
+        brief: cleaned,
+        motion,
+        model,
+      });
+      if (!result.svg || !result.svg.includes('<svg')) {
+        throw new Error('Generator returned no usable SVG');
+      }
+      onGenerated(result.svg, cleaned);
+      setBrief('');
+      toast.success(
+        'Vector SVG generated',
+        result.fromMock
+          ? 'Using placeholder (Claude not configured).'
+          : 'Hand-drawn by the AI and inlined in the hero.',
+      );
+    } catch (e) {
+      toast.error('SVG generation failed', (e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const pasteOwnSvg = async () => {
+    const text = pasteText.trim();
+    if (!text.includes('<svg')) {
+      toast.error('Not an SVG', 'Paste the full <svg>...</svg> markup.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await api.sanitizeSvg(text);
+      if (!result.svg) throw new Error('SVG rejected by sanitiser');
+      onGenerated(result.svg, 'Pasted SVG');
+      setPasteText('');
+      setPasting(false);
+      toast.success('SVG applied', 'Scripts and handlers stripped for safety.');
+    } catch (e) {
+      toast.error('SVG rejected', (e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-fuchsia-200 bg-fuchsia-50/50 p-3">
+      <div className="flex items-center justify-between">
+        <p className="flex items-center gap-1.5 text-[11px] font-semibold text-fuchsia-700">
+          <Sparkles className="h-3 w-3" />
+          SVG Studio — generate a vector from scratch
+        </p>
+        <div className="flex items-center gap-1.5">
+          {busy ? (
+            <span className="flex items-center gap-1 text-[10px] font-medium text-fuchsia-700">
+              <Loader2 className="h-2.5 w-2.5 animate-spin" />
+              Drawing…
+            </span>
+          ) : null}
+          <ModelPicker value={model} onChange={setModel} />
+        </div>
+      </div>
+      <p className="mt-1 text-[10px] text-slate-600">
+        Crisp vector markup written by Claude from your brief. Scales
+        to any size and keeps the brand palette. Different from the
+        raster generator above.
+      </p>
+
+      <div className="mt-2 flex flex-wrap gap-1">
+        {presets.map((p) => (
+          <button
+            key={p.label}
+            type="button"
+            disabled={busy}
+            onClick={() => setBrief(p.brief)}
+            className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-medium text-slate-700 transition-colors hover:border-fuchsia-500 hover:text-fuchsia-700 disabled:opacity-50"
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-2 flex items-start gap-1.5">
+        <textarea
+          value={brief}
+          onChange={(e) => setBrief(e.target.value)}
+          placeholder="e.g. 'a coffee cup with three curls of steam forming our logo monogram inside'"
+          rows={2}
+          disabled={busy}
+          onKeyDown={(e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !busy) {
+              e.preventDefault();
+              run(brief);
+            }
+          }}
+          className="flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] text-slate-700 placeholder:text-slate-400 focus:border-fuchsia-500 focus:outline-none focus:ring-1 focus:ring-fuchsia-500/30 disabled:opacity-50"
+        />
+        <button
+          type="button"
+          onClick={() => run(brief)}
+          disabled={busy || brief.trim().length < 6}
+          className="flex h-8 shrink-0 items-center gap-1 self-start rounded-lg bg-fuchsia-600 px-2.5 text-[11px] font-semibold text-white transition-colors hover:bg-fuchsia-700 disabled:opacity-50"
+          title="Generate (⌘/Ctrl + Enter)"
+        >
+          {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+          Draw
+        </button>
+      </div>
+
+      <div className="mt-2 flex items-center gap-1.5">
+        {illustration.customSvg ? (
+          <>
+            <button
+              type="button"
+              onClick={() => run(illustration.prompt || 'Redraw the illustration')}
+              disabled={busy}
+              className="inline-flex items-center gap-1 rounded-full border border-fuchsia-200 bg-white px-2 py-0.5 text-[10px] font-medium text-fuchsia-700 hover:bg-fuchsia-50 disabled:opacity-50"
+              title="Regenerate with the same brief"
+            >
+              <RotateCcw className="h-2.5 w-2.5" />
+              Roll again
+            </button>
+            <button
+              type="button"
+              onClick={onRevertToBuiltIn}
+              disabled={busy}
+              className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+            >
+              Back to built-in
+            </button>
+          </>
+        ) : null}
+        <button
+          type="button"
+          onClick={() => setPasting((o) => !o)}
+          className="ml-auto inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-medium text-slate-600 hover:bg-slate-50"
+        >
+          {pasting ? 'Cancel' : 'Paste your own SVG'}
+        </button>
+      </div>
+
+      {pasting ? (
+        <div className="mt-2 space-y-1.5">
+          <textarea
+            value={pasteText}
+            onChange={(e) => setPasteText(e.target.value)}
+            placeholder="<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 480 480'>…</svg>"
+            rows={4}
+            className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 font-mono text-[10px] text-slate-700 placeholder:text-slate-400 focus:border-fuchsia-500 focus:outline-none"
+          />
+          <button
+            type="button"
+            onClick={pasteOwnSvg}
+            disabled={busy || pasteText.trim().length < 20}
+            className="inline-flex items-center gap-1 rounded-full bg-slate-900 px-2.5 py-1 text-[10px] font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
+          >
+            {busy ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : null}
+            Apply SVG
+          </button>
         </div>
       ) : null}
     </div>

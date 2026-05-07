@@ -24,7 +24,9 @@ export type SiteTemplate =
   | 'hospitality'
   | 'legal'
   | 'nonprofit'
-  | 'tech';
+  | 'tech'
+  | 'events'
+  | 'homeservices';
 
 /** Which blocks are rendered, and in what order. */
 export type SiteBlockKey =
@@ -249,6 +251,7 @@ export interface HeroCutout {
  *   3. Add the string literal here
  */
 export type HeroIllustrationStyle =
+  // Original shortlist
   | 'rocket'
   | 'wrench'
   | 'coffee-cup'
@@ -263,21 +266,97 @@ export type HeroIllustrationStyle =
   | 'car'
   | 'paw'
   | 'briefcase'
-  | 'shopping-bag';
+  | 'shopping-bag'
+  // Food & drink
+  | 'espresso'
+  | 'croissant'
+  | 'pizza-slice'
+  | 'wine-glass'
+  | 'cocktail'
+  | 'ice-cream'
+  | 'cupcake'
+  | 'chef-hat'
+  // Beauty & wellness
+  | 'hair-dryer'
+  | 'lipstick'
+  | 'nail-polish'
+  | 'candle'
+  | 'flower'
+  // Fitness
+  | 'kettlebell'
+  | 'running-shoe'
+  | 'yoga-pose'
+  // Medical & dental
+  | 'stethoscope'
+  | 'pill'
+  | 'heart-pulse'
+  | 'dna'
+  // Real estate & home
+  | 'key'
+  | 'couch'
+  | 'lamp'
+  // Trades
+  | 'hammer'
+  | 'toolbox'
+  | 'paint-brush'
+  | 'gear'
+  | 'drill'
+  // Automotive
+  | 'motorcycle'
+  | 'delivery-van'
+  // Tech
+  | 'laptop'
+  | 'atom'
+  | 'cpu'
+  // Retail
+  | 'gift-box'
+  | 'diamond'
+  // Education
+  | 'book'
+  | 'graduation-cap'
+  | 'apple'
+  // Creative
+  | 'palette'
+  | 'film-reel'
+  | 'music-note'
+  // Nature & outdoors
+  | 'tree'
+  | 'mountain'
+  | 'sun'
+  | 'wave'
+  // Abstract / geometric
+  | 'orb'
+  | 'cube-iso'
+  | 'prism'
+  | 'spiral';
 
 /**
  * Motion preset for the hero illustration. Drives which scroll-linked
- * transforms are applied. Keep the list short — more than a handful
- * becomes noise; pick the preset that best matches the vibe.
+ * transforms are applied. Each preset is tuned for GPU transforms only
+ * (translate / rotate / scale / opacity) so they stay 60fps even on
+ * low-end mobile. All presets respect prefers-reduced-motion — they
+ * flatten to static when the user has that preference on.
  *
  *   launch   — rocket-style upward flight on scroll (big translate-Y
- *              negative, slight scale pulse), like the marketing site.
+ *              negative, slight scale pulse).
  *   float    — gentle vertical bob, independent of scroll. Safe default.
  *   drift    — slow diagonal drift on scroll (across + up).
  *   orbit    — small circular drift looping continuously.
  *   tilt-3d  — mouse-follow 3D tilt, no scroll translate. Premium feel.
  *   parallax — moderate scroll-Y translate + slight scale-down
  *              (behaves like a background layer). The most "website-y".
+ *   pulse    — rhythmic scale breathing (1 → 1.05 → 1).
+ *   spin     — slow continuous rotation (20s loop). Great for gears,
+ *              dna, orbs, records.
+ *   sway     — metronome-style left-right rotation (-3° ↔ 3°).
+ *   wobble   — playful rotate + scale (great for paw, ice-cream).
+ *   zoom-in  — scroll-Y scale-up from 0.7 → 1.15. Product-page vibe.
+ *   flip-y   — 180° Y-axis flip-in on mount. Dramatic entry, then idle.
+ *   bounce   — keyframe bounce on loop. Playful kids/nonprofit feel.
+ *   shake    — quick horizontal shake when in view. Attention-grabber.
+ *   reveal   — mask-in from bottom as the hero scrolls past 30%. Cinematic.
+ *   fade-in  — opacity 0 → 1 on scroll. Minimal.
+ *   slide-in — translate-X from off-canvas on scroll. Director-style.
  *   none     — static. For users who want a bold image with zero motion.
  */
 export type HeroIllustrationMotion =
@@ -287,9 +366,29 @@ export type HeroIllustrationMotion =
   | 'orbit'
   | 'tilt-3d'
   | 'parallax'
+  | 'pulse'
+  | 'spin'
+  | 'sway'
+  | 'wobble'
+  | 'zoom-in'
+  | 'flip-y'
+  | 'bounce'
+  | 'shake'
+  | 'reveal'
+  | 'fade-in'
+  | 'slide-in'
   | 'none';
 
 export interface HeroIllustration {
+  /**
+   * When true, keep all the config fields intact (style, motion, prompt,
+   * etc.) but skip rendering the illustration. Lets agencies toggle the
+   * parallax prop on/off without losing their configuration — removing
+   * the whole `illustration` object would lose any uploaded customUrl
+   * or stored prompt.
+   */
+  hidden?: boolean;
+
   /**
    * Direct URL to a custom image (SVG preferred for sharpness, PNG with
    * transparency also works). Takes precedence over `style` when set.
@@ -332,6 +431,34 @@ export interface HeroIllustration {
    * teal", "a 3D isometric wrench with a green gradient", etc.
    */
   prompt?: string;
+
+  /**
+   * Motion speed multiplier. 1 = default; 2 = twice as fast; 0.5 =
+   * half-speed. Clamped 0.25 – 4 in the renderer. Only affects
+   * keyframe-based presets (float, orbit, pulse, spin, sway, wobble,
+   * bounce). Scroll-linked presets use scroll progress so speed is
+   * inherently set by scroll velocity.
+   */
+  motionSpeed?: number;
+
+  /**
+   * Motion intensity. 1 = default; 2 = doubled travel distance / angle;
+   * 0.5 = half-intensity. Clamped 0.1 – 3 in the renderer. Lets agencies
+   * dial motion up for playful brands or right down for premium ones
+   * without picking a different preset.
+   */
+  motionIntensity?: number;
+
+  /**
+   * Inline SVG markup generated by the AI SVG composer. When present,
+   * takes precedence over `customUrl` and `style` because it's already
+   * painted with the brand palette and can carry its own internal
+   * <animate> tags for richer motion than CSS transforms alone.
+   * Stored as a raw string; the renderer mounts it via
+   * dangerouslySetInnerHTML after running it through a safe-SVG
+   * sanitiser.
+   */
+  customSvg?: string;
 }
 
 /**
@@ -1204,6 +1331,19 @@ export interface WebsiteConfig {
   customSections?: CustomSection[];
 
   /**
+   * Optional decorative backgrounds applied per-section. Keys match
+   * `SiteBlockKey` (e.g. `"services"`, `"reviews"`, `"faq"`). Each entry
+   * defines a full-section background effect (grid, dots, noise,
+   * particles, etc.) rendered behind that block's content. See
+   * `SectionBackground` for the shape.
+   *
+   * Hero is handled separately (via `hero.variant` which IS the hero
+   * background) so setting `sectionBackgrounds.hero` is ignored — edit
+   * `hero.variant` for that.
+   */
+  sectionBackgrounds?: SectionBackgrounds;
+
+  /**
    * Multipage sites. When present and length > 1, the renderer treats the
    * site as multipage: the homepage lives at `/sites/[slug]` using the
    * page with `slug: 'home'` (or the first entry if none), and other
@@ -1280,6 +1420,12 @@ export const DEFAULT_LAYOUT: Record<SiteTemplate, SiteBlockKey[]> = {
   legal: ['nav', 'hero', 'about', 'services', 'team', 'trustBadges', 'reviews', 'faq', 'contact', 'footer'],
   nonprofit: ['nav', 'hero', 'about', 'stats', 'services', 'team', 'reviews', 'cta', 'contact', 'footer'],
   tech: ['nav', 'hero', 'stats', 'services', 'team', 'about', 'reviews', 'faq', 'contact', 'footer'],
+  // Events — wedding planners, event venues, caterers. Gallery-led,
+  // atmospheric, lots of photography + testimonials.
+  events: ['nav', 'hero', 'gallery', 'services', 'portfolio', 'reviews', 'faq', 'cta', 'contact', 'footer'],
+  // Home services — landscapers, painters, roofers, builders. Proof-heavy
+  // (before/after + portfolio), local (serviceAreas + trustBadges).
+  homeservices: ['nav', 'hero', 'services', 'beforeAfter', 'portfolio', 'serviceAreas', 'process', 'trustBadges', 'reviews', 'cta', 'contact', 'footer'],
 };
 
 /**
@@ -1302,6 +1448,8 @@ export const DEFAULT_HERO_VARIANT: Record<SiteTemplate, HeroVariant> = {
   legal: 'spotlight',
   nonprofit: 'floating-icons',
   tech: 'beams',
+  events: 'full-bg-image',
+  homeservices: 'parallax-layers',
 };
 
 /** All hero variants the generator can pick from. */
@@ -1349,6 +1497,8 @@ export const SITE_TEMPLATES = [
   'legal',
   'nonprofit',
   'tech',
+  'events',
+  'homeservices',
 ] as const satisfies readonly SiteTemplate[];
 
 /** Brand palette derived from a primary color. Used when the generator misses one. */
@@ -1410,3 +1560,510 @@ export function luminance(hex: string): number {
   const transform = (c: number) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
   return 0.2126 * transform(r) + 0.7152 * transform(g) + 0.0722 * transform(b);
 }
+
+
+/* ═══════════════════════════════════════════════════════════════════ */
+/* Template personality — drives distinct visual signatures per industry */
+/* ═══════════════════════════════════════════════════════════════════ */
+
+/**
+ * Curated design "mood board" per template. The generator uses this to
+ * pick coordinated variant clusters so each industry has its own visual
+ * signature — a law firm looks nothing like a gym, and two gyms don't
+ * look identical either (the generator picks one of 2-3 hero variants
+ * per template at random weighted by fit).
+ *
+ * Each template specifies:
+ *   - `heroVariants` — 2-4 recommended hero variants for this industry
+ *     (AI picks one; randomising a bit so the same template doesn't
+ *     always render identically)
+ *   - `servicesVariants` — preferred services styles
+ *   - `galleryVariants` — preferred gallery styles (parallax, 3d, etc.)
+ *   - `reviewsVariants` — preferred testimonials styles
+ *   - `ctaVariants` — preferred CTA styles
+ *   - `processVariant` — numbered vs timeline
+ *   - `statsVariant` — ticker vs gradient vs changelog
+ *   - `teamVariant` — preferred team card layout
+ *   - `contactVariant` — form-side / grid-sections / shader
+ *   - `faqVariant` — accordion / grid / with-background
+ *   - `headlineEffect` — typewriter / flip-words / generate / none
+ *   - `signature` — one "wow" feature the template should lean into
+ *     (e.g. "container-scroll", "3d-marquee gallery", "animated-testimonials")
+ *   - `paletteHints` — descriptive palette notes for Claude
+ *   - `toneWords` — one-liner description of the brand feel
+ */
+export interface TemplatePersonality {
+  heroVariants: HeroVariant[];
+  servicesVariants: Array<
+    'cards' | 'bento' | 'sticky-scroll' | 'hover-effect' | '3d-cards' | 'wobble' | 'glare' | 'expandable'
+  >;
+  galleryVariants: Array<
+    | 'grid'
+    | 'focus-cards'
+    | 'parallax'
+    | 'apple-carousel'
+    | '3d-marquee'
+    | 'layout-grid'
+    | 'compare'
+    | 'direction-aware'
+  >;
+  reviewsVariants: Array<
+    | 'grid'
+    | 'marquee'
+    | 'carousel'
+    | 'masonry'
+    | 'draggable'
+    | 'stack'
+    | 'animated-testimonials'
+  >;
+  ctaVariants: Array<
+    | 'simple'
+    | 'with-images'
+    | 'masonry-images'
+    | 'centered-bold'
+    | 'moving-border'
+    | 'text-reveal'
+  >;
+  processVariant: 'numbered' | 'timeline';
+  statsVariant: 'ticker' | 'gradient' | 'changelog';
+  teamVariant:
+    | 'portrait'
+    | 'minimal'
+    | 'quote'
+    | 'banner'
+    | 'light-bg'
+    | 'small-avatars'
+    | 'card-hover';
+  contactVariant: 'form-side' | 'grid-sections' | 'shader';
+  faqVariant: 'accordion' | 'grid' | 'with-background';
+  headlineEffect: 'typewriter' | 'flip-words' | 'generate' | 'none';
+  /** A signature visual feature the generator should PUSH for this template. */
+  signature: string;
+  /** Palette and tone hints for Claude's colour picks. */
+  paletteHints: string;
+  /** One-line tone description. */
+  toneWords: string;
+}
+
+export const TEMPLATE_PERSONALITY: Record<SiteTemplate, TemplatePersonality> = {
+  service: {
+    // Trades / plumbing / electrical — trust + proof. Parallax with
+    // big work photos + before/after emphasis.
+    heroVariants: ['parallax-layers', 'two-column-image', 'spotlight'],
+    servicesVariants: ['cards', 'hover-effect', 'expandable'],
+    galleryVariants: ['compare', 'focus-cards', 'parallax'],
+    reviewsVariants: ['marquee', 'grid', 'animated-testimonials'],
+    ctaVariants: ['simple', 'moving-border', 'with-images'],
+    processVariant: 'numbered',
+    statsVariant: 'ticker',
+    teamVariant: 'portrait',
+    contactVariant: 'form-side',
+    faqVariant: 'accordion',
+    headlineEffect: 'none',
+    signature: 'compare gallery (before/after slider) + animated testimonials marquee',
+    paletteHints:
+      'Teals / deep greens / navies. Trustworthy, grounded, working-class professional.',
+    toneWords: 'direct, confident, no-nonsense',
+  },
+  food: {
+    // Cafes / restaurants — warm, sensory, photo-led. Floating icons
+    // for playfulness; apple-carousel for menu photos; marquee reviews.
+    heroVariants: ['floating-icons', 'full-bg-image', 'multicolor'],
+    servicesVariants: ['cards', 'bento', 'wobble'],
+    galleryVariants: ['apple-carousel', '3d-marquee', 'focus-cards'],
+    reviewsVariants: ['marquee', 'masonry', 'draggable'],
+    ctaVariants: ['with-images', 'masonry-images', 'centered-bold'],
+    processVariant: 'numbered',
+    statsVariant: 'ticker',
+    teamVariant: 'quote',
+    contactVariant: 'form-side',
+    faqVariant: 'with-background',
+    headlineEffect: 'flip-words',
+    signature: 'apple-carousel gallery with zoom-to-tile menu shots + floating-icons hero',
+    paletteHints:
+      'Warm terracotta, amber, cream, deep brown. Evoke morning light and craft.',
+    toneWords: 'warm, appetising, welcoming',
+  },
+  beauty: {
+    // Salons / spas — premium, aspirational, lush. Aurora / lamp for
+    // luxury; focus-cards for before/after; masonry reviews.
+    heroVariants: ['aurora', 'lamp', 'parallax-layers'],
+    servicesVariants: ['glare', 'hover-effect', 'bento'],
+    galleryVariants: ['focus-cards', 'layout-grid', 'compare'],
+    reviewsVariants: ['masonry', 'carousel', 'animated-testimonials'],
+    ctaVariants: ['centered-bold', 'moving-border', 'text-reveal'],
+    processVariant: 'timeline',
+    statsVariant: 'gradient',
+    teamVariant: 'banner',
+    contactVariant: 'shader',
+    faqVariant: 'with-background',
+    headlineEffect: 'flip-words',
+    signature: 'aurora hero + glare service cards + masonry testimonials',
+    paletteHints:
+      'Soft rose, magenta, blush, champagne, cream. Feminine, clean, luxurious.',
+    toneWords: 'elegant, pampering, refined',
+  },
+  fitness: {
+    // Gyms / PT — energetic, bold, dark hero. Meteors / beams / vortex.
+    // Bento services, ticker stats, draggable reviews.
+    heroVariants: ['meteors', 'beams', 'vortex'],
+    servicesVariants: ['bento', '3d-cards', 'wobble'],
+    galleryVariants: ['3d-marquee', 'parallax', 'direction-aware'],
+    reviewsVariants: ['draggable', 'marquee', 'stack'],
+    ctaVariants: ['moving-border', 'centered-bold', 'with-images'],
+    processVariant: 'numbered',
+    statsVariant: 'ticker',
+    teamVariant: 'card-hover',
+    contactVariant: 'grid-sections',
+    faqVariant: 'grid',
+    headlineEffect: 'generate',
+    signature: 'meteors dark hero + bento services with featured big tile + 3d-marquee gallery',
+    paletteHints:
+      'Electric blue, acid green, orange-red pop, near-black backgrounds. High-energy, gym-floor vibe.',
+    toneWords: 'bold, motivating, no-excuses',
+  },
+  professional: {
+    // Consulting / accounting — calm, authoritative, copy-first.
+    // Hero-highlight or spotlight. Sticky-scroll services (the
+    // signature feature), animated testimonials.
+    heroVariants: ['hero-highlight', 'spotlight', 'ripple'],
+    servicesVariants: ['sticky-scroll', 'hover-effect', 'expandable'],
+    galleryVariants: ['grid', 'focus-cards', 'layout-grid'],
+    reviewsVariants: ['animated-testimonials', 'grid', 'carousel'],
+    ctaVariants: ['simple', 'moving-border', 'centered-bold'],
+    processVariant: 'timeline',
+    statsVariant: 'changelog',
+    teamVariant: 'light-bg',
+    contactVariant: 'form-side',
+    faqVariant: 'accordion',
+    headlineEffect: 'typewriter',
+    signature: 'hero-highlight with highlighted phrase + sticky-scroll services section',
+    paletteHints:
+      'Deep navy, slate, warm teal. Serious, trustworthy, editorial.',
+    toneWords: 'authoritative, precise, measured',
+  },
+  retail: {
+    // Shops / boutiques — playful, colourful, product-led.
+    // Gradient-mesh / multicolor / boxes. 3d-marquee for product shots.
+    heroVariants: ['gradient-mesh', 'multicolor', 'boxes'],
+    servicesVariants: ['bento', '3d-cards', 'wobble'],
+    galleryVariants: ['3d-marquee', 'apple-carousel', 'layout-grid'],
+    reviewsVariants: ['masonry', 'marquee', 'draggable'],
+    ctaVariants: ['with-images', 'masonry-images', 'moving-border'],
+    processVariant: 'numbered',
+    statsVariant: 'gradient',
+    teamVariant: 'small-avatars',
+    contactVariant: 'grid-sections',
+    faqVariant: 'grid',
+    headlineEffect: 'flip-words',
+    signature: 'multicolor hero + 3d-marquee product gallery + draggable reviews',
+    paletteHints:
+      'Vibrant purple + gold + blush, or deep pinks. Shoppable, playful, magazine-style.',
+    toneWords: 'fresh, fun, collectable',
+  },
+  medical: {
+    // Clinics / dentists — clean, calm, trust-first.
+    // Ripple / spotlight. Timeline process. Accordion FAQ.
+    heroVariants: ['ripple', 'spotlight', 'hero-highlight'],
+    servicesVariants: ['cards', 'hover-effect', 'expandable'],
+    galleryVariants: ['grid', 'focus-cards', 'layout-grid'],
+    reviewsVariants: ['grid', 'carousel', 'animated-testimonials'],
+    ctaVariants: ['simple', 'centered-bold', 'moving-border'],
+    processVariant: 'timeline',
+    statsVariant: 'gradient',
+    teamVariant: 'light-bg',
+    contactVariant: 'form-side',
+    faqVariant: 'accordion',
+    headlineEffect: 'none',
+    signature: 'ripple hero (calming water effect) + timeline process',
+    paletteHints:
+      'Calm cyan, teal, white space. Medical-clean, reassuring, airy.',
+    toneWords: 'reassuring, professional, caring',
+  },
+  creative: {
+    // Design / photography — bold, confident, portfolio-led.
+    // Sparkles / dither / lamp. 3d-marquee gallery (the hero feature).
+    heroVariants: ['sparkles', 'dither', 'lamp'],
+    servicesVariants: ['bento', 'glare', '3d-cards'],
+    galleryVariants: ['3d-marquee', 'apple-carousel', 'parallax'],
+    reviewsVariants: ['animated-testimonials', 'draggable', 'masonry'],
+    ctaVariants: ['text-reveal', 'moving-border', 'centered-bold'],
+    processVariant: 'timeline',
+    statsVariant: 'gradient',
+    teamVariant: 'banner',
+    contactVariant: 'shader',
+    faqVariant: 'with-background',
+    headlineEffect: 'generate',
+    signature: '3d-marquee portfolio gallery + sparkles hero + text-reveal CTA',
+    paletteHints:
+      'Bold red + orange, or deep black with a hot accent. Editorial, confident.',
+    toneWords: 'bold, crafted, directional',
+  },
+  realestate: {
+    // Agents — aspirational, photo-led, stately.
+    // Parallax / lamp / two-column. Focus-cards gallery. Banner team.
+    heroVariants: ['parallax-layers', 'lamp', 'two-column-image'],
+    servicesVariants: ['hover-effect', 'bento', 'glare'],
+    galleryVariants: ['parallax', 'focus-cards', '3d-marquee'],
+    reviewsVariants: ['grid', 'carousel', 'animated-testimonials'],
+    ctaVariants: ['centered-bold', 'with-images', 'moving-border'],
+    processVariant: 'numbered',
+    statsVariant: 'gradient',
+    teamVariant: 'banner',
+    contactVariant: 'form-side',
+    faqVariant: 'accordion',
+    headlineEffect: 'none',
+    signature: 'parallax-layers hero + focus-cards property gallery + banner team cards',
+    paletteHints:
+      'Deep navy + emerald, or warm sand + bronze. Architectural, prestige.',
+    toneWords: 'aspirational, curated, discerning',
+  },
+  education: {
+    // Schools / training — enthusiastic, structured, warm.
+    // Beams / multicolor. Sticky-scroll services. Carousel reviews.
+    heroVariants: ['beams', 'multicolor', 'boxes'],
+    servicesVariants: ['sticky-scroll', 'bento', 'cards'],
+    galleryVariants: ['grid', 'apple-carousel', 'focus-cards'],
+    reviewsVariants: ['carousel', 'grid', 'animated-testimonials'],
+    ctaVariants: ['simple', 'centered-bold', 'with-images'],
+    processVariant: 'timeline',
+    statsVariant: 'ticker',
+    teamVariant: 'light-bg',
+    contactVariant: 'grid-sections',
+    faqVariant: 'accordion',
+    headlineEffect: 'flip-words',
+    signature: 'sticky-scroll services that reveal the curriculum as you scroll',
+    paletteHints:
+      'Indigo + violet, or warm orange + teal. Approachable, bright, energising.',
+    toneWords: 'encouraging, clear, supportive',
+  },
+  automotive: {
+    // Mechanics / garages — gritty, industrial, proof-heavy.
+    // Dither / meteors / beams. Compare gallery. Card-hover team.
+    heroVariants: ['dither', 'meteors', 'beams'],
+    servicesVariants: ['bento', '3d-cards', 'hover-effect'],
+    galleryVariants: ['compare', '3d-marquee', 'parallax'],
+    reviewsVariants: ['marquee', 'draggable', 'grid'],
+    ctaVariants: ['moving-border', 'simple', 'centered-bold'],
+    processVariant: 'numbered',
+    statsVariant: 'ticker',
+    teamVariant: 'card-hover',
+    contactVariant: 'grid-sections',
+    faqVariant: 'grid',
+    headlineEffect: 'generate',
+    signature: 'dither hero (retro-industrial) + compare gallery + card-hover team',
+    paletteHints:
+      'Dark slate + red, or black + yellow. Industrial, tool-belt, workshop.',
+    toneWords: 'gritty, reliable, hands-on',
+  },
+  hospitality: {
+    // Hotels / B&Bs — atmospheric, photo-first, dreamy.
+    // Full-bg-image / lamp / aurora. Focus-cards. Masonry reviews.
+    heroVariants: ['full-bg-image', 'lamp', 'aurora'],
+    servicesVariants: ['bento', 'glare', 'hover-effect'],
+    galleryVariants: ['focus-cards', 'apple-carousel', 'parallax'],
+    reviewsVariants: ['masonry', 'animated-testimonials', 'carousel'],
+    ctaVariants: ['centered-bold', 'with-images', 'text-reveal'],
+    processVariant: 'timeline',
+    statsVariant: 'gradient',
+    teamVariant: 'quote',
+    contactVariant: 'shader',
+    faqVariant: 'with-background',
+    headlineEffect: 'flip-words',
+    signature: 'full-bg-image hero with rotating featured rooms + focus-cards gallery',
+    paletteHints:
+      'Warm brown + amber + cream, or deep forest + brass. Atmospheric, cinematic.',
+    toneWords: 'welcoming, atmospheric, memorable',
+  },
+  legal: {
+    // Law firms — authoritative, traditional, serious.
+    // Hero-highlight / spotlight / ripple. Sticky-scroll services.
+    heroVariants: ['hero-highlight', 'spotlight', 'ripple'],
+    servicesVariants: ['sticky-scroll', 'expandable', 'hover-effect'],
+    galleryVariants: ['grid', 'focus-cards', 'layout-grid'],
+    reviewsVariants: ['animated-testimonials', 'carousel', 'grid'],
+    ctaVariants: ['simple', 'centered-bold', 'moving-border'],
+    processVariant: 'timeline',
+    statsVariant: 'changelog',
+    teamVariant: 'light-bg',
+    contactVariant: 'form-side',
+    faqVariant: 'accordion',
+    headlineEffect: 'typewriter',
+    signature:
+      'hero-highlight with the firm mission as highlighted text + animated testimonials',
+    paletteHints:
+      'Deep navy + gold accents, or burgundy + ivory. Libraries, old books, law-firm serious.',
+    toneWords: 'gravitas, precise, trustworthy',
+  },
+  nonprofit: {
+    // Charities / community — hopeful, community-led, warm.
+    // Floating-icons / multicolor / wavy. Masonry reviews.
+    heroVariants: ['floating-icons', 'multicolor', 'wavy'],
+    servicesVariants: ['cards', 'bento', 'hover-effect'],
+    galleryVariants: ['focus-cards', 'grid', 'apple-carousel'],
+    reviewsVariants: ['masonry', 'draggable', 'animated-testimonials'],
+    ctaVariants: ['with-images', 'centered-bold', 'moving-border'],
+    processVariant: 'numbered',
+    statsVariant: 'ticker',
+    teamVariant: 'small-avatars',
+    contactVariant: 'grid-sections',
+    faqVariant: 'grid',
+    headlineEffect: 'flip-words',
+    signature:
+      'floating-icons hero with emojis symbolising impact + masonry impact reviews',
+    paletteHints:
+      'Emerald + amber, or coral + teal. Community-warm, hand-drawn feel, human.',
+    toneWords: 'hopeful, grassroots, collective',
+  },
+  tech: {
+    // SaaS / startups — modern, technical, motion-heavy.
+    // Boxes / beams / vortex. Bento / 3d-cards. Animated testimonials.
+    heroVariants: ['boxes', 'beams', 'vortex'],
+    servicesVariants: ['bento', '3d-cards', 'hover-effect'],
+    galleryVariants: ['3d-marquee', 'focus-cards', 'apple-carousel'],
+    reviewsVariants: ['animated-testimonials', 'marquee', 'masonry'],
+    ctaVariants: ['moving-border', 'text-reveal', 'centered-bold'],
+    processVariant: 'timeline',
+    statsVariant: 'changelog',
+    teamVariant: 'card-hover',
+    contactVariant: 'grid-sections',
+    faqVariant: 'grid',
+    headlineEffect: 'typewriter',
+    signature:
+      'boxes hero (animated interactive grid) + bento services with featured big tile + changelog stats',
+    paletteHints:
+      'Indigo + cyan, or rich violet + cyan. Linear / Stripe / Vercel modern-SaaS feel.',
+    toneWords: 'forward, technical, confident',
+  },
+  events: {
+    // Wedding planners / event venues / caterers — atmospheric,
+    // photo-led, emotional. Lamp / full-bg / aurora hero. Focus-cards
+    // or apple-carousel galleries to showcase events. Masonry reviews.
+    heroVariants: ['lamp', 'full-bg-image', 'aurora'],
+    servicesVariants: ['bento', 'glare', 'hover-effect'],
+    galleryVariants: ['apple-carousel', 'focus-cards', '3d-marquee'],
+    reviewsVariants: ['masonry', 'animated-testimonials', 'carousel'],
+    ctaVariants: ['centered-bold', 'with-images', 'text-reveal'],
+    processVariant: 'timeline',
+    statsVariant: 'gradient',
+    teamVariant: 'banner',
+    contactVariant: 'shader',
+    faqVariant: 'with-background',
+    headlineEffect: 'flip-words',
+    signature:
+      'lamp hero with an atmospheric photo + apple-carousel gallery showing real events + timeline process for "how the day unfolds"',
+    paletteHints:
+      'Ivory + champagne + blush, or deep forest + gold + cream, or midnight navy + rose gold. Romantic, celebratory, editorial.',
+    toneWords: 'celebratory, curated, unforgettable',
+  },
+  homeservices: {
+    // Landscapers / painters / roofers / builders — proof-heavy,
+    // local, durable. Parallax / two-column hero. COMPARE gallery is
+    // the signature (before / after sells the work). Portfolio + process
+    // lead the story. Numbered process builds trust.
+    heroVariants: ['parallax-layers', 'two-column-image', 'spotlight'],
+    servicesVariants: ['bento', 'hover-effect', 'expandable'],
+    galleryVariants: ['compare', 'parallax', 'focus-cards'],
+    reviewsVariants: ['marquee', 'masonry', 'animated-testimonials'],
+    ctaVariants: ['with-images', 'moving-border', 'simple'],
+    processVariant: 'numbered',
+    statsVariant: 'ticker',
+    teamVariant: 'portrait',
+    contactVariant: 'form-side',
+    faqVariant: 'accordion',
+    headlineEffect: 'none',
+    signature:
+      'compare gallery (before/after drag slider) + portfolio with finished-job photos + numbered process',
+    paletteHints:
+      'Warm forest green + terracotta, or slate navy + sunburst yellow. Trade-professional, weather-beaten, proud-of-our-work.',
+    toneWords: 'practical, proud, no-nonsense',
+  },
+};
+
+/**
+ * Pick a random hero variant from the template's curated shortlist so
+ * two sites with the same template don't render identically. Uses a
+ * seed derived from the business name so regenerating the same site
+ * produces stable output across runs but different sites differ.
+ */
+export function pickHeroVariant(
+  template: SiteTemplate,
+  seed?: string,
+): HeroVariant {
+  const personality = TEMPLATE_PERSONALITY[template];
+  const options = personality.heroVariants;
+  if (!seed) return options[0]!;
+  const hash = hashString(seed);
+  return options[hash % options.length]!;
+}
+
+/**
+ * Tiny, stable string hash. Not cryptographic — used for deterministic
+ * variant selection so the same business name always maps to the same
+ * variant but different names pick different ones.
+ */
+export function hashString(s: string): number {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) {
+    h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
+  }
+  return h;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════ */
+/* Section backgrounds — decorative effects applied to any block        */
+/* ═══════════════════════════════════════════════════════════════════ */
+
+/**
+ * Decorative background effect that can be applied to any section on
+ * the site. Each effect is a full-section absolute layer rendered
+ * BEHIND the section's content with `pointer-events: none` so it
+ * doesn't interfere with clicks.
+ *
+ * The hero block already has its own background family (variants like
+ * 'beams', 'aurora', etc.) — these are for the OTHER sections. Use them
+ * to add a grid pattern to the services section, a particle field behind
+ * the testimonials, a dot grid behind the pricing tiers, etc.
+ */
+export type SectionBackgroundKind =
+  | 'none'
+  | 'grid'
+  | 'dots'
+  | 'noise'
+  | 'gradient'
+  | 'mesh'
+  | 'particles'
+  | 'sparkles'
+  | 'meteors'
+  | 'beams'
+  | 'ripple'
+  | 'shooting-stars';
+
+export interface SectionBackground {
+  kind: SectionBackgroundKind;
+  /**
+   * Opacity 0–1. Default varies per effect (lighter for noise, darker
+   * for particles). Clamped at the renderer.
+   */
+  opacity?: number;
+  /**
+   * Optional tint to bias the effect toward a specific colour. Accepts
+   * any CSS colour; defaults to the brand primary when omitted. Grid
+   * / dots / noise respect this as the line / dot / grain colour.
+   */
+  tint?: string;
+}
+
+/**
+ * Map of block key → background. Stored on `WebsiteConfig` so the
+ * renderer can look up the background for any block without forcing
+ * every block to have its own `sectionBackground` field. The agency
+ * edits these in the dashboard's "Section" editor; Claude can also
+ * set them when the instruction mentions "add a dot grid to the
+ * testimonials" etc.
+ *
+ * Keys match the `SiteBlockKey` enum plus the special `custom:<n>`
+ * form to target an individual custom section by index.
+ */
+export type SectionBackgrounds = Partial<Record<string, SectionBackground>>;

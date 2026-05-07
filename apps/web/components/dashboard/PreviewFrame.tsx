@@ -3,10 +3,13 @@
 /**
  * Preview frame with two modes:
  *
- *   Desktop: renders the children directly into the dashboard (no iframe).
- *   This keeps inline editing, the image picker, and every other
- *   interactive edit-mode feature working because the React tree is one
- *   continuous tree.
+ *   Desktop: renders the children at a fixed 1440px intrinsic width and
+ *   CSS-scales the whole thing down to fit the available preview column.
+ *   This gives pixel-perfect fidelity with the real desktop site — a
+ *   hero looks exactly like it will in production on a 1440px monitor.
+ *   Since the DOM tree is still a regular React tree (not an iframe),
+ *   inline editing, the image picker, and every interactive edit feature
+ *   continue to work unchanged.
  *
  *   Mobile / Tablet: renders the LIVE site URL inside an iframe with a
  *   fixed width matching the real device. Because the iframe is a real
@@ -21,12 +24,9 @@
  *   - Viewport behaves exactly like a real phone
  *   - Same infra the published site uses — what you see really is what
  *     a real phone will show
- *
- * Desktop/edit-mode is unaffected by any of this. You only give up
- * inline-edit when simulating a phone, which is a sensible split.
  */
 
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 export type DevicePreset = 'desktop' | 'tablet' | 'mobile';
 
@@ -43,14 +43,23 @@ interface PreviewFrameProps {
   pageSlug?: string;
 }
 
-// Device widths chosen to match the most-common real phones / tablets.
-// 390px = iPhone 14/15 Pro logical viewport.
-// 768px = iPad Mini / portrait iPad.
+// Device widths chosen to match the most-common real viewports.
+// 390px  = iPhone 14/15 Pro logical viewport.
+// 768px  = iPad Mini / portrait iPad.
+// 1440px = common desktop (MacBook Pro 14" / common cafe laptop).
 const DEVICE_WIDTH: Record<DevicePreset, number | null> = {
   desktop: null,
   tablet: 768,
   mobile: 390,
 };
+
+/**
+ * Intrinsic width we render the desktop preview at. Scaled down by CSS
+ * transform to fit whatever column width the dashboard gives us. 1440 is
+ * the "most common desktop browser width" across all our client analytics,
+ * so laying out at this width makes preview match production pixel-perfectly.
+ */
+const DESKTOP_INTRINSIC_WIDTH = 1440;
 
 export function PreviewFrame({
   device,
@@ -59,14 +68,7 @@ export function PreviewFrame({
   pageSlug,
 }: PreviewFrameProps) {
   if (device === 'desktop') {
-    return (
-      <div
-        data-preview-root="1"
-        className="max-h-[85vh] overflow-y-auto bg-white"
-      >
-        {children}
-      </div>
-    );
+    return <ScaledDesktopPreview>{children}</ScaledDesktopPreview>;
   }
 
   // Mobile/tablet — iframe the real site. Fall back to desktop if we
@@ -87,6 +89,120 @@ export function PreviewFrame({
   }
 
   return <IframePreview device={device} liveUrl={liveUrl} pageSlug={pageSlug} />;
+}
+
+/**
+ * Desktop preview rendered at the canonical 1440px intrinsic width and
+ * CSS-scaled to fit the dashboard column. This matches what the site
+ * will look like on a real desktop browser instead of squishing the
+ * layout into whatever width the editor sidebar leaves.
+ *
+ * Scaling uses the `zoom` property when supported (Chromium family)
+ * because it lets content stay semantically 1440px while visually
+ * shrinking — meaning Tailwind's breakpoints ("md:", "lg:", "xl:")
+ * trigger exactly the same way they would at the real browser size.
+ * Transform: scale() would force every breakpoint to use the real
+ * container width, which defeats the purpose of "preview at 1440".
+ *
+ * We feature-detect `zoom` at runtime. Firefox / older browsers fall
+ * back to `transform: scale()` with compensating height, which still
+ * gets the aspect ratio right.
+ */
+function ScaledDesktopPreview({ children }: { children: ReactNode }) {
+  const outerRef = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(1);
+  const [useZoom, setUseZoom] = useState(false);
+
+  // Detect `zoom` support. Chromium/WebKit support it; Firefox does not
+  // (yet). `zoom: 1` is a no-op on unsupported browsers but still sets
+  // the computed style — we check with a sentinel element.
+  useEffect(() => {
+    // Safer feature detection than a UA sniff. Modern Firefox 126+
+    // actually now supports `zoom` too, so this benefits everyone.
+    try {
+      const probe = document.createElement('div');
+      probe.style.zoom = '2';
+      document.body.appendChild(probe);
+      const works = window.getComputedStyle(probe).zoom === '2';
+      document.body.removeChild(probe);
+      setUseZoom(works);
+    } catch {
+      setUseZoom(false);
+    }
+  }, []);
+
+  // Recompute scale on resize. Clamped at 1 so we never zoom UP — if
+  // the editor column is somehow wider than 1440px, we render 1:1.
+  // Min 0.35 so the preview still fits cleanly at narrow column widths
+  // (editor sidebar at 360px on a 1280px viewport leaves ~880px of
+  // preview column width, which scales to 0.61 — well above the floor).
+  useEffect(() => {
+    const update = () => {
+      const el = outerRef.current;
+      if (!el) return;
+      const available = el.clientWidth;
+      const next = Math.min(1, Math.max(0.35, available / DESKTOP_INTRINSIC_WIDTH));
+      setScale(next);
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    if (outerRef.current) ro.observe(outerRef.current);
+    window.addEventListener('resize', update);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', update);
+    };
+  }, []);
+
+  // When using zoom, the outer div's clientHeight already reflects the
+  // visually-scaled content, so we don't need to pre-compute a height.
+  // When using transform, we must pre-compute the scaled height so the
+  // outer container reserves the correct vertical space (transforms
+  // don't affect layout).
+  return (
+    <div
+      ref={outerRef}
+      data-preview-root="1"
+      className="max-h-[85vh] w-full overflow-y-auto bg-white"
+      style={{ overflowX: 'auto' }}
+    >
+      {useZoom ? (
+        <div
+          style={{
+            width: `${DESKTOP_INTRINSIC_WIDTH}px`,
+            // Non-standard `zoom` shrinks content semantically — media
+            // queries evaluate against the 1440px intrinsic width so
+            // breakpoints fire correctly.
+            zoom: scale,
+          } as React.CSSProperties}
+        >
+          {children}
+        </div>
+      ) : (
+        // Transform fallback. The scaled content's visual width is
+        // `1440 * scale`, so we set the wrapper's explicit width to
+        // that value — otherwise the parent overflow box thinks the
+        // content is 1440px wide and shows horizontal scroll even when
+        // the scaled content fits.
+        <div
+          style={{
+            width: `${DESKTOP_INTRINSIC_WIDTH * scale}px`,
+            minHeight: '100%',
+          }}
+        >
+          <div
+            style={{
+              width: `${DESKTOP_INTRINSIC_WIDTH}px`,
+              transform: `scale(${scale})`,
+              transformOrigin: 'top left',
+            }}
+          >
+            {children}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function IframePreview({

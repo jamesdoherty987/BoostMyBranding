@@ -15,22 +15,61 @@
  */
 
 import type { HeroIllustrationStyle } from '@boost/core';
+import type { BrandPalette as SharedBrandPalette, IllustrationProps as SharedIllustrationProps } from './svg-types';
+export type BrandPalette = SharedBrandPalette;
+type IllustrationProps = SharedIllustrationProps;
 
-export interface BrandPalette {
-  primary: string;
-  accent: string;
-  pop?: string;
-  /** Deep neutral for contrast shading. Defaults to near-black. */
-  dark?: string;
-}
-
-interface IllustrationProps {
-  brand: BrandPalette;
-  /** Unique id prefix so two illustrations on the same page don't clash
-   *  on gradient/filter ids. Required in practice. */
-  idPrefix: string;
-  className?: string;
-}
+import {
+  Espresso,
+  Croissant,
+  PizzaSlice,
+  WineGlass,
+  Cocktail,
+  IceCream,
+  Cupcake,
+  ChefHat,
+  HairDryer,
+  Lipstick,
+  NailPolish,
+  Candle,
+  Flower,
+  Kettlebell,
+  RunningShoe,
+  YogaPose,
+  Stethoscope,
+  Pill,
+  HeartPulse,
+  Dna,
+  Key,
+  Couch,
+  Lamp,
+  Hammer,
+  Toolbox,
+  PaintBrush,
+  Gear,
+  Drill,
+  Motorcycle,
+  DeliveryVan,
+  Laptop,
+  Atom,
+  Cpu,
+  GiftBox,
+  Diamond,
+  Book,
+  GraduationCap,
+  Apple,
+  Palette,
+  FilmReel,
+  MusicNote,
+  Tree,
+  Mountain,
+  Sun,
+  Wave,
+  Orb,
+  CubeIso,
+  Prism,
+  Spiral,
+} from './extra-svgs';
 
 /* ------------------------------------------------------------------ */
 /* Gradient helper — three-stop brand gradient used across the styles */
@@ -632,6 +671,7 @@ const COMPONENTS: Record<
   HeroIllustrationStyle,
   (props: IllustrationProps) => React.ReactElement
 > = {
+  // Originals
   rocket: Rocket,
   wrench: Wrench,
   'coffee-cup': CoffeeCup,
@@ -647,6 +687,68 @@ const COMPONENTS: Record<
   paw: Paw,
   briefcase: Briefcase,
   'shopping-bag': ShoppingBag,
+  // Food & drink
+  espresso: Espresso,
+  croissant: Croissant,
+  'pizza-slice': PizzaSlice,
+  'wine-glass': WineGlass,
+  cocktail: Cocktail,
+  'ice-cream': IceCream,
+  cupcake: Cupcake,
+  'chef-hat': ChefHat,
+  // Beauty
+  'hair-dryer': HairDryer,
+  lipstick: Lipstick,
+  'nail-polish': NailPolish,
+  candle: Candle,
+  flower: Flower,
+  // Fitness
+  kettlebell: Kettlebell,
+  'running-shoe': RunningShoe,
+  'yoga-pose': YogaPose,
+  // Medical
+  stethoscope: Stethoscope,
+  pill: Pill,
+  'heart-pulse': HeartPulse,
+  dna: Dna,
+  // Home
+  key: Key,
+  couch: Couch,
+  lamp: Lamp,
+  // Trades
+  hammer: Hammer,
+  toolbox: Toolbox,
+  'paint-brush': PaintBrush,
+  gear: Gear,
+  drill: Drill,
+  // Automotive
+  motorcycle: Motorcycle,
+  'delivery-van': DeliveryVan,
+  // Tech
+  laptop: Laptop,
+  atom: Atom,
+  cpu: Cpu,
+  // Retail
+  'gift-box': GiftBox,
+  diamond: Diamond,
+  // Education
+  book: Book,
+  'graduation-cap': GraduationCap,
+  apple: Apple,
+  // Creative
+  palette: Palette,
+  'film-reel': FilmReel,
+  'music-note': MusicNote,
+  // Nature
+  tree: Tree,
+  mountain: Mountain,
+  sun: Sun,
+  wave: Wave,
+  // Abstract
+  orb: Orb,
+  'cube-iso': CubeIso,
+  prism: Prism,
+  spiral: Spiral,
 };
 
 /**

@@ -15,9 +15,10 @@
  *   parallax — moderate scroll-Y + slight scale-down
  *   none     — static
  *
- * Respects prefers-reduced-motion (flattens to static) and the
- * `embedded` context (disables scroll listeners inside the dashboard
- * preview iframe).
+ * Respects prefers-reduced-motion (flattens to static). The `embedded`
+ * flag is kept for signature compatibility but no longer disables
+ * scroll motion — the dashboard's desktop preview is a direct React
+ * tree, so scroll-linked transforms work correctly there.
  *
  * Sources, in precedence order:
  *   1. `customUrl` — any SVG/PNG URL from the editor upload
@@ -64,9 +65,22 @@ export function HeroIllustrationLayer({
   heroRef,
 }: HeroIllustrationLayerProps) {
   const reduced = useReducedMotion();
-  const motionDisabled = Boolean(reduced) || Boolean(embedded);
+  // Scroll-driven motion works fine in the dashboard's direct desktop
+  // preview (same DOM tree as the editor), so we only disable it when
+  // the user explicitly prefers reduced motion. Mobile / tablet preview
+  // runs inside an iframe and uses its own internal scroll, so it's
+  // unaffected either way.
+  const motionDisabled = Boolean(reduced);
+  // Embedded is still used to gate enter-once animations (initial fade
+  // on mount) to avoid flashes inside the preview — kept for those.
+  void embedded;
 
   const { editMode } = useSiteContext();
+
+  // When the agency has toggled the illustration off without deleting
+  // its config, honour that — but still render in edit mode so they
+  // can toggle it back on without losing their work.
+  if (illustration.hidden && !editMode) return null;
 
   const source = resolveSource(illustration);
   if (!source) return null;
@@ -74,6 +88,8 @@ export function HeroIllustrationLayer({
   const side = illustration.side ?? 'right';
   const scale = clamp(illustration.scale ?? 1, 0.5, 1.5);
   const preset = illustration.motion ?? defaultMotionForStyle(illustration.style);
+  const speed = clamp(illustration.motionSpeed ?? 1, 0.25, 4);
+  const intensity = clamp(illustration.motionIntensity ?? 1, 0.1, 3);
 
   return (
     <IllustrationContainer
@@ -81,6 +97,8 @@ export function HeroIllustrationLayer({
       scale={scale}
       editMode={editMode}
       preset={preset}
+      speed={speed}
+      intensity={intensity}
       motionDisabled={motionDisabled}
       heroRef={heroRef}
       idPrefix={idPrefix}
@@ -100,6 +118,8 @@ function IllustrationContainer({
   scale,
   editMode,
   preset,
+  speed,
+  intensity,
   motionDisabled,
   heroRef,
   idPrefix,
@@ -111,11 +131,16 @@ function IllustrationContainer({
   scale: number;
   editMode: boolean | undefined;
   preset: HeroIllustrationMotion;
+  speed: number;
+  intensity: number;
   motionDisabled: boolean;
   heroRef: React.RefObject<HTMLElement | null>;
   idPrefix: string;
   brand: BrandPalette;
-  source: { kind: 'custom'; url: string } | { kind: 'style'; style: HeroIllustrationStyle };
+  source:
+    | { kind: 'custom'; url: string }
+    | { kind: 'svg'; svg: string }
+    | { kind: 'style'; style: HeroIllustrationStyle };
   illustration: HeroIllustration;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -129,21 +154,42 @@ function IllustrationContainer({
   });
 
   // Launch preset — rocket-style: big translate up, gentle scale pulse.
-  const launchY = useTransform(scrollYProgress, [0, 1], ['0%', '-220%']);
-  const launchScale = useTransform(scrollYProgress, [0, 0.3, 1], [1, 1.06, 0.7]);
+  // `intensity` scales the travel distance; `speed` is irrelevant here
+  // because scroll-linked presets follow scroll velocity.
+  const launchY = useTransform(scrollYProgress, [0, 1], ['0%', `${-220 * intensity}%`]);
+  const launchScale = useTransform(scrollYProgress, [0, 0.3, 1], [1, 1 + 0.06 * intensity, 0.7]);
   const launchOpacity = useTransform(scrollYProgress, [0, 0.75, 1], [1, 1, 0]);
 
   // Parallax preset — moderate translate + slight zoom.
-  const parallaxY = useTransform(scrollYProgress, [0, 1], ['0px', '-140px']);
-  const parallaxScale = useTransform(scrollYProgress, [0, 1], [1, 0.92]);
+  const parallaxY = useTransform(scrollYProgress, [0, 1], ['0px', `${-140 * intensity}px`]);
+  const parallaxScale = useTransform(scrollYProgress, [0, 1], [1, Math.max(0.5, 1 - 0.08 * intensity)]);
 
   // Drift preset — diagonal on scroll.
   const driftX = useTransform(
     scrollYProgress,
     [0, 1],
-    [side === 'right' ? '0%' : '0%', side === 'right' ? '-14%' : '14%'],
+    [side === 'right' ? '0%' : '0%', side === 'right' ? `${-14 * intensity}%` : `${14 * intensity}%`],
   );
-  const driftY = useTransform(scrollYProgress, [0, 1], ['0%', '-40%']);
+  const driftY = useTransform(scrollYProgress, [0, 1], ['0%', `${-40 * intensity}%`]);
+
+  // Zoom-in preset — scales up as the user scrolls past.
+  const zoomScale = useTransform(scrollYProgress, [0, 0.5, 1], [0.7, 1 + 0.05 * intensity, 1 + 0.15 * intensity]);
+  const zoomOpacity = useTransform(scrollYProgress, [0, 0.2, 1], [0, 1, 1]);
+
+  // Fade-in preset — pure opacity on scroll.
+  const fadeOpacity = useTransform(scrollYProgress, [0, 0.3, 0.7, 1], [0, 1, 1, 0]);
+
+  // Slide-in preset — translates from off-canvas on scroll.
+  const slideX = useTransform(
+    scrollYProgress,
+    [0, 0.5, 1],
+    [side === 'right' ? `${120 * intensity}%` : `${-120 * intensity}%`, '0%', '0%'],
+  );
+  const slideOpacity = useTransform(scrollYProgress, [0, 0.3, 1], [0, 1, 1]);
+
+  // Reveal preset — mask-like slide up with fade.
+  const revealY = useTransform(scrollYProgress, [0, 0.3, 1], [`${40 * intensity}%`, '0%', `${-20 * intensity}%`]);
+  const revealOpacity = useTransform(scrollYProgress, [0, 0.25, 0.75, 1], [0, 1, 1, 0.6]);
 
   // Tilt-3d preset — mouse-follow rotation (desktop only). Springs
   // smooth the raw pointer values so the tilt settles gently instead
@@ -191,29 +237,87 @@ function IllustrationContainer({
             return { x: driftX, y: driftY };
           case 'tilt-3d':
             return { rotateX, rotateY };
+          case 'zoom-in':
+            return { scale: zoomScale, opacity: zoomOpacity };
+          case 'fade-in':
+            return { opacity: fadeOpacity };
+          case 'slide-in':
+            return { x: slideX, opacity: slideOpacity };
+          case 'reveal':
+            return { y: revealY, opacity: revealOpacity };
           default:
             return {};
         }
       })();
 
-  // float / orbit use keyframe animate rather than scroll — driven by
-  // Framer's `animate` prop on the inner motion.div.
+  // Keyframe-based presets — driven by Framer's `animate` prop. `speed`
+  // inversely scales duration (2× speed = half the duration); `intensity`
+  // scales the keyframe values (distance travelled, angle swept).
+  const kf = (baseDuration: number): number => Math.max(0.4, baseDuration / speed);
   const animateProps: Record<string, unknown> = motionDisabled
     ? {}
     : (() => {
         switch (preset) {
           case 'float':
             return {
-              animate: { y: ['0%', '-4%', '0%'] },
-              transition: { duration: 4, repeat: Infinity, ease: 'easeInOut' },
+              animate: { y: ['0%', `${-4 * intensity}%`, '0%'] },
+              transition: { duration: kf(4), repeat: Infinity, ease: 'easeInOut' },
             };
           case 'orbit':
             return {
               animate: {
-                x: ['0%', '3%', '0%', '-3%', '0%'],
-                y: ['0%', '-3%', '0%', '3%', '0%'],
+                x: ['0%', `${3 * intensity}%`, '0%', `${-3 * intensity}%`, '0%'],
+                y: ['0%', `${-3 * intensity}%`, '0%', `${3 * intensity}%`, '0%'],
               },
-              transition: { duration: 9, repeat: Infinity, ease: 'linear' },
+              transition: { duration: kf(9), repeat: Infinity, ease: 'linear' },
+            };
+          case 'pulse':
+            return {
+              animate: { scale: [1, 1 + 0.05 * intensity, 1] },
+              transition: { duration: kf(2.4), repeat: Infinity, ease: 'easeInOut' },
+            };
+          case 'spin':
+            return {
+              animate: { rotate: 360 },
+              transition: { duration: kf(20), repeat: Infinity, ease: 'linear' },
+            };
+          case 'sway':
+            return {
+              animate: { rotate: [`-${3 * intensity}deg`, `${3 * intensity}deg`, `-${3 * intensity}deg`] },
+              transition: { duration: kf(3.2), repeat: Infinity, ease: 'easeInOut' },
+            };
+          case 'wobble':
+            return {
+              animate: {
+                rotate: [`-${4 * intensity}deg`, `${4 * intensity}deg`, `-${2 * intensity}deg`, `${2 * intensity}deg`, '0deg'],
+                scale: [1, 1 + 0.03 * intensity, 1, 1 + 0.02 * intensity, 1],
+              },
+              transition: { duration: kf(2.4), repeat: Infinity, ease: 'easeInOut' },
+            };
+          case 'bounce':
+            return {
+              animate: { y: ['0%', `${-10 * intensity}%`, '0%', `${-4 * intensity}%`, '0%'] },
+              transition: { duration: kf(1.6), repeat: Infinity, ease: 'easeOut' },
+            };
+          case 'shake':
+            return {
+              animate: {
+                x: [
+                  '0%',
+                  `${-2 * intensity}%`,
+                  `${2 * intensity}%`,
+                  `${-1.5 * intensity}%`,
+                  `${1.5 * intensity}%`,
+                  '0%',
+                ],
+              },
+              transition: { duration: kf(0.8), repeat: Infinity, repeatDelay: 3, ease: 'easeInOut' },
+            };
+          case 'flip-y':
+            return {
+              initial: { rotateY: -180, opacity: 0 },
+              animate: { rotateY: 0, opacity: 1 },
+              transition: { duration: kf(1.2), ease: 'easeOut' },
             };
           default:
             return {};
@@ -246,11 +350,11 @@ function IllustrationContainer({
         ref={ref}
         onPointerMove={onMouseMove}
         onPointerLeave={onMouseLeave}
-        className="relative"
+        className="relative transform-gpu"
         style={{
           width: `min(${baseSize}px, 34vw)`,
           maxWidth: '560px',
-          willChange: motionDisabled ? undefined : 'transform',
+          willChange: motionDisabled ? undefined : 'transform, opacity',
           // Re-enable pointer events on the inner element when tilt-3d
           // is active so the cursor can actually drive the tilt — the
           // outer wrapper is pointer-events-none to let clicks through
@@ -276,6 +380,15 @@ function IllustrationContainer({
             className="block h-auto w-full select-none"
             draggable={false}
           />
+        ) : source.kind === 'svg' ? (
+          // Inline AI-generated SVG. Sanitised server-side before being
+          // persisted; still dangerouslySetInnerHTML-only because
+          // raw markup is the point.
+          <div
+            className="block h-auto w-full select-none [&>svg]:block [&>svg]:h-auto [&>svg]:w-full"
+            // eslint-disable-next-line react/no-danger -- SVG is sanitised upstream.
+            dangerouslySetInnerHTML={{ __html: source.svg }}
+          />
         ) : (
           <IllustrationSvg
             style={source.style}
@@ -297,8 +410,14 @@ function resolveSource(
   illustration: HeroIllustration,
 ):
   | { kind: 'custom'; url: string }
+  | { kind: 'svg'; svg: string }
   | { kind: 'style'; style: HeroIllustrationStyle }
   | null {
+  // Inline custom SVG wins when present — it's already styled and can
+  // carry its own animate tags for richer motion than CSS transforms.
+  if (illustration.customSvg && illustration.customSvg.trim()) {
+    return { kind: 'svg', svg: illustration.customSvg };
+  }
   if (illustration.customUrl) {
     return { kind: 'custom', url: illustration.customUrl };
   }

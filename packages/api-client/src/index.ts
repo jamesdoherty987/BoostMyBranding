@@ -1261,6 +1261,7 @@ export class BoostApi {
     videoModelId?: string;
     videoDurationSeconds?: number;
     outputType?: 'image' | 'video' | 'both';
+    imageCount?: number;
   }) {
     return this.request<{ costCents: number }>('/api/v1/inspiration/estimate', {
       method: 'POST',
@@ -1288,6 +1289,87 @@ export class BoostApi {
     videoDurationSeconds?: number;
     useInspirationAsVideoSeed?: boolean;
     inspirationProfileIds?: string[];
+    imageControls?: {
+      style?:
+        | 'editorial_photography'
+        | 'cinematic_photography'
+        | 'documentary_photography'
+        | 'lifestyle_photography'
+        | 'flat_lay'
+        | 'product_studio'
+        | 'architectural'
+        | 'minimalist'
+        | 'magazine_editorial'
+        | 'vintage_film'
+        | 'moody_dark'
+        | 'bright_airy'
+        | 'illustration_flat'
+        | 'illustration_3d';
+      lighting?:
+        | 'golden_hour'
+        | 'soft_daylight'
+        | 'overcast_even'
+        | 'studio_softbox'
+        | 'dramatic_rembrandt'
+        | 'low_key_moody'
+        | 'high_key_bright'
+        | 'neon_night'
+        | 'window_side_light'
+        | 'backlit_silhouette';
+      composition?:
+        | 'rule_of_thirds'
+        | 'centered'
+        | 'overhead_flat'
+        | 'close_up'
+        | 'wide_environmental'
+        | 'shallow_depth'
+        | 'symmetrical'
+        | 'negative_space'
+        | 'leading_lines';
+      mood?:
+        | 'warm_intimate'
+        | 'calm_premium'
+        | 'energetic_playful'
+        | 'confident_bold'
+        | 'quiet_elegant'
+        | 'nostalgic'
+        | 'futuristic_clean';
+      cameraTechnical?: string;
+      avoid?: string[];
+      extra?: string;
+    };
+    videoControls?: {
+      cameraMovement?:
+        | 'static'
+        | 'slow_push_in'
+        | 'slow_pull_out'
+        | 'gentle_pan_left'
+        | 'gentle_pan_right'
+        | 'tilt_up'
+        | 'tilt_down'
+        | 'subtle_orbit'
+        | 'handheld_follow'
+        | 'crane_up'
+        | 'rack_focus';
+      motionStyle?:
+        | 'cinematic_natural'
+        | 'smooth_slow_mo'
+        | 'kinetic_snappy'
+        | 'documentary_handheld'
+        | 'dreamy_float'
+        | 'macro_detail';
+      mood?:
+        | 'warm_intimate'
+        | 'calm_premium'
+        | 'energetic_playful'
+        | 'confident_bold'
+        | 'quiet_elegant'
+        | 'nostalgic'
+        | 'futuristic_clean';
+      avoid?: string[];
+      extra?: string;
+    };
+    imageCount?: number;
   }) {
     return this.request<{
       analysis: {
@@ -1550,6 +1632,45 @@ export class BoostApi {
         available: boolean;
         notes?: string;
       }>;
+      personas: Array<{
+        id: string;
+        displayName: string;
+        niche: string;
+        tagline: string;
+        recommendedAvatarId: string;
+        voiceDirection: string;
+        hookFormulas: string[];
+        signOffs: string[];
+        vocabulary: string[];
+        avoidVocabulary: string[];
+      }>;
+      viralFormats: Array<{
+        id: string;
+        displayName: string;
+        niche: string[];
+        summary: string;
+        targetDurationSeconds: number;
+        hookWindowSeconds: number;
+        captionStyle: string;
+        pacing: string;
+        retentionMechanic: string;
+        writerDirective: string;
+        beats: Array<{
+          role: string;
+          purpose: string;
+          seconds: number;
+          cameraHint?: string;
+          captionHint?: string;
+        }>;
+      }>;
+      hookFormulas: Array<{
+        id: string;
+        intent: string;
+        displayName: string;
+        template: string;
+        why: string;
+        niches: string[];
+      }>;
     }>('/api/v1/talking-head/options');
   }
 
@@ -1560,12 +1681,96 @@ export class BoostApi {
     durationSeconds?: number;
     productId?: string;
     inspirationProfileIds?: string[];
+    personaId?: string;
+    formatId?: string;
+    hookFormulaId?: string;
   }) {
     return this.request<{
       script: string;
       estimatedDurationSeconds: number;
       fromMock: boolean;
     }>('/api/v1/talking-head/script', {
+      method: 'POST',
+      body: JSON.stringify(args),
+    });
+  }
+
+  /**
+   * Generate N distinct hook variants for the same brief. Standard UGC
+   * A/B workflow: each variant uses a different canonical hook formula
+   * so the set covers different retention levers (pain-named, bold
+   * claim, curiosity gap, listicle preview, pattern interrupt, etc.).
+   */
+  generateHookVariants(args: {
+    clientId: string;
+    brief: string;
+    platform?: 'tiktok' | 'instagram_reels' | 'youtube_shorts' | 'generic';
+    productId?: string;
+    count?: number;
+    personaId?: string;
+    niche?:
+      | 'ecommerce_ad'
+      | 'saas_ad'
+      | 'personal_brand'
+      | 'faceless_education'
+      | 'faceless_story'
+      | 'lifestyle'
+      | 'fitness'
+      | 'beauty'
+      | 'food'
+      | 'tech'
+      | 'finance'
+      | 'general';
+    inspirationProfileIds?: string[];
+  }) {
+    return this.request<{
+      variants: Array<{
+        hookFormulaId: string;
+        hookFormulaDisplayName: string;
+        intent: string;
+        text: string;
+      }>;
+      fromMock: boolean;
+    }>('/api/v1/talking-head/hook-variants', {
+      method: 'POST',
+      body: JSON.stringify(args),
+    });
+  }
+
+  /**
+   * Persona-voiced product review script. Combines a chosen influencer
+   * persona (gym, fashion, makeup, tech, foodie, outdoor, wellness,
+   * home-decor) with a specific product to produce a short on-camera
+   * review. Returns the script plus the persona's recommended avatar
+   * so the render step uses the right face for the voice.
+   */
+  generateProductReviewScript(args: {
+    clientId: string;
+    productId: string;
+    personaId: string;
+    platform?: 'tiktok' | 'instagram_reels' | 'youtube_shorts' | 'generic';
+    durationSeconds?: number;
+    angle?:
+      | 'unboxing'
+      | 'first_impressions'
+      | 'thirty_day_update'
+      | 'dupe_vs_original'
+      | 'compare'
+      | 'how_to_use';
+    direction?: string;
+    inspirationProfileIds?: string[];
+  }) {
+    return this.request<{
+      script: string;
+      estimatedDurationSeconds: number;
+      fromMock: boolean;
+      persona: {
+        id: string;
+        displayName: string;
+        niche: string;
+        recommendedAvatarId: string;
+      };
+    }>('/api/v1/talking-head/product-review-script', {
       method: 'POST',
       body: JSON.stringify(args),
     });

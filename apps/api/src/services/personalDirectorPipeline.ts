@@ -56,6 +56,12 @@ import {
 } from './personalAiModels.js';
 import { stitchShots, type StitchShotInput } from './personalStitcher.js';
 import type { GenerateForAccountArgs, GenerateForAccountResult } from './personalPipeline.js';
+import {
+  getViralFormat,
+  defaultFormatFor,
+  formatToPromptBlock,
+} from './viralFormats.js';
+import { getHookFormula, hookFormulaToDirective } from './viralHooks.js';
 
 /* ═══════════════════════════════════════════════════════════════════ */
 /* Entry point                                                          */
@@ -155,12 +161,72 @@ export async function generateForAccountDirector(
           .join('\n')
       : undefined;
 
+    /* ── 2b. Inspiration style block ─────────────────────── */
+    // Pull everything the user tagged as inspiration / style reference,
+    // and render it as a short multi-line style brief the director and
+    // every AI shot can read. This is the single biggest quality lever
+    // for "feels like our inspiration" — without it each shot drifts.
+    const inspirationItems = accountMedia.filter(
+      (m) => m.role === 'inspiration' || m.role === 'style_reference',
+    );
+    const inspirationStyleBlock = inspirationItems.length
+      ? inspirationItems
+          .slice(0, 8)
+          .map((m, i) => {
+            const desc =
+              m.description ??
+              m.aiDescription ??
+              (m.tags && m.tags.length > 0 ? m.tags.join(', ') : 'reference image');
+            return `[${i + 1}] ${desc}`;
+          })
+          .join('\n')
+      : undefined;
+    // Short one-line version for per-shot prompts. We compress every
+    // ref down to whatever descriptive text the user or Claude wrote
+    // and cap the whole thing so shots stay inside the model's token
+    // budget.
+    const inspirationStyleHint = inspirationItems.length
+      ? inspirationItems
+          .slice(0, 4)
+          .map((m) => m.description ?? m.aiDescription ?? '')
+          .filter((s) => s && s.length > 0)
+          .join('; ')
+          .slice(0, 400)
+      : undefined;
+
     /* ── 3. Plan storyboard ──────────────────────────────── */
     broadcast({ type: 'personal:progress', payload: { accountId: account.id, postId, phase: 'directing' } });
+
+    // Viral format: the operator may have pinned one via generator
+    // config; otherwise we pick a sensible default for the theme. A
+    // character-driven account defaults to storytime; a faceless
+    // educational theme defaults to listicle; everything else picks
+    // the three-act curiosity loop.
+    const chosenFormat =
+      (genConfig.viralFormatId ? getViralFormat(genConfig.viralFormatId) : undefined) ??
+      defaultFormatFor({
+        niche: theme.template === 'slideshow' ? 'faceless_education' : 'general',
+        productCentric: false,
+        hasCharacter: Boolean(character),
+      });
+    const viralFormatBlock = formatToPromptBlock(chosenFormat);
+
+    // Optional opening-hook formula. Locks the first beat.
+    const hookFormulaDirective = genConfig.hookFormulaId
+      ? (() => {
+          const f = getHookFormula(genConfig.hookFormulaId!);
+          return f ? hookFormulaToDirective(f) : undefined;
+        })()
+      : undefined;
+
     const storyboard = await planStoryboard({
       theme,
       topic,
-      targetDurationSeconds: theme.targetDurationSeconds,
+      // Respect the format's sweet-spot duration when it's been picked
+      // explicitly; otherwise fall back to the theme default.
+      targetDurationSeconds: genConfig.viralFormatId
+        ? chosenFormat.targetDurationSeconds
+        : theme.targetDurationSeconds,
       styleBible,
       customDirection: account.customDirection ?? undefined,
       blacklist: account.topicBlacklist ?? undefined,
@@ -176,6 +242,9 @@ export async function generateForAccountDirector(
           }
         : undefined,
       referenceMediaDigest: refMediaDigest,
+      inspirationStyleBlock,
+      viralFormatBlock,
+      hookFormulaDirective,
       allowMultiAct: true,
       maxAiVideoShots: maxAiShotsFor(genConfig),
     });
@@ -210,9 +279,14 @@ export async function generateForAccountDirector(
       ? await getCharacterAnchorImages(character.id, 3)
       : [];
 
+    // Both 'style_reference' and 'inspiration' are visual anchors — the
+    // distinction in the media library is bookkeeping, not intent. Pass
+    // both into AI image/video models as reference URLs so the output
+    // inherits the look.
     const styleRefUrls = accountMedia
-      .filter((m) => m.role === 'style_reference')
-      .slice(0, 3)
+      .filter((m) => m.role === 'style_reference' || m.role === 'inspiration')
+      .filter((m) => (m.mimeType ?? '').startsWith('image/'))
+      .slice(0, 4)
       .map((m) => m.fileUrl);
 
     const defaultImageModel =
@@ -236,6 +310,7 @@ export async function generateForAccountDirector(
         styleBibleVibe: styleBible.vibe ?? undefined,
         characterFragment: character?.promptFragment ?? undefined,
         globalColourGrade: storyboard.editPlan.colourGrade,
+        inspirationStyleHint,
       });
       const negativePrompt = [
         ...(styleBible.donts ?? []),
@@ -244,7 +319,7 @@ export async function generateForAccountDirector(
         .filter(Boolean)
         .join(', ');
 
-      const refs = [...characterAnchors.slice(0, 2), ...styleRefUrls.slice(0, 1)];
+      const refs = [...characterAnchors.slice(0, 2), ...styleRefUrls.slice(0, 2)];
 
       let asset: { url: string; kind: 'image' | 'video' } | null = null;
       let shotCost = 0;

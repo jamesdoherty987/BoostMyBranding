@@ -204,12 +204,40 @@ export interface PriceListItem {
  * percentage so it stays anchored responsively. `animation` chooses the
  * motion style — all variants use CSS/Framer so they're GPU-cheap.
  *
+ * Keyframe-based motions (loop continuously, no scroll coupling):
  *   float  — gentle up/down bob, staggered per cutout
  *   tilt   — slow back-and-forth rotation, nice for props
  *   orbit  — small circular drift, feels alive
  *   pulse  — subtle scale in/out, good for badges / stars
  *   drift  — slow diagonal movement across its origin point
+ *   spin   — continuous full rotation, good for gears / suns
+ *   sway   — subtle rocking rotation, good for hanging objects
+ *   bounce — stronger bouncing, playful brands
+ *   wobble — tilt + scale combo, playful
  *   none   — static; use when the image already has its own animation baked in
+ *
+ * Scroll-linked motions (tied to how far the user has scrolled into the
+ * hero — these are the ones that feel alive and "fly by" like the rocket
+ * on the marketing landing page). For all scroll-* presets:
+ *   - `intensity` scales the travel distance (1 = default, 2 = double, etc.)
+ *   - `speed`     scales how quickly the motion completes relative to the
+ *                 hero's scroll range. speed=2 means the cutout finishes
+ *                 its travel by the midpoint of the hero; speed=0.5 means
+ *                 it's only halfway through the motion when the hero is
+ *                 fully scrolled past.
+ *
+ *   scroll-up          — travels upward as the user scrolls down (good for rockets)
+ *   scroll-down        — travels downward as the user scrolls down
+ *   scroll-parallax    — moderate translate + zoom, classic parallax
+ *   scroll-fly-out     — accelerating flight straight up off screen (rocket launch)
+ *   scroll-fly-left    — flies off the left edge as the user scrolls
+ *   scroll-fly-right   — flies off the right edge as the user scrolls
+ *   scroll-fly-down    — falls off the bottom edge
+ *   scroll-fly-diag-up — flies up-right off screen (or up-left if side is right)
+ *   scroll-fly-diag-dn — flies down-right off screen (or down-left)
+ *   scroll-rotate      — rotates while drifting up
+ *   scroll-zoom        — zooms in dramatically as the user scrolls
+ *   scroll-fade        — fades out as the user scrolls past
  */
 export interface HeroCutout {
   /** Image URL. Best results with a transparent PNG. */
@@ -231,11 +259,52 @@ export interface HeroCutout {
    */
   layer?: 0 | 1;
   /** Animation style. Default 'float'. */
-  animation?: 'float' | 'tilt' | 'orbit' | 'pulse' | 'drift' | 'none';
-  /** Animation speed multiplier. 1 = default, 2 = twice as fast. Default 1. */
+  animation?:
+    | 'float'
+    | 'tilt'
+    | 'orbit'
+    | 'pulse'
+    | 'drift'
+    | 'spin'
+    | 'sway'
+    | 'bounce'
+    | 'wobble'
+    | 'scroll-up'
+    | 'scroll-down'
+    | 'scroll-parallax'
+    | 'scroll-fly-out'
+    | 'scroll-fly-left'
+    | 'scroll-fly-right'
+    | 'scroll-fly-down'
+    | 'scroll-fly-diag-up'
+    | 'scroll-fly-diag-dn'
+    | 'scroll-rotate'
+    | 'scroll-zoom'
+    | 'scroll-fade'
+    | 'none';
+  /**
+   * Animation speed multiplier. 1 = default, 2 = twice as fast, 0.5 = half.
+   * For loops this shortens the cycle duration. For scroll-* presets this
+   * scales the scroll range the motion consumes — speed=2 means the
+   * motion finishes by the hero's midpoint. Clamped 0.1–5.
+   */
   speed?: number;
+  /**
+   * Animation intensity multiplier. 1 = default; 2 = doubled travel/angle;
+   * 0.5 = half. Only affects how far things move — the motion style stays
+   * the same. Clamped 0.1–4 in the renderer.
+   */
+  intensity?: number;
   /** Optional drop shadow intensity. 0 = none, 1 = soft, 2 = dramatic. Default 1. */
   shadow?: 0 | 1 | 2;
+  /**
+   * Ground-contact shadow — a soft dark ellipse that sits below the
+   * cutout to ground it in the scene. Makes a dropped-in PNG (product
+   * photo, cutout image) look sat into the page rather than pasted on
+   * top. Default false. When true the renderer adds a blurred ellipse
+   * underneath that tracks the cutout's motion.
+   */
+  groundShadow?: boolean;
 }
 
 /**
@@ -377,6 +446,22 @@ export type HeroIllustrationMotion =
   | 'reveal'
   | 'fade-in'
   | 'slide-in'
+  // Directional fly-offs — scroll-linked, exit in the named direction.
+  // `launch` already covers "fly up"; these add the rest so the
+  // illustration can drift/exit to any edge as the user scrolls.
+  | 'fly-left'
+  | 'fly-right'
+  | 'fly-down'
+  | 'fly-diag-up'
+  | 'fly-diag-down'
+  // Extra loop animations that mirror the cutout options.
+  | 'jiggle'
+  | 'swing'
+  | 'heartbeat'
+  | 'rubber-band'
+  | 'spin-slow'
+  | 'spin-fast'
+  | 'orbit-wide'
   | 'none';
 
 export interface HeroIllustration {
@@ -533,6 +618,16 @@ export interface WebsiteConfig {
     darkColor?: string;
     /** Whether the hero is dark-on-light or light-on-dark. */
     heroStyle?: 'light' | 'dark';
+    /**
+     * Whole-site surface mode. Default `light` — the renderer paints a
+     * white background across every block. Set `dark` and every block's
+     * "white" / "slate-50" section flips to a dark surface with white
+     * text. Agencies usually ask for this as "make the site dark" /
+     * "dark mode the whole thing" (not just the hero). Hero already
+     * has its own `heroStyle` toggle; `siteBackground` is the rest of
+     * the page.
+     */
+    siteBackground?: 'light' | 'dark';
     /**
      * Optional logo URL. When set, the nav renders this instead of the
      * default business-initial circle. Keep it compact (square or close

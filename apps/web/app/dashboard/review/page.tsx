@@ -87,6 +87,15 @@ export default function ReviewQueuePage() {
   const [editing, setEditing] = useState(false);
   const [editedCaption, setEditedCaption] = useState('');
 
+  // AI quick-actions state. Every action is mutually exclusive — a user
+  // can't rewrite and swap the image at the same time — so we track a
+  // single `busy` key plus whatever output the last action produced so
+  // the panel can render it in place.
+  const [quickBusy, setQuickBusy] = useState<null | 'warmer' | 'alts' | 'swap'>(null);
+  const [altCaptions, setAltCaptions] = useState<Array<{ caption: string; hashtags: string[] }>>(
+    [],
+  );
+
   // Realtime: receive updates from teammates, react to presence locks.
   const onEvent = useCallback(
     (evt: { type: string; payload: any }) => {
@@ -113,6 +122,13 @@ export default function ReviewQueuePage() {
   const top = filtered[0];
   const { getLocker } = usePostLock(API_URL, top?.id ?? null, me?.id);
   const locker = top ? getLocker(top.id) : undefined;
+
+  // Reset quick-action output whenever we move to a new post so we
+  // don't show alt captions belonging to the previous card.
+  useEffect(() => {
+    setAltCaptions([]);
+    setQuickBusy(null);
+  }, [top?.id]);
 
   // Guards against double-firing decisions — two rapid keyboard presses
   // or a realtime event arriving between the first click and the
@@ -174,6 +190,120 @@ export default function ReviewQueuePage() {
   const approved = history.filter((d) => d.action === 'approve').length;
   const rejected = history.filter((d) => d.action === 'reject').length;
   const edited = history.filter((d) => d.action === 'edit').length;
+
+  /* ── AI quick actions ───────────────────────────────── */
+
+  /**
+   * Rewrite the caption in a warmer tone. We send an instruction to the
+   * regenerate-post endpoint — it applies the same anti-hallucination
+   * rules as the first draft, so the output stays truthful.
+   */
+  const rewriteWarmer = async () => {
+    if (!top || quickBusy) return;
+    setQuickBusy('warmer');
+    try {
+      const res = await api.regeneratePost({
+        postId: top.id,
+        instruction:
+          'Rewrite in a warmer, more human tone. Keep every factual claim unchanged. Shorter sentences where it helps; no marketing clichés.',
+      });
+      // Optimistically patch the top card so the user sees the new
+      // copy without waiting for a reload.
+      setQueue((q) =>
+        q.map((p) =>
+          p.id === top.id ? { ...p, caption: res.caption, hashtags: res.hashtags } : p,
+        ),
+      );
+      toast.success('Re-toned');
+    } catch (e) {
+      toast.error('Rewrite failed', (e as Error).message);
+    } finally {
+      setQuickBusy(null);
+    }
+  };
+
+  /**
+   * Generate 5 alternate captions. Runs the regenerate call in parallel
+   * with different "angles" so the results are meaningfully different.
+   */
+  const generateAlts = async () => {
+    if (!top || quickBusy) return;
+    setQuickBusy('alts');
+    setAltCaptions([]);
+    try {
+      const angles = [
+        'Lead with a surprising observation that grabs attention in the first 7 words.',
+        'Open with a specific sensory detail from the image.',
+        'Ask a question the audience will want to answer in the comments.',
+        'Frame it as a short story in two sentences.',
+        'Cut every word that is not load-bearing — make it read like a text message.',
+      ];
+      const results = await Promise.allSettled(
+        angles.map((instruction) => api.regeneratePost({ postId: top.id, instruction })),
+      );
+      const ok = results
+        .filter(
+          (
+            r,
+          ): r is PromiseFulfilledResult<{
+            caption: string;
+            hashtags: string[];
+            hook: string;
+            rationale: string;
+          }> => r.status === 'fulfilled',
+        )
+        .map((r) => ({ caption: r.value.caption, hashtags: r.value.hashtags }));
+      if (ok.length === 0) {
+        toast.error('No alternates returned', 'The model was busy. Try again in a moment.');
+      } else {
+        setAltCaptions(ok);
+      }
+    } catch (e) {
+      toast.error('Alts failed', (e as Error).message);
+    } finally {
+      setQuickBusy(null);
+    }
+  };
+
+  /** Apply one of the alt captions to the top post and clear the list. */
+  const useAltCaption = async (idx: number) => {
+    if (!top) return;
+    const alt = altCaptions[idx];
+    if (!alt) return;
+    try {
+      await api.updatePost(top.id, { caption: alt.caption, hashtags: alt.hashtags });
+      setQueue((q) =>
+        q.map((p) =>
+          p.id === top.id ? { ...p, caption: alt.caption, hashtags: alt.hashtags } : p,
+        ),
+      );
+      setAltCaptions([]);
+      toast.success('Caption updated');
+    } catch (e) {
+      toast.error('Could not apply caption', (e as Error).message);
+    }
+  };
+
+  /**
+   * Swap the generated image. Re-runs the hero image generator on the
+   * post using its own caption as the brief. The backend persists the
+   * new URL so the next listPosts call returns it.
+   */
+  const swapImage = async () => {
+    if (!top || quickBusy) return;
+    setQuickBusy('swap');
+    try {
+      const res = await api.regeneratePostImage({ postId: top.id });
+      setQueue((q) =>
+        q.map((p) => (p.id === top.id ? { ...p, generatedImageUrl: res.imageUrl } : p)),
+      );
+      toast.success('New image ready');
+    } catch (e) {
+      toast.error('Image swap failed', (e as Error).message);
+    } finally {
+      setQuickBusy(null);
+    }
+  };
 
   if (isLoading) {
     return (
@@ -333,16 +463,58 @@ export default function ReviewQueuePage() {
                   AI quick actions
                 </div>
                 <div className="mt-3 space-y-2">
-                  <Button size="sm" variant="outline" className="w-full justify-start">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="w-full justify-start"
+                    onClick={rewriteWarmer}
+                    disabled={quickBusy !== null}
+                    loading={quickBusy === 'warmer'}
+                  >
                     Rewrite in a warmer tone
                   </Button>
-                  <Button size="sm" variant="outline" className="w-full justify-start">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="w-full justify-start"
+                    onClick={generateAlts}
+                    disabled={quickBusy !== null}
+                    loading={quickBusy === 'alts'}
+                  >
                     Generate 5 alt captions
                   </Button>
-                  <Button size="sm" variant="outline" className="w-full justify-start">
-                    Swap image (Flux 2 Pro)
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="w-full justify-start"
+                    onClick={swapImage}
+                    disabled={quickBusy !== null}
+                    loading={quickBusy === 'swap'}
+                  >
+                    Swap image
                   </Button>
                 </div>
+
+                {altCaptions.length > 0 ? (
+                  <div className="mt-3 space-y-2 rounded-xl border border-slate-100 bg-slate-50 p-2">
+                    <p className="px-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                      {altCaptions.length} alternate{altCaptions.length === 1 ? '' : 's'}
+                    </p>
+                    {altCaptions.map((alt, i) => (
+                      <button
+                        key={i}
+                        onClick={() => useAltCaption(i)}
+                        className="group block w-full rounded-lg border border-slate-200 bg-white p-2 text-left text-xs text-slate-700 transition-colors hover:border-[#1D9CA1] hover:bg-[#1D9CA1]/5"
+                      >
+                        <p className="line-clamp-3">{alt.caption}</p>
+                        <p className="mt-1 line-clamp-1 text-[10px] text-slate-400 group-hover:text-[#1D9CA1]">
+                          Use this ·{' '}
+                          {alt.hashtags.slice(0, 3).join(' ') || 'no hashtags'}
+                        </p>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
               </div>
 
               <div className="sticky bottom-4 flex gap-3 safe-pb">

@@ -148,48 +148,213 @@ function IllustrationContainer({
   // Scroll-linked transforms from the hero section's own scroll range,
   // NOT the page. Lets the animation run regardless of where the hero
   // sits on the page.
+  //
+  // `layoutEffect: false` avoids the "ref not yet hydrated" warning —
+  // the hero ref is set on the wrapping <div> higher up the tree, so
+  // Framer's layout-effect-time measurement runs before the ref is
+  // attached on first render. Deferring to a useEffect pass is fine
+  // here because the motion only needs to kick in once the user
+  // actually starts scrolling.
   const { scrollYProgress } = useScroll({
     target: heroRef as React.RefObject<HTMLElement>,
     offset: ['start start', 'end start'],
+    layoutEffect: false,
   });
 
+  // `speed` compresses the scroll range for scroll-linked presets so
+  // the motion finishes earlier. speed=1 → motion spans full 0..1
+  // scroll progress. speed=2 → motion completes at progress=0.5.
+  const scrollEnd = Math.min(1, Math.max(0.15, 1 / speed));
+  const scrollMid = scrollEnd * 0.5;
+  // Sign used by diagonal presets — fly outward from the anchored side.
+  const sideSign = side === 'right' ? 1 : -1;
+
   // Launch preset — rocket-style: big translate up, gentle scale pulse.
-  // `intensity` scales the travel distance; `speed` is irrelevant here
-  // because scroll-linked presets follow scroll velocity.
-  const launchY = useTransform(scrollYProgress, [0, 1], ['0%', `${-220 * intensity}%`]);
-  const launchScale = useTransform(scrollYProgress, [0, 0.3, 1], [1, 1 + 0.06 * intensity, 0.7]);
-  const launchOpacity = useTransform(scrollYProgress, [0, 0.75, 1], [1, 1, 0]);
+  const launchY = useTransform(
+    scrollYProgress,
+    [0, scrollEnd],
+    ['0%', `${-220 * intensity}%`],
+  );
+  const launchScale = useTransform(
+    scrollYProgress,
+    [0, scrollMid, scrollEnd],
+    [1, 1 + 0.06 * intensity, 0.7],
+  );
+  const launchOpacity = useTransform(
+    scrollYProgress,
+    [0, scrollEnd * 0.8, scrollEnd],
+    [1, 1, 0],
+  );
 
   // Parallax preset — moderate translate + slight zoom.
-  const parallaxY = useTransform(scrollYProgress, [0, 1], ['0px', `${-140 * intensity}px`]);
-  const parallaxScale = useTransform(scrollYProgress, [0, 1], [1, Math.max(0.5, 1 - 0.08 * intensity)]);
+  const parallaxY = useTransform(
+    scrollYProgress,
+    [0, scrollEnd],
+    ['0px', `${-140 * intensity}px`],
+  );
+  const parallaxScale = useTransform(
+    scrollYProgress,
+    [0, scrollEnd],
+    [1, Math.max(0.5, 1 - 0.08 * intensity)],
+  );
 
   // Drift preset — diagonal on scroll.
   const driftX = useTransform(
     scrollYProgress,
-    [0, 1],
-    [side === 'right' ? '0%' : '0%', side === 'right' ? `${-14 * intensity}%` : `${14 * intensity}%`],
+    [0, scrollEnd],
+    ['0%', side === 'right' ? `${-14 * intensity}%` : `${14 * intensity}%`],
   );
-  const driftY = useTransform(scrollYProgress, [0, 1], ['0%', `${-40 * intensity}%`]);
+  const driftY = useTransform(
+    scrollYProgress,
+    [0, scrollEnd],
+    ['0%', `${-40 * intensity}%`],
+  );
+
+  // Fly-left preset — horizontal exit to the left + slight rise + spin.
+  const flyLeftX = useTransform(
+    scrollYProgress,
+    [0, scrollMid, scrollEnd],
+    ['0%', `${-60 * intensity}%`, `${-240 * intensity}%`],
+  );
+  const flyLeftY = useTransform(
+    scrollYProgress,
+    [0, scrollEnd],
+    ['0%', `${-30 * intensity}%`],
+  );
+  const flyLeftRotate = useTransform(
+    scrollYProgress,
+    [0, scrollEnd],
+    ['0deg', `${-30 * intensity}deg`],
+  );
+  const flyLeftOpacity = useTransform(
+    scrollYProgress,
+    [0, scrollEnd * 0.85, scrollEnd],
+    [1, 1, 0],
+  );
+
+  // Fly-right preset — mirror of fly-left.
+  const flyRightX = useTransform(
+    scrollYProgress,
+    [0, scrollMid, scrollEnd],
+    ['0%', `${60 * intensity}%`, `${240 * intensity}%`],
+  );
+  const flyRightY = useTransform(
+    scrollYProgress,
+    [0, scrollEnd],
+    ['0%', `${-30 * intensity}%`],
+  );
+  const flyRightRotate = useTransform(
+    scrollYProgress,
+    [0, scrollEnd],
+    ['0deg', `${30 * intensity}deg`],
+  );
+  const flyRightOpacity = useTransform(
+    scrollYProgress,
+    [0, scrollEnd * 0.85, scrollEnd],
+    [1, 1, 0],
+  );
+
+  // Fly-down preset — falls off the bottom.
+  const flyDownY = useTransform(
+    scrollYProgress,
+    [0, scrollMid, scrollEnd],
+    ['0%', `${80 * intensity}%`, `${320 * intensity}%`],
+  );
+  const flyDownScale = useTransform(
+    scrollYProgress,
+    [0, scrollEnd],
+    [1, Math.max(0.4, 1 - 0.2 * intensity)],
+  );
+  const flyDownOpacity = useTransform(
+    scrollYProgress,
+    [0, scrollEnd * 0.8, scrollEnd],
+    [1, 1, 0],
+  );
+
+  // Diagonal fly — exits up-and-outward toward the anchored side.
+  const diagUpX = useTransform(
+    scrollYProgress,
+    [0, scrollMid, scrollEnd],
+    ['0%', `${sideSign * 40 * intensity}%`, `${sideSign * 200 * intensity}%`],
+  );
+  const diagUpY = useTransform(
+    scrollYProgress,
+    [0, scrollMid, scrollEnd],
+    ['0%', `${-60 * intensity}%`, `${-260 * intensity}%`],
+  );
+  const diagUpRotate = useTransform(
+    scrollYProgress,
+    [0, scrollEnd],
+    ['0deg', `${sideSign * 20 * intensity}deg`],
+  );
+  const diagUpOpacity = useTransform(
+    scrollYProgress,
+    [0, scrollEnd * 0.85, scrollEnd],
+    [1, 1, 0],
+  );
+  const diagDnX = useTransform(
+    scrollYProgress,
+    [0, scrollMid, scrollEnd],
+    ['0%', `${sideSign * 40 * intensity}%`, `${sideSign * 200 * intensity}%`],
+  );
+  const diagDnY = useTransform(
+    scrollYProgress,
+    [0, scrollMid, scrollEnd],
+    ['0%', `${60 * intensity}%`, `${260 * intensity}%`],
+  );
+  const diagDnRotate = useTransform(
+    scrollYProgress,
+    [0, scrollEnd],
+    ['0deg', `${-sideSign * 20 * intensity}deg`],
+  );
+  const diagDnOpacity = useTransform(
+    scrollYProgress,
+    [0, scrollEnd * 0.85, scrollEnd],
+    [1, 1, 0],
+  );
 
   // Zoom-in preset — scales up as the user scrolls past.
-  const zoomScale = useTransform(scrollYProgress, [0, 0.5, 1], [0.7, 1 + 0.05 * intensity, 1 + 0.15 * intensity]);
-  const zoomOpacity = useTransform(scrollYProgress, [0, 0.2, 1], [0, 1, 1]);
+  const zoomScale = useTransform(
+    scrollYProgress,
+    [0, scrollMid, scrollEnd],
+    [0.7, 1 + 0.05 * intensity, 1 + 0.15 * intensity],
+  );
+  const zoomOpacity = useTransform(
+    scrollYProgress,
+    [0, scrollMid * 0.4, scrollEnd],
+    [0, 1, 1],
+  );
 
   // Fade-in preset — pure opacity on scroll.
-  const fadeOpacity = useTransform(scrollYProgress, [0, 0.3, 0.7, 1], [0, 1, 1, 0]);
+  const fadeOpacity = useTransform(
+    scrollYProgress,
+    [0, scrollEnd * 0.3, scrollEnd * 0.7, scrollEnd],
+    [0, 1, 1, 0],
+  );
 
   // Slide-in preset — translates from off-canvas on scroll.
   const slideX = useTransform(
     scrollYProgress,
-    [0, 0.5, 1],
+    [0, scrollMid, scrollEnd],
     [side === 'right' ? `${120 * intensity}%` : `${-120 * intensity}%`, '0%', '0%'],
   );
-  const slideOpacity = useTransform(scrollYProgress, [0, 0.3, 1], [0, 1, 1]);
+  const slideOpacity = useTransform(
+    scrollYProgress,
+    [0, scrollEnd * 0.3, scrollEnd],
+    [0, 1, 1],
+  );
 
   // Reveal preset — mask-like slide up with fade.
-  const revealY = useTransform(scrollYProgress, [0, 0.3, 1], [`${40 * intensity}%`, '0%', `${-20 * intensity}%`]);
-  const revealOpacity = useTransform(scrollYProgress, [0, 0.25, 0.75, 1], [0, 1, 1, 0.6]);
+  const revealY = useTransform(
+    scrollYProgress,
+    [0, scrollMid, scrollEnd],
+    [`${40 * intensity}%`, '0%', `${-20 * intensity}%`],
+  );
+  const revealOpacity = useTransform(
+    scrollYProgress,
+    [0, scrollEnd * 0.25, scrollEnd * 0.75, scrollEnd],
+    [0, 1, 1, 0.6],
+  );
 
   // Tilt-3d preset — mouse-follow rotation (desktop only). Springs
   // smooth the raw pointer values so the tilt settles gently instead
@@ -235,6 +400,36 @@ function IllustrationContainer({
             return { y: parallaxY, scale: parallaxScale };
           case 'drift':
             return { x: driftX, y: driftY };
+          case 'fly-left':
+            return {
+              x: flyLeftX,
+              y: flyLeftY,
+              rotate: flyLeftRotate,
+              opacity: flyLeftOpacity,
+            };
+          case 'fly-right':
+            return {
+              x: flyRightX,
+              y: flyRightY,
+              rotate: flyRightRotate,
+              opacity: flyRightOpacity,
+            };
+          case 'fly-down':
+            return { y: flyDownY, scale: flyDownScale, opacity: flyDownOpacity };
+          case 'fly-diag-up':
+            return {
+              x: diagUpX,
+              y: diagUpY,
+              rotate: diagUpRotate,
+              opacity: diagUpOpacity,
+            };
+          case 'fly-diag-down':
+            return {
+              x: diagDnX,
+              y: diagDnY,
+              rotate: diagDnRotate,
+              opacity: diagDnOpacity,
+            };
           case 'tilt-3d':
             return { rotateX, rotateY };
           case 'zoom-in':
@@ -281,6 +476,63 @@ function IllustrationContainer({
               animate: { rotate: 360 },
               transition: { duration: kf(20), repeat: Infinity, ease: 'linear' },
             };
+          case 'spin-slow':
+            return {
+              animate: { rotate: 360 },
+              transition: { duration: kf(60), repeat: Infinity, ease: 'linear' },
+            };
+          case 'spin-fast':
+            return {
+              animate: { rotate: 360 },
+              transition: { duration: kf(4), repeat: Infinity, ease: 'linear' },
+            };
+          case 'orbit-wide':
+            return {
+              animate: {
+                x: ['0%', `${8 * intensity}%`, '0%', `${-8 * intensity}%`, '0%'],
+                y: ['0%', `${-8 * intensity}%`, '0%', `${8 * intensity}%`, '0%'],
+              },
+              transition: { duration: kf(12), repeat: Infinity, ease: 'linear' },
+            };
+          case 'heartbeat':
+            return {
+              animate: { scale: [1, 1 + 0.08 * intensity, 1, 1 + 0.04 * intensity, 1] },
+              transition: { duration: kf(1.3), repeat: Infinity, ease: 'easeInOut' },
+            };
+          case 'rubber-band':
+            return {
+              animate: {
+                scaleX: [1, 1 + 0.25 * intensity, 1 - 0.15 * intensity, 1 + 0.15 * intensity, 1 - 0.05 * intensity, 1],
+                scaleY: [1, 1 - 0.25 * intensity, 1 + 0.15 * intensity, 1 - 0.15 * intensity, 1 + 0.05 * intensity, 1],
+              },
+              transition: { duration: kf(1.4), repeat: Infinity, repeatDelay: 2.5, ease: 'easeInOut' },
+            };
+          case 'jiggle':
+            return {
+              animate: {
+                x: ['0%', `${-2 * intensity}%`, `${2 * intensity}%`, `${-1 * intensity}%`, `${1 * intensity}%`, '0%'],
+                rotate: ['0deg', `${-3 * intensity}deg`, `${3 * intensity}deg`, `${-2 * intensity}deg`, `${2 * intensity}deg`, '0deg'],
+              },
+              transition: { duration: kf(0.9), repeat: Infinity, repeatDelay: 2, ease: 'easeInOut' },
+            };
+          case 'swing':
+            return {
+              animate: {
+                rotate: [
+                  `${-6 * intensity}deg`,
+                  `${6 * intensity}deg`,
+                  `${-4 * intensity}deg`,
+                  `${4 * intensity}deg`,
+                  '0deg',
+                ],
+              },
+              transition: {
+                duration: kf(2.4),
+                repeat: Infinity,
+                ease: 'easeInOut',
+                // Swing pivots from the top so it reads as a hanging pendulum.
+              },
+            };
           case 'sway':
             return {
               animate: { rotate: [`-${3 * intensity}deg`, `${3 * intensity}deg`, `-${3 * intensity}deg`] },
@@ -324,15 +576,14 @@ function IllustrationContainer({
         }
       })();
 
-  // Positioning. The illustration only renders at lg+ (1024px) where
-  // every hero variant's layout has real two-column room for it. On
-  // tablets (768–1023px) most variants stack single-column and an
-  // absolute illustration would land on top of the copy. On phones the
-  // hero is copy+CTA only for focus and loading cost.
+  // Positioning. The illustration renders from md+ (768px) so the
+  // dashboard desktop/tablet preview — which is narrower than the
+  // full-screen site — still shows it. On phones the hero is copy+CTA
+  // only for focus and loading cost.
   const sideClass =
     side === 'right'
-      ? 'lg:right-[4%] xl:right-[6%]'
-      : 'lg:left-[4%] xl:left-[6%]';
+      ? 'md:right-[2%] lg:right-[4%] xl:right-[6%]'
+      : 'md:left-[2%] lg:left-[4%] xl:left-[6%]';
 
   // Size. 420px default; scale multiplier tweaks proportionally. Max
   // 560px so it never fully dominates the section. Uses `vw` upper
@@ -343,7 +594,7 @@ function IllustrationContainer({
   return (
     <div
       aria-hidden={!editMode}
-      className={`pointer-events-none absolute inset-y-0 hidden lg:flex lg:items-center ${sideClass}`}
+      className={`pointer-events-none absolute inset-y-0 hidden md:flex md:items-center ${sideClass}`}
       style={{ zIndex: 5, perspective: preset === 'tilt-3d' ? 1200 : undefined }}
     >
       <motion.div
@@ -361,6 +612,9 @@ function IllustrationContainer({
           // to the hero CTAs, but tilt needs to receive mousemove.
           pointerEvents: preset === 'tilt-3d' && !motionDisabled ? 'auto' : 'none',
           transformStyle: preset === 'tilt-3d' ? 'preserve-3d' : undefined,
+          // Pendulum swing pivots from the top so it reads as a hanging
+          // object. Every other preset keeps the default center origin.
+          transformOrigin: preset === 'swing' ? 'top center' : undefined,
           filter:
             // Two layered shadows: a coloured one in the primary brand
             // so the silhouette reads on dark backgrounds, plus a neutral

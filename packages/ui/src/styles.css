@@ -277,3 +277,78 @@
     opacity: 0;
   }
 }
+
+/* Site-wide dark surface mode.
+ *
+ * When `brand.siteBackground === 'dark'` the root `.bmb-site-dark`
+ * class is applied and every block's hard "white" / "slate-50" surface
+ * flips to a dark panel with light text. Hero has its own dark/light
+ * toggle (`brand.heroStyle`) and is excluded. Decorative layers
+ * (gradient meshes, particles, sparkles) are kept because they already
+ * render transparently on top of the block surface.
+ *
+ * The selectors lean on Tailwind's utility classes being present on the
+ * block's outer <section>. That's a private contract between
+ * `SiteRenderer` and the block components — both ship together, so
+ * depending on the class name is pragmatic.
+ */
+.bmb-site-dark section.bg-white,
+.bmb-site-dark section.bg-slate-50,
+.bmb-site-dark section.bg-slate-100 {
+  background-color: #0b1220 !important;
+  color: #e2e8f0;
+}
+
+/* Within a dark block: flip explicit text-slate-900 to light, and
+ * soften body slates so they stay readable. */
+.bmb-site-dark section.bg-white :is(h1, h2, h3, h4, h5, h6),
+.bmb-site-dark section.bg-slate-50 :is(h1, h2, h3, h4, h5, h6),
+.bmb-site-dark section.bg-slate-100 :is(h1, h2, h3, h4, h5, h6) {
+  color: #f8fafc;
+}
+.bmb-site-dark section.bg-white .text-slate-900,
+.bmb-site-dark section.bg-slate-50 .text-slate-900,
+.bmb-site-dark section.bg-slate-100 .text-slate-900 {
+  color: #f1f5f9;
+}
+.bmb-site-dark section.bg-white .text-slate-800,
+.bmb-site-dark section.bg-white .text-slate-700,
+.bmb-site-dark section.bg-white .text-slate-600,
+.bmb-site-dark section.bg-slate-50 .text-slate-800,
+.bmb-site-dark section.bg-slate-50 .text-slate-700,
+.bmb-site-dark section.bg-slate-50 .text-slate-600,
+.bmb-site-dark section.bg-slate-100 .text-slate-800,
+.bmb-site-dark section.bg-slate-100 .text-slate-700,
+.bmb-site-dark section.bg-slate-100 .text-slate-600 {
+  color: #cbd5e1;
+}
+
+/* Cards inside dark sections — bump surface up one level so they
+ * separate from the section background. */
+.bmb-site-dark section.bg-white .bg-white,
+.bmb-site-dark section.bg-slate-50 .bg-white,
+.bmb-site-dark section.bg-slate-100 .bg-white {
+  background-color: #111a2e !important;
+  color: #e2e8f0;
+  border-color: rgba(255, 255, 255, 0.08);
+}
+.bmb-site-dark section.bg-white .border-slate-200,
+.bmb-site-dark section.bg-white .border-slate-100,
+.bmb-site-dark section.bg-slate-50 .border-slate-200,
+.bmb-site-dark section.bg-slate-50 .border-slate-100,
+.bmb-site-dark section.bg-slate-100 .border-slate-200,
+.bmb-site-dark section.bg-slate-100 .border-slate-100 {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+/* Inputs — dark mode. */
+.bmb-site-dark section.bg-white input,
+.bmb-site-dark section.bg-white textarea,
+.bmb-site-dark section.bg-white select,
+.bmb-site-dark section.bg-slate-50 input,
+.bmb-site-dark section.bg-slate-50 textarea,
+.bmb-site-dark section.bg-slate-50 select {
+  background-color: rgba(255, 255, 255, 0.04) !important;
+  color: #f1f5f9;
+  border-color: rgba(255, 255, 255, 0.12);
+}

@@ -12,9 +12,15 @@ import { requireAuth, requireRole } from '../services/auth.js';
 import {
   AVATAR_CATALOG,
   VOICE_CATALOG,
+  INFLUENCER_PERSONAS,
   generateAvatarScript,
   generateAvatarVideo,
+  generateProductReviewScript,
+  generateHookVariants,
+  getPersona,
 } from '../services/talkingHead.js';
+import { VIRAL_FORMATS, getViralFormat } from '../services/viralFormats.js';
+import { HOOK_FORMULAS, getHookFormula } from '../services/viralHooks.js';
 import { MODEL_CATALOG, estimateCostCents, getModel } from '../services/modelCatalog.js';
 import { isDbConfigured, getDb, clientImages } from '@boost/database';
 import { withRetry } from '../services/retry.js';
@@ -31,8 +37,14 @@ talkingHeadRouter.get(
   requireAuth,
   requireRole('agency_admin', 'agency_member'),
   (_req, res) => {
+    // Talking-head / UGC models: explicit allowlist by id-prefix and
+    // known premium entries so new avatar providers get surfaced
+    // without accidentally pulling in general video models like Kling.
+    const UGC_MODEL_IDS = new Set(['runway-act-one', 'omnihuman', 'higgsfield-sora-2']);
     const models = MODEL_CATALOG.filter(
-      (m) => m.id.startsWith('veed-') && m.mediaType === 'video',
+      (m) =>
+        m.mediaType === 'video' &&
+        (m.id.startsWith('veed-') || UGC_MODEL_IDS.has(m.id)),
     ).map((m) => ({
       id: m.id,
       displayName: m.displayName,
@@ -47,6 +59,9 @@ talkingHeadRouter.get(
         avatars: AVATAR_CATALOG,
         voices: VOICE_CATALOG,
         models,
+        personas: INFLUENCER_PERSONAS,
+        viralFormats: VIRAL_FORMATS,
+        hookFormulas: HOOK_FORMULAS,
       },
     });
   },
@@ -59,6 +74,12 @@ const scriptSchema = z.object({
   durationSeconds: z.number().int().min(5).max(90).default(30),
   productId: z.string().uuid().optional(),
   inspirationProfileIds: z.array(z.string().uuid()).max(10).optional(),
+  /** Influencer persona id from INFLUENCER_PERSONAS. Optional. */
+  personaId: z.string().max(100).optional(),
+  /** Viral format id from VIRAL_FORMATS. Optional — auto-selects when omitted. */
+  formatId: z.string().max(100).optional(),
+  /** Hook formula id from HOOK_FORMULAS. Optional — persona/format picks otherwise. */
+  hookFormulaId: z.string().max(100).optional(),
 });
 
 talkingHeadRouter.post(
@@ -68,8 +89,131 @@ talkingHeadRouter.post(
   async (req, res, next) => {
     try {
       const args = scriptSchema.parse(req.body);
+      if (args.personaId && !getPersona(args.personaId)) {
+        return res.status(400).json({
+          error: { message: `Unknown persona: ${args.personaId}`, code: 'UNKNOWN_PERSONA' },
+        });
+      }
+      if (args.formatId && !getViralFormat(args.formatId)) {
+        return res.status(400).json({
+          error: { message: `Unknown viral format: ${args.formatId}`, code: 'UNKNOWN_FORMAT' },
+        });
+      }
+      if (args.hookFormulaId && !getHookFormula(args.hookFormulaId)) {
+        return res.status(400).json({
+          error: { message: `Unknown hook formula: ${args.hookFormulaId}`, code: 'UNKNOWN_HOOK' },
+        });
+      }
       const result = await generateAvatarScript(args);
       res.json({ data: result });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+/**
+ * Generate N hook variants for the same brief. Each variant uses a
+ * distinct canonical hook formula — the standard A/B setup for UGC.
+ */
+const hookVariantsSchema = z.object({
+  clientId: z.string().uuid(),
+  brief: z.string().min(10).max(2000),
+  platform: z.enum(['tiktok', 'instagram_reels', 'youtube_shorts', 'generic']).default('tiktok'),
+  productId: z.string().uuid().optional(),
+  count: z.number().int().min(2).max(8).default(5),
+  personaId: z.string().max(100).optional(),
+  niche: z
+    .enum([
+      'ecommerce_ad',
+      'saas_ad',
+      'personal_brand',
+      'faceless_education',
+      'faceless_story',
+      'lifestyle',
+      'fitness',
+      'beauty',
+      'food',
+      'tech',
+      'finance',
+      'general',
+    ])
+    .optional(),
+  inspirationProfileIds: z.array(z.string().uuid()).max(10).optional(),
+});
+
+talkingHeadRouter.post(
+  '/hook-variants',
+  requireAuth,
+  requireRole('agency_admin', 'agency_member'),
+  async (req, res, next) => {
+    try {
+      const args = hookVariantsSchema.parse(req.body);
+      if (args.personaId && !getPersona(args.personaId)) {
+        return res.status(400).json({
+          error: { message: `Unknown persona: ${args.personaId}`, code: 'UNKNOWN_PERSONA' },
+        });
+      }
+      const result = await generateHookVariants(args);
+      res.json({ data: result });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+/**
+ * Product-review script. Returns a short persona-voiced review of a
+ * specific product. The caller uses the returned `script` with
+ * `/talking-head/render` to produce the final MP4 — we keep the two
+ * steps separate so the reviewer can tweak the script in-between.
+ */
+const productReviewSchema = z.object({
+  clientId: z.string().uuid(),
+  productId: z.string().uuid(),
+  personaId: z.string().max(100),
+  platform: z.enum(['tiktok', 'instagram_reels', 'youtube_shorts', 'generic']).default('tiktok'),
+  durationSeconds: z.number().int().min(5).max(90).default(30),
+  angle: z
+    .enum([
+      'unboxing',
+      'first_impressions',
+      'thirty_day_update',
+      'dupe_vs_original',
+      'compare',
+      'how_to_use',
+    ])
+    .optional(),
+  direction: z.string().max(1000).optional(),
+  inspirationProfileIds: z.array(z.string().uuid()).max(10).optional(),
+});
+
+talkingHeadRouter.post(
+  '/product-review-script',
+  requireAuth,
+  requireRole('agency_admin', 'agency_member'),
+  async (req, res, next) => {
+    try {
+      const args = productReviewSchema.parse(req.body);
+      if (!getPersona(args.personaId)) {
+        return res.status(400).json({
+          error: { message: `Unknown persona: ${args.personaId}`, code: 'UNKNOWN_PERSONA' },
+        });
+      }
+      const result = await generateProductReviewScript(args);
+      res.json({
+        data: {
+          script: result.script,
+          estimatedDurationSeconds: result.estimatedDurationSeconds,
+          fromMock: result.fromMock,
+          persona: {
+            id: result.persona.id,
+            displayName: result.persona.displayName,
+            niche: result.persona.niche,
+            recommendedAvatarId: result.persona.recommendedAvatarId,
+          },
+        },
+      });
     } catch (e) {
       next(e);
     }
@@ -104,9 +248,23 @@ talkingHeadRouter.post(
           .status(400)
           .json({ error: { message: `Unknown model: ${args.modelId}`, code: 'UNKNOWN_MODEL' } });
       }
-      if (model.mediaType !== 'video' || !model.id.startsWith('veed-')) {
+      // Accept all talking-head / UGC models: veed presets plus the
+      // premium roster (Runway Act-One, Omnihuman, Higgsfield Sora 2).
+      const PREMIUM_UGC = new Set(['runway-act-one', 'omnihuman', 'higgsfield-sora-2']);
+      const isTalkingHeadModel =
+        model.mediaType === 'video' &&
+        (model.id.startsWith('veed-') || PREMIUM_UGC.has(model.id));
+      if (!isTalkingHeadModel) {
         return res.status(400).json({
           error: { message: `${model.displayName} is not a talking-head model`, code: 'MODEL_TYPE_MISMATCH' },
+        });
+      }
+      if (!model.available) {
+        return res.status(400).json({
+          error: {
+            message: `${model.displayName} requires additional credentials. Contact your admin to enable it.`,
+            code: 'MODEL_UNAVAILABLE',
+          },
         });
       }
 

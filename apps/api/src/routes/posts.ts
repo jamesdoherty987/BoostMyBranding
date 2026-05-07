@@ -62,10 +62,14 @@ postsRouter.get('/', requireAuth, async (req, res, next) => {
     }
 
     if (!isDbConfigured()) {
+      // Mock mode: there are no batches — mockPosts are fixtures, not
+      // generated output. If the caller asked for a specific batchId
+      // return an empty list so the UI shows "no posts in this batch"
+      // rather than surfacing unrelated mock posts.
+      if (batchId) return res.json({ data: [] });
       let results = mockPosts;
       if (clientId) results = results.filter((p) => p.clientId === clientId);
       if (status) results = results.filter((p) => p.status === status);
-      // batch filter isn't represented in mock data — leave as-is.
       return res.json({ data: results });
     }
     const db = getDb();

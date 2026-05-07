@@ -60,7 +60,112 @@ export interface ModelOption {
  * previously greyed-out option.
  */
 export const MODEL_CATALOG: ModelOption[] = [
-  // ── VIDEO ────────────────────────────────────────────────────────
+  // ── VIDEO — 2026 FRONTIER ───────────────────────────────────────
+  // These are the "headline" models most teams want. Kept on top of
+  // the catalog so the picker's default selection lands here.
+  {
+    id: 'veo-3.1',
+    displayName: 'Google Veo 3.1',
+    provider: 'vertex',
+    endpoint: 'veo-3.1',
+    mediaType: 'video',
+    supportsReference: true,
+    maxReferenceCount: 3,
+    maxDurationSeconds: 8,
+    pricePerUnitCents: 40,
+    unit: 'second',
+    recommendation: 'quality',
+    supportedAspectRatios: ['9:16', '16:9'],
+    // Vertex credentials not wired yet — picker shows as locked.
+    available: false,
+    notes: 'Up to 4K and NATIVE audio in one pass. Best for hero shots and commercial-grade ads. Requires Vertex AI credentials.',
+  },
+  {
+    id: 'sora-2-pro',
+    displayName: 'OpenAI Sora 2 Pro',
+    provider: 'fal',
+    endpoint: 'fal-ai/openai/sora-2/pro',
+    mediaType: 'video',
+    supportsReference: true,
+    maxReferenceCount: 2,
+    maxDurationSeconds: 12,
+    pricePerUnitCents: 50,
+    unit: 'second',
+    recommendation: null,
+    supportedAspectRatios: ['9:16', '1:1', '16:9'],
+    // fal.ai access to Sora 2 is gated per-account; leaving locked so the
+    // picker doesn't promise what the workspace can't deliver.
+    available: false,
+    notes: 'Strongest narrative short-form in 2026. Great for multi-shot stories and reactions. Access gated on fal.ai.',
+  },
+  {
+    id: 'kling-3-pro',
+    displayName: 'Kling 3 Pro',
+    provider: 'fal',
+    endpoint: 'fal-ai/kling-video/v3/pro/image-to-video',
+    mediaType: 'video',
+    supportsReference: true,
+    maxReferenceCount: 1,
+    maxDurationSeconds: 10,
+    pricePerUnitCents: 12,
+    unit: 'second',
+    recommendation: 'quality',
+    supportedAspectRatios: ['9:16', '1:1', '16:9'],
+    available: features.fal,
+    notes: '2026 Kling. Strong long B-roll, realistic on-camera people. Default choice for everyday marketing on fal.ai.',
+  },
+  {
+    id: 'seedance-2-pro',
+    displayName: 'ByteDance Seedance 2.0 Pro',
+    provider: 'fal',
+    endpoint: 'fal-ai/bytedance/seedance/v2/pro/image-to-video',
+    mediaType: 'video',
+    supportsReference: true,
+    maxReferenceCount: 1,
+    maxDurationSeconds: 10,
+    pricePerUnitCents: 8,
+    unit: 'second',
+    recommendation: 'price',
+    supportedAspectRatios: ['9:16', '1:1', '16:9'],
+    available: features.fal,
+    notes: 'Seedance 2.0 — cheapest frontier-tier per second. Solid for UGC demos; physics not as strong as Veo/Kling.',
+  },
+  {
+    id: 'runway-gen-4.5',
+    displayName: 'Runway Gen-4.5',
+    provider: 'fal',
+    endpoint: 'runway/gen-4.5',
+    mediaType: 'video',
+    supportsReference: true,
+    maxReferenceCount: 2,
+    maxDurationSeconds: 10,
+    pricePerUnitCents: 20,
+    unit: 'second',
+    recommendation: null,
+    supportedAspectRatios: ['9:16', '1:1', '16:9'],
+    available: false,
+    notes: 'Best temporal consistency — characters stay on-model across the whole shot. Requires RUNWAY_API_KEY.',
+  },
+  {
+    id: 'hailuo-2-3',
+    displayName: 'MiniMax Hailuo 2.3',
+    provider: 'fal',
+    endpoint: 'fal-ai/minimax/hailuo-02/pro/image-to-video',
+    mediaType: 'video',
+    supportsReference: true,
+    maxReferenceCount: 1,
+    maxDurationSeconds: 6,
+    pricePerUnitCents: 7,
+    unit: 'second',
+    recommendation: 'speed',
+    supportedAspectRatios: ['9:16', '1:1', '16:9'],
+    available: features.fal,
+    notes: 'Hailuo 2.3 — fast and fixed-priced. Natural physics, 6s clips. Ideal for rapid A/B generation.',
+  },
+
+  // ── VIDEO — previous generations ────────────────────────────────
+  // Kept so existing workflows that pinned these IDs keep working. New
+  // work should default to the 2026 frontier block above.
   {
     id: 'kling-2.1-pro',
     displayName: 'Kling 2.1 Pro',
@@ -190,6 +295,21 @@ export const MODEL_CATALOG: ModelOption[] = [
     notes: 'Takes one reference image and edits it toward your brief. The go-to for style-guided generation.',
   },
   {
+    id: 'flux-kontext-max-multi',
+    displayName: 'Flux Kontext Max (Multi-reference)',
+    provider: 'fal',
+    endpoint: 'fal-ai/flux-pro/kontext/max/multi',
+    mediaType: 'image',
+    supportsReference: true,
+    maxReferenceCount: 4,
+    pricePerUnitCents: 10,
+    unit: 'image',
+    recommendation: null,
+    supportedAspectRatios: ['1:1', '4:5', '9:16', '16:9'],
+    available: features.fal,
+    notes: 'Kontext Max with up to 4 references in one call. Best for transferring both subject and style from multiple inspirations.',
+  },
+  {
     id: 'flux-dev',
     displayName: 'Flux Dev',
     provider: 'fal',
@@ -234,22 +354,6 @@ export const MODEL_CATALOG: ModelOption[] = [
     available: false, // requires GEMINI_API_KEY — not wired in this app yet
     notes: 'Google Gemini 3.1 Flash Image. Up to 14 reference images + "thinking" mode. Requires GEMINI_API_KEY.',
   },
-  {
-    id: 'veo-3.1',
-    displayName: 'Google Veo 3.1',
-    provider: 'vertex',
-    endpoint: 'veo-3.1',
-    mediaType: 'video',
-    supportsReference: true,
-    maxReferenceCount: 3,
-    maxDurationSeconds: 8,
-    pricePerUnitCents: 40,
-    unit: 'second',
-    recommendation: null,
-    supportedAspectRatios: ['9:16', '16:9'],
-    available: false, // requires Vertex AI credentials — not wired in this app yet
-    notes: 'Highest realism + native audio. Requires Vertex AI credentials.',
-  },
   // ── TALKING-HEAD / AI UGC ─────────────────────────────────────────
   {
     id: 'veed-avatar-text',
@@ -283,6 +387,57 @@ export const MODEL_CATALOG: ModelOption[] = [
     available: features.fal,
     notes: 'Upload your own on-camera footage; the model re-lipsyncs it to new audio. Use for real-person UGC.',
   },
+  // Premium high-realism UGC / influencer models. Marked unavailable in
+  // the default deployment — requires dedicated credentials. The picker
+  // still shows them so the user knows what's possible after unlocking.
+  {
+    id: 'runway-act-one',
+    displayName: 'Runway Act-One',
+    provider: 'fal',
+    endpoint: 'runway/act-one', // placeholder — actual integration is via Runway API
+    mediaType: 'video',
+    supportsReference: true,
+    maxReferenceCount: 2,
+    maxDurationSeconds: 30,
+    pricePerUnitCents: 50,
+    unit: 'second',
+    recommendation: 'quality',
+    supportedAspectRatios: ['9:16', '1:1', '16:9'],
+    available: false,
+    notes: 'Runway Act-One. Drives a static character photo with a source video of your own performance — best-in-class realism for product reviews. Requires RUNWAY_API_KEY.',
+  },
+  {
+    id: 'omnihuman',
+    displayName: 'ByteDance Omnihuman',
+    provider: 'fal',
+    endpoint: 'bytedance/omnihuman',
+    mediaType: 'video',
+    supportsReference: true,
+    maxReferenceCount: 1,
+    maxDurationSeconds: 30,
+    pricePerUnitCents: 45,
+    unit: 'second',
+    recommendation: 'quality',
+    supportedAspectRatios: ['9:16', '1:1', '16:9'],
+    available: false,
+    notes: 'ByteDance Omnihuman. Photoreal full-body talking character from a single image + audio. Best for premium UGC / ad creative.',
+  },
+  {
+    id: 'higgsfield-sora-2',
+    displayName: 'Higgsfield Sora 2',
+    provider: 'fal',
+    endpoint: 'higgsfield/sora-2',
+    mediaType: 'video',
+    supportsReference: true,
+    maxReferenceCount: 3,
+    maxDurationSeconds: 12,
+    pricePerUnitCents: 60,
+    unit: 'second',
+    recommendation: null,
+    supportedAspectRatios: ['9:16', '1:1', '16:9'],
+    available: false,
+    notes: 'Higgsfield Sora 2 — text-to-video with native audio and strong prompt adherence. Requires HIGGSFIELD_API_KEY.',
+  },
 ];
 
 /**
@@ -315,6 +470,8 @@ export function snapVideoDuration(requested: number, model: ModelOption): number
   const clamped = Math.max(2, Math.min(cap, Math.round(requested)));
   if (model.id.startsWith('kling-')) return clamped >= 8 ? 10 : 5;
   if (model.id === 'hailuo-02-standard') return 6; // only discrete option ≤ 6s
+  if (model.id === 'hailuo-2-3') return clamped >= 5 ? 6 : 4;
+  if (model.id === 'seedance-2-pro') return clamped >= 8 ? 10 : 5;
   if (model.id === 'stable-video') return Math.min(4, clamped);
   // Avatar models bill per second of output; any integer in [5, 90] works.
   if (model.id.startsWith('veed-')) return Math.max(5, Math.min(90, clamped));

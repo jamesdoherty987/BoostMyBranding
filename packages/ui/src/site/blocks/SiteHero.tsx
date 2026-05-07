@@ -241,15 +241,35 @@ export function SiteHero({ config, images, businessName, embedded }: SiteHeroPro
   })();
 
   return (
-    <div id="hero" ref={heroRef} className="relative">
+    <div
+      id="hero"
+      ref={heroRef}
+      // `relative` anchors the absolutely-positioned cutout + illustration
+      // layers. `isolate` makes the stacking context explicit. `overflow-hidden`
+      // stops cutouts that sit near the edges from spilling into the next
+      // section — without it, a cutout positioned at y=100 or scaled up on
+      // scroll would be visible on top of the section directly below the
+      // hero, which reads like the hero is being pushed under it.
+      className="relative isolate overflow-hidden"
+    >
       {/* Cutouts layer 0 — behind copy */}
       {cutouts && cutouts.length > 0 ? (
-        <HeroCutouts cutouts={cutouts} embedded={embedded} layer={0} />
+        <HeroCutouts
+          cutouts={cutouts}
+          embedded={embedded}
+          layer={0}
+          heroRef={heroRef}
+        />
       ) : null}
       {variantEl}
       {/* Cutouts layer 1 — above copy */}
       {cutouts && cutouts.length > 0 ? (
-        <HeroCutouts cutouts={cutouts} embedded={embedded} layer={1} />
+        <HeroCutouts
+          cutouts={cutouts}
+          embedded={embedded}
+          layer={1}
+          heroRef={heroRef}
+        />
       ) : null}
       {/* Scroll-driven hero illustration (rocket-style). Renders nothing
           when `illustration` is unset or the current variant already

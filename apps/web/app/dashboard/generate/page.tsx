@@ -1177,7 +1177,7 @@ function AIImageMode({ clientId }: { clientId: string }) {
             {result ? (
               <div className="mt-3 space-y-3">
                 <div className="relative aspect-square overflow-hidden rounded-xl bg-slate-900">
-                  /* eslint-disable-next-line @next/next/no-img-element */
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={result.imageUrl}
                     alt=""
@@ -1375,7 +1375,7 @@ function TemplateMode({ clientId, businessName }: { clientId: string; businessNa
                             : 'border-slate-200 hover:border-slate-300'
                         }`}
                       >
-                        /* eslint-disable-next-line @next/next/no-img-element */
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={m.fileUrl} alt="" className="h-full w-full object-cover" />
                       </button>
                     ))}

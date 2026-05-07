@@ -56,6 +56,91 @@ const isValidUuid = (s: string) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 
 /* ═══════════════════════════════════════════════════════════════════ */
+/* Creative-control presets                                             */
+/* ═══════════════════════════════════════════════════════════════════ */
+
+const IMAGE_STYLE_OPTIONS = [
+  { value: 'editorial_photography', label: 'Editorial photography', hint: 'Magazine quality, natural' },
+  { value: 'cinematic_photography', label: 'Cinematic', hint: 'Film feel, widescreen' },
+  { value: 'documentary_photography', label: 'Documentary', hint: 'Candid, unretouched' },
+  { value: 'lifestyle_photography', label: 'Lifestyle', hint: 'Relaxed, aspirational' },
+  { value: 'flat_lay', label: 'Flat lay', hint: 'Top-down, arranged' },
+  { value: 'product_studio', label: 'Product studio', hint: 'Seamless backdrop, crisp' },
+  { value: 'architectural', label: 'Architectural', hint: 'Strong geometry' },
+  { value: 'minimalist', label: 'Minimalist', hint: 'Restrained, single subject' },
+  { value: 'magazine_editorial', label: 'Magazine editorial', hint: 'Print-quality detail' },
+  { value: 'vintage_film', label: 'Vintage film', hint: '35mm, analogue' },
+  { value: 'moody_dark', label: 'Moody / dark', hint: 'Deep shadows' },
+  { value: 'bright_airy', label: 'Bright / airy', hint: 'Soft pastels, clean whites' },
+  { value: 'illustration_flat', label: 'Flat illustration', hint: 'Vector, flat design' },
+  { value: 'illustration_3d', label: '3D illustration', hint: 'Stylised render' },
+] as const;
+type ImageStyleKey = (typeof IMAGE_STYLE_OPTIONS)[number]['value'];
+
+const LIGHTING_OPTIONS = [
+  { value: 'golden_hour', label: 'Golden hour' },
+  { value: 'soft_daylight', label: 'Soft daylight' },
+  { value: 'overcast_even', label: 'Overcast even' },
+  { value: 'studio_softbox', label: 'Studio softbox' },
+  { value: 'dramatic_rembrandt', label: 'Dramatic Rembrandt' },
+  { value: 'low_key_moody', label: 'Low-key moody' },
+  { value: 'high_key_bright', label: 'High-key bright' },
+  { value: 'neon_night', label: 'Neon night' },
+  { value: 'window_side_light', label: 'Window side light' },
+  { value: 'backlit_silhouette', label: 'Backlit silhouette' },
+] as const;
+type LightingKey = (typeof LIGHTING_OPTIONS)[number]['value'];
+
+const COMPOSITION_OPTIONS = [
+  { value: 'rule_of_thirds', label: 'Rule of thirds' },
+  { value: 'centered', label: 'Centered' },
+  { value: 'overhead_flat', label: 'Overhead flat' },
+  { value: 'close_up', label: 'Close-up' },
+  { value: 'wide_environmental', label: 'Wide environmental' },
+  { value: 'shallow_depth', label: 'Shallow depth' },
+  { value: 'symmetrical', label: 'Symmetrical' },
+  { value: 'negative_space', label: 'Negative space' },
+  { value: 'leading_lines', label: 'Leading lines' },
+] as const;
+type CompositionKey = (typeof COMPOSITION_OPTIONS)[number]['value'];
+
+const MOOD_OPTIONS = [
+  { value: 'warm_intimate', label: 'Warm / intimate' },
+  { value: 'calm_premium', label: 'Calm / premium' },
+  { value: 'energetic_playful', label: 'Energetic / playful' },
+  { value: 'confident_bold', label: 'Confident / bold' },
+  { value: 'quiet_elegant', label: 'Quiet / elegant' },
+  { value: 'nostalgic', label: 'Nostalgic' },
+  { value: 'futuristic_clean', label: 'Futuristic / clean' },
+] as const;
+type MoodKey = (typeof MOOD_OPTIONS)[number]['value'];
+
+const CAMERA_MOVEMENT_OPTIONS = [
+  { value: 'static', label: 'Static' },
+  { value: 'slow_push_in', label: 'Slow push-in' },
+  { value: 'slow_pull_out', label: 'Slow pull-out' },
+  { value: 'gentle_pan_left', label: 'Pan left' },
+  { value: 'gentle_pan_right', label: 'Pan right' },
+  { value: 'tilt_up', label: 'Tilt up' },
+  { value: 'tilt_down', label: 'Tilt down' },
+  { value: 'subtle_orbit', label: 'Subtle orbit' },
+  { value: 'handheld_follow', label: 'Handheld follow' },
+  { value: 'crane_up', label: 'Crane up' },
+  { value: 'rack_focus', label: 'Rack focus' },
+] as const;
+type CameraMovementKey = (typeof CAMERA_MOVEMENT_OPTIONS)[number]['value'];
+
+const MOTION_STYLE_OPTIONS = [
+  { value: 'cinematic_natural', label: 'Cinematic natural' },
+  { value: 'smooth_slow_mo', label: 'Smooth slow-mo' },
+  { value: 'kinetic_snappy', label: 'Kinetic snappy' },
+  { value: 'documentary_handheld', label: 'Documentary handheld' },
+  { value: 'dreamy_float', label: 'Dreamy float' },
+  { value: 'macro_detail', label: 'Macro detail' },
+] as const;
+type MotionStyleKey = (typeof MOTION_STYLE_OPTIONS)[number]['value'];
+
+/* ═══════════════════════════════════════════════════════════════════ */
 /* Types                                                                */
 /* ═══════════════════════════════════════════════════════════════════ */
 
@@ -189,6 +274,21 @@ export function InspirationMode({
   const [useInspirationAsVideoSeed, setUseInspirationAsVideoSeed] = useState(true);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
+  /* ── Creative controls ──────────────────────────────────────── */
+
+  const [imageCount, setImageCount] = useState(1);
+  const [imgStyle, setImgStyle] = useState<ImageStyleKey | ''>('');
+  const [imgLighting, setImgLighting] = useState<LightingKey | ''>('');
+  const [imgComposition, setImgComposition] = useState<CompositionKey | ''>('');
+  const [imgMood, setImgMood] = useState<MoodKey | ''>('');
+  const [imgCameraTechnical, setImgCameraTechnical] = useState('');
+  const [imgAvoid, setImgAvoid] = useState('');
+  const [vidCameraMovement, setVidCameraMovement] = useState<CameraMovementKey | ''>('');
+  const [vidMotionStyle, setVidMotionStyle] = useState<MotionStyleKey | ''>('');
+  const [vidMood, setVidMood] = useState<MoodKey | ''>('');
+  const [vidAvoid, setVidAvoid] = useState('');
+  const [showControls, setShowControls] = useState(false);
+
   /* ── Run state ───────────────────────────────────────────────── */
 
   const [running, setRunning] = useState(false);
@@ -223,6 +323,7 @@ export function InspirationMode({
           videoModelId: outputType !== 'image' ? videoModelId || undefined : undefined,
           videoDurationSeconds: videoDuration,
           outputType,
+          imageCount,
         });
         if (!cancelled) setEstimateCents(res.costCents);
       } catch {
@@ -233,7 +334,7 @@ export function InspirationMode({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [imageModelId, videoModelId, outputType, videoDuration]);
+  }, [imageModelId, videoModelId, outputType, videoDuration, imageCount]);
 
   /* ── Handlers ────────────────────────────────────────────────── */
 
@@ -373,6 +474,21 @@ export function InspirationMode({
         videoAspectRatio: videoAspect,
         videoDurationSeconds: videoDuration,
         useInspirationAsVideoSeed,
+        imageCount,
+        imageControls: {
+          style: imgStyle || undefined,
+          lighting: imgLighting || undefined,
+          composition: imgComposition || undefined,
+          mood: imgMood || undefined,
+          cameraTechnical: imgCameraTechnical.trim() || undefined,
+          avoid: splitAvoid(imgAvoid),
+        },
+        videoControls: {
+          cameraMovement: vidCameraMovement || undefined,
+          motionStyle: vidMotionStyle || undefined,
+          mood: vidMood || undefined,
+          avoid: splitAvoid(vidAvoid),
+        },
       });
 
       setOutputs(result.outputs);
@@ -806,7 +922,162 @@ export function InspirationMode({
           </CardContent>
         </Card>
 
-        {/* STEP 5 — Fine-tune */}
+        {/* STEP 5 — Creative controls (optional presets) */}
+        <Card>
+          <CardContent className="p-5 md:p-6 space-y-4">
+            <button
+              onClick={() => setShowControls((v) => !v)}
+              className="flex w-full items-center justify-between text-left"
+            >
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#1D9CA1]/10 text-[11px] font-bold text-[#1D9CA1]">
+                    5
+                  </span>
+                  <h2 className="text-sm font-semibold text-slate-900">Creative controls</h2>
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">
+                    optional
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-slate-500">
+                  Pick a style, lighting, composition, mood, and camera direction. Leave empty
+                  to let the model pick based on the inspiration.
+                </p>
+              </div>
+              {showControls ? (
+                <ChevronUp className="h-4 w-4 text-slate-400" />
+              ) : (
+                <ChevronDown className="h-4 w-4 text-slate-400" />
+              )}
+            </button>
+
+            {showControls ? (
+              <div className="space-y-4">
+                {/* Image controls */}
+                {outputType === 'image' || outputType === 'both' ? (
+                  <div className="rounded-xl border border-slate-200 p-3 space-y-3">
+                    <p className="text-xs font-semibold text-slate-900">Image direction</p>
+
+                    <PresetPicker
+                      label="Style"
+                      value={imgStyle}
+                      options={IMAGE_STYLE_OPTIONS}
+                      onChange={(v) => setImgStyle(v as ImageStyleKey | '')}
+                    />
+                    <PresetPicker
+                      label="Lighting"
+                      value={imgLighting}
+                      options={LIGHTING_OPTIONS}
+                      onChange={(v) => setImgLighting(v as LightingKey | '')}
+                    />
+                    <PresetPicker
+                      label="Composition"
+                      value={imgComposition}
+                      options={COMPOSITION_OPTIONS}
+                      onChange={(v) => setImgComposition(v as CompositionKey | '')}
+                    />
+                    <PresetPicker
+                      label="Mood"
+                      value={imgMood}
+                      options={MOOD_OPTIONS}
+                      onChange={(v) => setImgMood(v as MoodKey | '')}
+                    />
+
+                    <div>
+                      <label className="text-[11px] font-medium text-slate-600">
+                        Camera / lens <span className="text-slate-400">(optional, free-text)</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={imgCameraTechnical}
+                        onChange={(e) => setImgCameraTechnical(e.target.value)}
+                        maxLength={300}
+                        placeholder="e.g. 35mm f/1.8, shallow depth of field, eye-level"
+                        className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs no-zoom"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-medium text-slate-600">
+                        Avoid <span className="text-slate-400">(comma-separated)</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={imgAvoid}
+                        onChange={(e) => setImgAvoid(e.target.value)}
+                        maxLength={500}
+                        placeholder="stock-photo vibe, cluttered, oversaturated"
+                        className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs no-zoom"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-medium text-slate-600">
+                        Variants: {imageCount} {imageCount === 1 ? 'image' : 'images'}
+                        <span className="text-slate-400"> (cost scales with count)</span>
+                      </label>
+                      <input
+                        type="range"
+                        min={1}
+                        max={4}
+                        step={1}
+                        value={imageCount}
+                        onChange={(e) => setImageCount(Number(e.target.value))}
+                        className="mt-2 w-full accent-[#1D9CA1]"
+                      />
+                    </div>
+                  </div>
+                ) : null}
+
+                {/* Video controls */}
+                {outputType === 'video' || outputType === 'both' ? (
+                  <div className="rounded-xl border border-slate-200 p-3 space-y-3">
+                    <p className="text-xs font-semibold text-slate-900">Video direction</p>
+
+                    <PresetPicker
+                      label="Camera movement"
+                      value={vidCameraMovement}
+                      options={CAMERA_MOVEMENT_OPTIONS}
+                      onChange={(v) => setVidCameraMovement(v as CameraMovementKey | '')}
+                    />
+                    <PresetPicker
+                      label="Motion style"
+                      value={vidMotionStyle}
+                      options={MOTION_STYLE_OPTIONS}
+                      onChange={(v) => setVidMotionStyle(v as MotionStyleKey | '')}
+                    />
+                    <PresetPicker
+                      label="Mood"
+                      value={vidMood}
+                      options={MOOD_OPTIONS}
+                      onChange={(v) => setVidMood(v as MoodKey | '')}
+                    />
+
+                    <div>
+                      <label className="text-[11px] font-medium text-slate-600">
+                        Avoid <span className="text-slate-400">(comma-separated)</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={vidAvoid}
+                        onChange={(e) => setVidAvoid(e.target.value)}
+                        maxLength={500}
+                        placeholder="cuts, warped faces, heavy grain"
+                        className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs no-zoom"
+                      />
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <p className="text-[11px] text-slate-400">
+                Tap to expand. Everything is optional — sensible defaults apply.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* STEP 6 — Fine-tune */}
         <Card>
           <CardContent className="p-5 md:p-6 space-y-4">
             <button
@@ -815,7 +1086,7 @@ export function InspirationMode({
             >
               <div className="flex items-center gap-2">
                 <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#1D9CA1]/10 text-[11px] font-bold text-[#1D9CA1]">
-                  5
+                  6
                 </span>
                 <h2 className="text-sm font-semibold text-slate-900">Fine-tune</h2>
               </div>
@@ -1244,5 +1515,74 @@ function OutputCard({
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * Split a comma or newline separated "avoid" list into the clean string[]
+ * the backend wants. Trim, drop empties, cap at 20 items.
+ */
+function splitAvoid(raw: string): string[] | undefined {
+  if (!raw || typeof raw !== 'string') return undefined;
+  const items = raw
+    .split(/[,\n;]/g)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0 && s.length <= 80)
+    .slice(0, 20);
+  return items.length > 0 ? items : undefined;
+}
+
+/**
+ * Compact preset picker rendered as a horizontally scrolling row of pills
+ * plus a "no preference" pill at the start. Intentionally uses the native
+ * select fallback on very narrow screens so nothing clips — the pill row
+ * wraps on wider screens.
+ */
+function PresetPicker({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: ReadonlyArray<{ value: string; label: string; hint?: string }>;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div>
+      <label className="text-[11px] font-medium text-slate-600">{label}</label>
+      <div className="mt-1 flex flex-wrap gap-1.5">
+        <button
+          type="button"
+          onClick={() => onChange('')}
+          className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors ${
+            value === ''
+              ? 'border-transparent bg-slate-900 text-white'
+              : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+          }`}
+        >
+          Auto
+        </button>
+        {options.map((opt) => {
+          const active = value === opt.value;
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => onChange(opt.value)}
+              title={opt.hint}
+              className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                active
+                  ? 'border-transparent bg-slate-900 text-white'
+                  : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+              }`}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }

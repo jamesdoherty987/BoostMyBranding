@@ -3519,6 +3519,34 @@ function BrandEditor({
             </button>
           ))}
         </div>
+        <p className="mt-1 text-[10px] text-slate-400">
+          Affects only the hero background tone.
+        </p>
+      </div>
+
+      <div>
+        <p className="text-xs font-medium text-slate-600">Site background</p>
+        <div className="mt-1.5 flex gap-2">
+          {(['light', 'dark'] as const).map((s) => (
+            <button
+              key={s}
+              onClick={() => updateBrand({ siteBackground: s })}
+              className={`flex-1 rounded-xl border py-2 text-xs font-semibold capitalize transition-all ${
+                (brand.siteBackground ?? 'light') === s
+                  ? s === 'dark'
+                    ? 'border-slate-900 bg-slate-900 text-white'
+                    : 'border-[#1D9CA1] bg-[#1D9CA1]/10 text-[#1D9CA1]'
+                  : 'border-slate-200 text-slate-600 hover:border-slate-300'
+              }`}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+        <p className="mt-1 text-[10px] text-slate-400">
+          Flips every non-hero block (services, reviews, about, etc.) to a
+          dark panel with light text.
+        </p>
       </div>
 
       {/* SEO meta — what shows in the browser tab + Google search result. */}
@@ -7454,13 +7482,32 @@ const CUTOUT_ANIMATIONS: Array<{
   value: NonNullable<NonNullable<WebsiteConfig['hero']>['cutouts']>[number]['animation'];
   label: string;
   description: string;
+  group: 'loop' | 'scroll';
 }> = [
-  { value: 'float', label: 'Float', description: 'Gentle up-and-down bob' },
-  { value: 'tilt', label: 'Tilt', description: 'Slow rotation back and forth' },
-  { value: 'orbit', label: 'Orbit', description: 'Subtle circular drift' },
-  { value: 'pulse', label: 'Pulse', description: 'Breathing scale' },
-  { value: 'drift', label: 'Drift', description: 'Slow diagonal movement' },
-  { value: 'none', label: 'Static', description: 'No animation' },
+  // Loop (keyframe) — runs continuously regardless of scroll.
+  { value: 'float', label: 'Float', description: 'Gentle up-and-down bob', group: 'loop' },
+  { value: 'tilt', label: 'Tilt', description: 'Slow rotation back and forth', group: 'loop' },
+  { value: 'sway', label: 'Sway', description: 'Subtle rocking — hanging objects', group: 'loop' },
+  { value: 'orbit', label: 'Orbit', description: 'Subtle circular drift', group: 'loop' },
+  { value: 'pulse', label: 'Pulse', description: 'Breathing scale', group: 'loop' },
+  { value: 'drift', label: 'Drift', description: 'Slow diagonal movement', group: 'loop' },
+  { value: 'spin', label: 'Spin', description: 'Continuous full rotation', group: 'loop' },
+  { value: 'bounce', label: 'Bounce', description: 'Strong bouncing, playful', group: 'loop' },
+  { value: 'wobble', label: 'Wobble', description: 'Tilt and scale combined', group: 'loop' },
+  // Scroll-linked — movement tied to how far the user has scrolled.
+  { value: 'scroll-up', label: 'Scroll up', description: 'Drifts upward on scroll', group: 'scroll' },
+  { value: 'scroll-down', label: 'Scroll down', description: 'Drifts downward on scroll', group: 'scroll' },
+  { value: 'scroll-parallax', label: 'Parallax', description: 'Translate + zoom on scroll', group: 'scroll' },
+  { value: 'scroll-fly-out', label: 'Fly up', description: 'Shoots off the top — rocket launch', group: 'scroll' },
+  { value: 'scroll-fly-left', label: 'Fly left', description: 'Exits off the left edge', group: 'scroll' },
+  { value: 'scroll-fly-right', label: 'Fly right', description: 'Exits off the right edge', group: 'scroll' },
+  { value: 'scroll-fly-down', label: 'Fly down', description: 'Falls off the bottom', group: 'scroll' },
+  { value: 'scroll-fly-diag-up', label: 'Fly diag up', description: 'Flies off top-right / top-left', group: 'scroll' },
+  { value: 'scroll-fly-diag-dn', label: 'Fly diag down', description: 'Drops off bottom-right / bottom-left', group: 'scroll' },
+  { value: 'scroll-rotate', label: 'Scroll rotate', description: 'Spins while drifting up', group: 'scroll' },
+  { value: 'scroll-zoom', label: 'Zoom in', description: 'Zooms in as you scroll past', group: 'scroll' },
+  { value: 'scroll-fade', label: 'Fade out', description: 'Fades out as you scroll past', group: 'scroll' },
+  { value: 'none', label: 'Static', description: 'No animation', group: 'loop' },
 ];
 
 function CutoutCard({
@@ -7565,34 +7612,94 @@ function CutoutCard({
           </div>
         </div>
 
+        <label className="flex items-center gap-2 pt-1 text-[10px] font-medium text-slate-600">
+          <input
+            type="checkbox"
+            checked={Boolean(cutout.groundShadow)}
+            onChange={(e) => onChange({ groundShadow: e.target.checked })}
+            className="h-3.5 w-3.5 rounded border-slate-300 text-[#1D9CA1] focus:ring-[#1D9CA1]"
+          />
+          <span>
+            Ground shadow
+            <span className="ml-1 font-normal text-slate-400">
+              (for dropped-in PNGs, makes them look sat into the page)
+            </span>
+          </span>
+        </label>
+
         <div>
-          <label className="text-[10px] font-medium text-slate-500">Animation</label>
-          <div className="mt-1 grid grid-cols-3 gap-1">
-            {CUTOUT_ANIMATIONS.map((a) => (
-              <button
-                key={a.value}
-                type="button"
-                onClick={() => onChange({ animation: a.value })}
-                className={`rounded-md border px-1.5 py-1 text-[10px] font-medium transition-colors ${
-                  (cutout.animation ?? 'float') === a.value
-                    ? 'border-[#1D9CA1] bg-[#1D9CA1]/5 text-[#1D9CA1]'
-                    : 'border-slate-200 text-slate-600 hover:border-slate-300'
-                }`}
-                title={a.description}
-              >
-                {a.label}
-              </button>
-            ))}
+          <label className="text-[10px] font-medium text-slate-500">
+            Animation
+          </label>
+          <p className="mt-0.5 text-[9px] text-slate-400">
+            Loop runs continuously. Scroll is tied to how far the user has
+            scrolled into the hero — same feel as the rocket on the main
+            landing page.
+          </p>
+          <div className="mt-1.5 space-y-1.5">
+            <div>
+              <p className="text-[9px] font-semibold uppercase tracking-wider text-slate-400">
+                Loop
+              </p>
+              <div className="mt-1 grid grid-cols-3 gap-1">
+                {CUTOUT_ANIMATIONS.filter((a) => a.group === 'loop').map((a) => (
+                  <button
+                    key={a.value}
+                    type="button"
+                    onClick={() => onChange({ animation: a.value })}
+                    className={`rounded-md border px-1.5 py-1 text-[10px] font-medium transition-colors ${
+                      (cutout.animation ?? 'float') === a.value
+                        ? 'border-[#1D9CA1] bg-[#1D9CA1]/5 text-[#1D9CA1]'
+                        : 'border-slate-200 text-slate-600 hover:border-slate-300'
+                    }`}
+                    title={a.description}
+                  >
+                    {a.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <p className="text-[9px] font-semibold uppercase tracking-wider text-slate-400">
+                On scroll
+              </p>
+              <div className="mt-1 grid grid-cols-3 gap-1">
+                {CUTOUT_ANIMATIONS.filter((a) => a.group === 'scroll').map((a) => (
+                  <button
+                    key={a.value}
+                    type="button"
+                    onClick={() => onChange({ animation: a.value })}
+                    className={`rounded-md border px-1.5 py-1 text-[10px] font-medium transition-colors ${
+                      (cutout.animation ?? 'float') === a.value
+                        ? 'border-[#1D9CA1] bg-[#1D9CA1]/5 text-[#1D9CA1]'
+                        : 'border-slate-200 text-slate-600 hover:border-slate-300'
+                    }`}
+                    title={a.description}
+                  >
+                    {a.label}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
 
         <Slider
           label="Animation speed"
           value={cutout.speed ?? 1}
-          min={0.3}
-          max={3}
+          min={0.25}
+          max={5}
           step={0.1}
           onChange={(v) => onChange({ speed: v })}
+          suffix="×"
+        />
+        <Slider
+          label="Animation intensity"
+          value={cutout.intensity ?? 1}
+          min={0.25}
+          max={4}
+          step={0.1}
+          onChange={(v) => onChange({ intensity: v })}
           suffix="×"
         />
       </div>
@@ -8815,25 +8922,45 @@ const ILLUSTRATION_MOTIONS: Array<{
   value: HeroIllustrationMotion;
   label: string;
   description: string;
+  /**
+   * Grouping for the UI. `scroll` presets are driven by scroll
+   * position; `loop` presets run continuously on a timer; `static`
+   * is none / no motion.
+   */
+  group: 'scroll' | 'loop' | 'static';
 }> = [
-  { value: 'parallax', label: 'Parallax', description: 'Smooth scroll-Y, slight zoom out. Safe default.' },
-  { value: 'launch', label: 'Launch', description: 'Rocket-style flight up on scroll.' },
-  { value: 'float', label: 'Float', description: 'Gentle bob, no scroll dependency.' },
-  { value: 'drift', label: 'Drift', description: 'Diagonal drift across the hero on scroll.' },
-  { value: 'orbit', label: 'Orbit', description: 'Continuous small circular motion.' },
-  { value: 'tilt-3d', label: 'Tilt 3D', description: 'Follows the cursor in 3D. Desktop only.' },
-  { value: 'pulse', label: 'Pulse', description: 'Gentle scale breathing.' },
-  { value: 'spin', label: 'Spin', description: 'Slow continuous rotation. Best for round shapes.' },
-  { value: 'sway', label: 'Sway', description: 'Metronome left-right rotation.' },
-  { value: 'wobble', label: 'Wobble', description: 'Playful jiggle. Kids / playful brands.' },
-  { value: 'bounce', label: 'Bounce', description: 'Rhythmic vertical bounce.' },
-  { value: 'shake', label: 'Shake', description: 'Occasional horizontal shake.' },
-  { value: 'zoom-in', label: 'Zoom-in', description: 'Scales up as you scroll past.' },
-  { value: 'flip-y', label: 'Flip-in', description: '180° Y-axis flip on mount.' },
-  { value: 'reveal', label: 'Reveal', description: 'Cinematic slide-up + fade on scroll.' },
-  { value: 'fade-in', label: 'Fade-in', description: 'Minimal scroll-driven opacity.' },
-  { value: 'slide-in', label: 'Slide-in', description: 'Enters from off-canvas on scroll.' },
-  { value: 'none', label: 'None', description: 'Static. No motion.' },
+  // Scroll-linked — tied to how far the user has scrolled through the hero.
+  { value: 'parallax', label: 'Parallax', description: 'Smooth scroll-Y, slight zoom out. Safe default.', group: 'scroll' },
+  { value: 'launch', label: 'Fly up', description: 'Rocket-style flight up on scroll.', group: 'scroll' },
+  { value: 'fly-left', label: 'Fly left', description: 'Exits off the left edge on scroll.', group: 'scroll' },
+  { value: 'fly-right', label: 'Fly right', description: 'Exits off the right edge on scroll.', group: 'scroll' },
+  { value: 'fly-down', label: 'Fly down', description: 'Falls off the bottom on scroll.', group: 'scroll' },
+  { value: 'fly-diag-up', label: 'Fly diag up', description: 'Flies up-right (or up-left).', group: 'scroll' },
+  { value: 'fly-diag-down', label: 'Fly diag down', description: 'Drops off diagonally.', group: 'scroll' },
+  { value: 'drift', label: 'Drift', description: 'Gentle diagonal drift across the hero.', group: 'scroll' },
+  { value: 'zoom-in', label: 'Zoom in', description: 'Scales up as you scroll past.', group: 'scroll' },
+  { value: 'reveal', label: 'Reveal', description: 'Cinematic slide-up + fade on scroll.', group: 'scroll' },
+  { value: 'fade-in', label: 'Fade in', description: 'Minimal scroll-driven opacity.', group: 'scroll' },
+  { value: 'slide-in', label: 'Slide in', description: 'Enters from off-canvas on scroll.', group: 'scroll' },
+  // Loops — run continuously.
+  { value: 'float', label: 'Float', description: 'Gentle vertical bob.', group: 'loop' },
+  { value: 'bounce', label: 'Bounce', description: 'Rhythmic vertical bounce.', group: 'loop' },
+  { value: 'pulse', label: 'Pulse', description: 'Gentle scale breathing.', group: 'loop' },
+  { value: 'heartbeat', label: 'Heartbeat', description: 'Double-thump scale pulse.', group: 'loop' },
+  { value: 'sway', label: 'Sway', description: 'Metronome left-right rotation.', group: 'loop' },
+  { value: 'swing', label: 'Swing', description: 'Pendulum swing from the top-center.', group: 'loop' },
+  { value: 'wobble', label: 'Wobble', description: 'Playful tilt + scale combo.', group: 'loop' },
+  { value: 'jiggle', label: 'Jiggle', description: 'Quick xy + rotate jitter on loop.', group: 'loop' },
+  { value: 'rubber-band', label: 'Rubber band', description: 'Stretchy scale-x/scale-y loop.', group: 'loop' },
+  { value: 'orbit', label: 'Orbit', description: 'Small continuous circular motion.', group: 'loop' },
+  { value: 'orbit-wide', label: 'Wide orbit', description: 'Bigger circular path.', group: 'loop' },
+  { value: 'spin', label: 'Spin', description: 'Slow full rotation.', group: 'loop' },
+  { value: 'spin-slow', label: 'Spin slow', description: 'Ultra-slow rotation (60s).', group: 'loop' },
+  { value: 'spin-fast', label: 'Spin fast', description: 'Fast continuous spin (4s).', group: 'loop' },
+  { value: 'shake', label: 'Shake', description: 'Occasional horizontal shake.', group: 'loop' },
+  { value: 'flip-y', label: 'Flip in', description: '180° Y-axis flip on mount.', group: 'loop' },
+  { value: 'tilt-3d', label: 'Tilt 3D', description: 'Follows the cursor. Desktop only.', group: 'loop' },
+  { value: 'none', label: 'Static', description: 'No motion.', group: 'static' },
 ];
 
 /**
@@ -9323,28 +9450,47 @@ function IllustrationEditor({
                 </span>
               ) : null}
             </p>
-            <div className="flex flex-wrap gap-1.5">
-              {ILLUSTRATION_MOTIONS.map((m) => {
-                const effective =
-                  illustration.motion ?? defaultMotionForStyle(illustration.style);
-                const isSelected = effective === m.value;
-                const isExplicit = illustration.motion === m.value;
+            <div className="space-y-2">
+              {(['scroll', 'loop', 'static'] as const).map((groupKey) => {
+                const items = ILLUSTRATION_MOTIONS.filter((m) => m.group === groupKey);
+                if (items.length === 0) return null;
+                const groupLabel =
+                  groupKey === 'scroll'
+                    ? 'On scroll'
+                    : groupKey === 'loop'
+                      ? 'Loop'
+                      : 'Static';
                 return (
-                  <button
-                    key={m.value}
-                    type="button"
-                    onClick={() => setField({ motion: m.value })}
-                    title={m.description}
-                    className={`rounded-full border px-2.5 py-1 text-[10px] font-medium transition-colors ${
-                      isSelected
-                        ? isExplicit
-                          ? 'border-[#1D9CA1] bg-[#1D9CA1] text-white'
-                          : 'border-[#1D9CA1]/40 bg-[#1D9CA1]/10 text-[#1D9CA1]'
-                        : 'border-slate-200 bg-white text-slate-700 hover:border-slate-400'
-                    }`}
-                  >
-                    {m.label}
-                  </button>
+                  <div key={groupKey}>
+                    <p className="mb-1 text-[9px] font-semibold uppercase tracking-widest text-slate-400">
+                      {groupLabel}
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {items.map((m) => {
+                        const effective =
+                          illustration.motion ?? defaultMotionForStyle(illustration.style);
+                        const isSelected = effective === m.value;
+                        const isExplicit = illustration.motion === m.value;
+                        return (
+                          <button
+                            key={m.value}
+                            type="button"
+                            onClick={() => setField({ motion: m.value })}
+                            title={m.description}
+                            className={`rounded-full border px-2.5 py-1 text-[10px] font-medium transition-colors ${
+                              isSelected
+                                ? isExplicit
+                                  ? 'border-[#1D9CA1] bg-[#1D9CA1] text-white'
+                                  : 'border-[#1D9CA1]/40 bg-[#1D9CA1]/10 text-[#1D9CA1]'
+                                : 'border-slate-200 bg-white text-slate-700 hover:border-slate-400'
+                            }`}
+                          >
+                            {m.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
                 );
               })}
             </div>

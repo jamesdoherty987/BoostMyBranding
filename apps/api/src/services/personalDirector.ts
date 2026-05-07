@@ -209,6 +209,27 @@ export interface DirectArgs {
   };
   /** Digest of user-uploaded reference media (role, description, tags). */
   referenceMediaDigest?: string;
+  /**
+   * A distilled style block from the account's saved inspiration /
+   * style_reference media. Not the raw urls — a human-readable
+   * summary ("Moody low-light food photography. Shot on 50mm…") the
+   * director treats as the authoritative visual language. The
+   * generator also appends this to every AI image/video shot prompt
+   * downstream so the look stays consistent.
+   */
+  inspirationStyleBlock?: string;
+  /**
+   * Optional viral format block. When set, the director must hit every
+   * beat in the supplied format (the block is rendered upstream from
+   * `formatToPromptBlock`). Locks pacing, hook window, beat structure,
+   * and caption style.
+   */
+  viralFormatBlock?: string;
+  /**
+   * Optional hook formula directive — when present, the director's
+   * first beat must open with a line matching this formula's template.
+   */
+  hookFormulaDirective?: string;
   /** When true the director plans multi-act narratives (process / transformation / reveal). */
   allowMultiAct?: boolean;
   /** Max number of AI-video shots per storyboard — keeps cost in check. */
@@ -374,6 +395,18 @@ function buildDirectorPrompt(args: DirectArgs): string {
     ? `\n\nUSER REFERENCE LIBRARY (these images are available to pass into the video model as visual anchors — cite by index where relevant):\n${args.referenceMediaDigest}`
     : '';
 
+  const inspirationBlock = args.inspirationStyleBlock
+    ? `\n\nINSPIRATION VISUAL LANGUAGE (the account has picked these as the target look — every AI-generated shot must feel like it was shot by the same person who made these references):\n${args.inspirationStyleBlock}`
+    : '';
+
+  const viralFormatPromptBlock = args.viralFormatBlock
+    ? `\n\n${args.viralFormatBlock}`
+    : '';
+
+  const hookFormulaBlock = args.hookFormulaDirective
+    ? `\n\n${args.hookFormulaDirective}\nThe first shot's voiceover + onScreen must follow this hook formula.`
+    : '';
+
   const newsBlock = args.newsContext
     ? `\n\nGROUNDED CONTEXT (cite only facts present here):\n${args.newsContext}`
     : '';
@@ -392,7 +425,7 @@ function buildDirectorPrompt(args: DirectArgs): string {
 THEME: ${args.theme.name} — ${args.theme.tagline}
 DEFAULT VISUAL STYLE: ${args.theme.visualStyle}
 DEFAULT VOICE: ${args.theme.voiceGuide}
-PREFERRED PLATFORMS: ${args.theme.preferredPlatforms.join(', ')}${styleBibleBlock}${charBlock}${refBlock}${newsBlock}${blacklist}${args.customDirection ? `\n\nACCOUNT-LEVEL DIRECTION: ${args.customDirection}` : ''}
+PREFERRED PLATFORMS: ${args.theme.preferredPlatforms.join(', ')}${styleBibleBlock}${charBlock}${refBlock}${inspirationBlock}${viralFormatPromptBlock}${hookFormulaBlock}${newsBlock}${blacklist}${args.customDirection ? `\n\nACCOUNT-LEVEL DIRECTION: ${args.customDirection}` : ''}
 
 DIRECTING RULES (non-negotiable):
 - Plan 5-10 SHOTS total. Most shots are 2-4 seconds. Shots carry the viewer — one long clip is a dead video.${multiActHint}
@@ -493,8 +526,22 @@ export function shotToPrompt(args: {
   styleBibleVibe?: string;
   characterFragment?: string;
   globalColourGrade?: string;
+  /**
+   * Distilled inspiration style hint ("editorial food photography, moody
+   * low-light…"). Appended to every AI shot so the generator mirrors the
+   * account's chosen visual language without the caller having to stitch
+   * it in manually.
+   */
+  inspirationStyleHint?: string;
 }): string {
-  const { shot, themeVisualStyle, styleBibleVibe, characterFragment, globalColourGrade } = args;
+  const {
+    shot,
+    themeVisualStyle,
+    styleBibleVibe,
+    characterFragment,
+    globalColourGrade,
+    inspirationStyleHint,
+  } = args;
 
   // 1. IDENTITY — character / subject description (identity anchor).
   const identity = characterFragment
@@ -509,11 +556,12 @@ export function shotToPrompt(args: {
   // 3. MOTION — camera + subject motion.
   const motion = `Camera: ${cameraToEnglish(shot.camera)}. ${shot.subjectAction ? `Subject action: ${shot.subjectAction}.` : ''}${shot.speedRamp && shot.speedRamp !== 'none' ? ` Speed ramp: ${shot.speedRamp.replace('_', ' ')}.` : ''}`;
 
-  // 4. STYLE — theme + account vibe + colour grade.
+  // 4. STYLE — theme + account vibe + colour grade + inspiration.
   const style = [
     themeVisualStyle,
     styleBibleVibe,
     globalColourGrade ? `Colour grade: ${globalColourGrade}.` : '',
+    inspirationStyleHint ? `Visual language: ${inspirationStyleHint}.` : '',
   ]
     .filter(Boolean)
     .join(' ');

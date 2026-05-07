@@ -1154,6 +1154,21 @@ export interface PersonalGeneratorConfig {
   letterbox?: boolean;
   /** Apply film-grain overlay. */
   filmGrain?: boolean;
+
+  /* ── Viral format + hook (optional) ──────────────────────── */
+  /**
+   * Viral format id from `VIRAL_FORMATS` (e.g. `problem-demo-payoff`,
+   * `listicle-countdown`, `hook-build-payoff`). When set, the director
+   * must hit the format's beat structure. When unset, the director
+   * keeps its default behaviour.
+   */
+  viralFormatId?: string;
+  /**
+   * Hook formula id from `HOOK_FORMULAS` (e.g. `bold-claim`,
+   * `curiosity-gap`). When set, the first shot's voiceover/onScreen
+   * must follow the formula.
+   */
+  hookFormulaId?: string;
 }
 
 /** Shape of a character sheet distilled from reference images. */

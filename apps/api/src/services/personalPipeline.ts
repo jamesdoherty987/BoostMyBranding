@@ -288,7 +288,11 @@ async function generateForAccountScript(
           )
         : [],
       character,
-      styleRefs: accountMedia.filter((m) => m.role === 'style_reference'),
+      // Treat 'inspiration' the same as 'style_reference' for the script
+      // pipeline — they're both "make it look like this".
+      styleRefs: accountMedia.filter(
+        (m) => m.role === 'style_reference' || m.role === 'inspiration',
+      ),
     });
     if (theme.requiresGroundedImages && mediaAssets.some((m) => m.source === 'ai')) {
       // Grounded themes (News, History) cannot fall back to AI imagery.

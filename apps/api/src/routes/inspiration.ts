@@ -146,6 +146,7 @@ const estimateSchema = z.object({
   videoModelId: z.string().max(100).optional(),
   videoDurationSeconds: z.number().int().min(2).max(20).optional(),
   outputType: z.enum(['image', 'video', 'both']).optional(),
+  imageCount: z.number().int().min(1).max(4).optional(),
 });
 
 inspirationRouter.post(
@@ -161,7 +162,7 @@ inspirationRouter.post(
         videoModelId:
           args.outputType !== 'image' && args.videoModelId ? args.videoModelId : undefined,
         videoDurationSeconds: args.videoDurationSeconds,
-        imageCount: 1,
+        imageCount: args.imageCount ?? 1,
         videoCount: 1,
       });
       res.json({ data: { costCents: cents } });
@@ -172,6 +173,103 @@ inspirationRouter.post(
 );
 
 /* ── Generate (orchestrator) ────────────────────────────────────── */
+
+const IMAGE_STYLE_VALUES = [
+  'editorial_photography',
+  'cinematic_photography',
+  'documentary_photography',
+  'lifestyle_photography',
+  'flat_lay',
+  'product_studio',
+  'architectural',
+  'minimalist',
+  'magazine_editorial',
+  'vintage_film',
+  'moody_dark',
+  'bright_airy',
+  'illustration_flat',
+  'illustration_3d',
+] as const;
+
+const LIGHTING_VALUES = [
+  'golden_hour',
+  'soft_daylight',
+  'overcast_even',
+  'studio_softbox',
+  'dramatic_rembrandt',
+  'low_key_moody',
+  'high_key_bright',
+  'neon_night',
+  'window_side_light',
+  'backlit_silhouette',
+] as const;
+
+const COMPOSITION_VALUES = [
+  'rule_of_thirds',
+  'centered',
+  'overhead_flat',
+  'close_up',
+  'wide_environmental',
+  'shallow_depth',
+  'symmetrical',
+  'negative_space',
+  'leading_lines',
+] as const;
+
+const MOOD_VALUES = [
+  'warm_intimate',
+  'calm_premium',
+  'energetic_playful',
+  'confident_bold',
+  'quiet_elegant',
+  'nostalgic',
+  'futuristic_clean',
+] as const;
+
+const CAMERA_MOVEMENT_VALUES = [
+  'static',
+  'slow_push_in',
+  'slow_pull_out',
+  'gentle_pan_left',
+  'gentle_pan_right',
+  'tilt_up',
+  'tilt_down',
+  'subtle_orbit',
+  'handheld_follow',
+  'crane_up',
+  'rack_focus',
+] as const;
+
+const MOTION_STYLE_VALUES = [
+  'cinematic_natural',
+  'smooth_slow_mo',
+  'kinetic_snappy',
+  'documentary_handheld',
+  'dreamy_float',
+  'macro_detail',
+] as const;
+
+const imageControlsSchema = z
+  .object({
+    style: z.enum(IMAGE_STYLE_VALUES).optional(),
+    lighting: z.enum(LIGHTING_VALUES).optional(),
+    composition: z.enum(COMPOSITION_VALUES).optional(),
+    mood: z.enum(MOOD_VALUES).optional(),
+    cameraTechnical: z.string().max(300).optional(),
+    avoid: z.array(z.string().max(80)).max(20).optional(),
+    extra: z.string().max(800).optional(),
+  })
+  .optional();
+
+const videoControlsSchema = z
+  .object({
+    cameraMovement: z.enum(CAMERA_MOVEMENT_VALUES).optional(),
+    motionStyle: z.enum(MOTION_STYLE_VALUES).optional(),
+    mood: z.enum(MOOD_VALUES).optional(),
+    avoid: z.array(z.string().max(80)).max(20).optional(),
+    extra: z.string().max(800).optional(),
+  })
+  .optional();
 
 const generateSchema = z.object({
   clientId: z.string().uuid(),
@@ -203,6 +301,11 @@ const generateSchema = z.object({
   useInspirationAsVideoSeed: z.boolean().optional(),
   /** Saved inspiration profile ids to factor into the generation prompt. */
   inspirationProfileIds: z.array(z.string().uuid()).max(10).optional(),
+  /** Optional creative controls for prompt composition. */
+  imageControls: imageControlsSchema,
+  videoControls: videoControlsSchema,
+  /** Number of image variants to generate (1-4). */
+  imageCount: z.number().int().min(1).max(4).optional(),
 });
 
 inspirationRouter.post(

@@ -204,7 +204,12 @@ export function SiteRenderer({
       <div
         id="top"
         style={style}
-        className={`relative w-full bg-white text-slate-900 ${embedded ? '' : 'min-h-screen'}`}
+        data-site-theme={pageConfig.brand.siteBackground === 'dark' ? 'dark' : 'light'}
+        className={`bmb-site relative w-full text-slate-900 ${embedded ? '' : 'min-h-screen'} ${
+          pageConfig.brand.siteBackground === 'dark'
+            ? 'bmb-site-dark bg-[#0b1220] text-slate-100'
+            : 'bg-white'
+        }`}
       >
         {/* Announcement bar — always renders first (above the nav) when
             present, regardless of block order in `layout`. */}
@@ -219,8 +224,20 @@ export function SiteRenderer({
           if (!bg || bg.kind === 'none' || key === 'nav' || key === 'hero' || key === 'footer') {
             return block;
           }
+          // Every block renders its own <section> with a hard background
+          // colour (e.g. `bg-white`, `bg-slate-50`) which would paint
+          // over the decorative layer underneath. Use an arbitrary
+          // selector to force the direct-child <section>'s background
+          // to transparent so the decorative effect shows through,
+          // while keeping the block's padding + layout intact. The
+          // decorative layer sits absolutely behind the content; the
+          // block's own content stays at its normal stacking level via
+          // `isolate` on the wrapper.
           return (
-            <div key={`sb-${key}`} className="relative isolate">
+            <div
+              key={`sb-${key}`}
+              className="relative isolate [&>section]:!bg-transparent"
+            >
               <SectionBackgroundLayer background={bg} />
               {block}
             </div>

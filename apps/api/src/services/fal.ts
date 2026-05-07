@@ -229,6 +229,26 @@ export async function generateImageWithReference(args: {
 
   const refs = args.referenceUrls.slice(0, Math.max(1, model.maxReferenceCount));
 
+  // Flux Kontext Max (multi) — up to 4 references + prompt.
+  if (model.id === 'flux-kontext-max-multi') {
+    if (refs.length === 0) {
+      // Multi-ref Kontext needs at least one reference. Fall back to plain Flux.
+      const out = await generateImage(args.prompt, args.aspectRatio);
+      return { imageUrl: out, usedReferences: 0, fromMock: false };
+    }
+    const result = await fal.subscribe(model.endpoint, {
+      input: {
+        prompt: args.prompt,
+        image_urls: refs,
+        aspect_ratio: args.aspectRatio,
+      },
+      logs: false,
+    });
+    const out = (result.data as any)?.images?.[0]?.url;
+    if (!out) throw new Error(`${model.displayName} did not return an image URL`);
+    return { imageUrl: out as string, usedReferences: refs.length, fromMock: false };
+  }
+
   // Flux Kontext — single reference + prompt.
   if (model.id === 'flux-kontext-max') {
     if (refs.length === 0) {
@@ -320,6 +340,14 @@ function clampVideoDuration(requested: number, model: ModelOption): number {
     // Hailuo 02 standard is a fixed 6s.
     return 6;
   }
+  if (model.id === 'hailuo-2-3') {
+    // Hailuo 2.3 (pro) accepts 4 or 6 — snap to the closer.
+    return clamped >= 5 ? 6 : 4;
+  }
+  if (model.id === 'seedance-2-pro') {
+    // Seedance 2.0 accepts 5 or 10.
+    return clamped >= 8 ? 10 : 5;
+  }
   if (model.id === 'stable-video') {
     // SVD returns ~4s regardless of request.
     return Math.min(4, clamped);
@@ -336,7 +364,7 @@ function videoInputFor(
     aspectRatio: '9:16' | '1:1' | '16:9';
   },
 ): Record<string, unknown> {
-  // Kling family — all accept the same shape.
+  // Kling family (1.6, 2.1, 3) — all accept the same shape.
   if (model.id.startsWith('kling-')) {
     return {
       prompt: args.prompt,
@@ -345,20 +373,40 @@ function videoInputFor(
       aspect_ratio: args.aspectRatio,
     };
   }
-  // MiniMax Hailuo 02 — standard tier is fixed at 6 seconds.
-  if (model.id === 'hailuo-02-standard') {
+  // MiniMax Hailuo family (02 standard and 2.3). Standard is fixed at 6s,
+  // 2.3 (pro) accepts duration; both take prompt + image.
+  if (model.id === 'hailuo-02-standard' || model.id === 'hailuo-2-3') {
     return {
       prompt: args.prompt,
       image_url: args.imageUrl,
       prompt_optimizer: true,
     };
   }
-  // Seedance Pro — minimal input. The model uses sensible defaults for
-  // resolution and aspect ratio based on the seed image.
-  if (model.id === 'seedance-1-pro') {
+  // Seedance (1.0 Pro and 2.0 Pro) — minimal input. The model uses
+  // sensible defaults for resolution and aspect ratio based on the
+  // seed image.
+  if (model.id === 'seedance-1-pro' || model.id === 'seedance-2-pro') {
     return {
       prompt: args.prompt,
       image_url: args.imageUrl,
+    };
+  }
+  // Sora 2 Pro (when wired) — takes the standard prompt + image + AR.
+  if (model.id === 'sora-2-pro') {
+    return {
+      prompt: args.prompt,
+      image_url: args.imageUrl,
+      aspect_ratio: args.aspectRatio,
+      duration_seconds: args.durationSeconds,
+    };
+  }
+  // Runway Gen-4.5 — standard image-to-video shape.
+  if (model.id === 'runway-gen-4.5') {
+    return {
+      prompt: args.prompt,
+      image_url: args.imageUrl,
+      aspect_ratio: args.aspectRatio,
+      duration: args.durationSeconds,
     };
   }
   // Stable Video Diffusion — motion bucket driven.

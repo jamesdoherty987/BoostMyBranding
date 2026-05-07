@@ -22,9 +22,14 @@ import { buildBrandContext, brandContextToImageStyle } from './brandContext.js';
 import {
   listProfiles,
   profilesToImageStyleHint,
-  profilesToPromptBlock,
   type InspirationProfilePayload,
 } from './inspirationProfiles.js';
+import {
+  buildImagePrompt,
+  buildVideoPrompt,
+  type ImageCreativeControls,
+  type VideoCreativeControls,
+} from './promptBuilder.js';
 
 /* ═══════════════════════════════════════════════════════════════════ */
 /* Types                                                                */
@@ -77,6 +82,23 @@ export interface InspirationGenerateArgs {
    * generation prompt alongside any per-run inspiration items.
    */
   inspirationProfileIds?: string[];
+
+  /**
+   * Optional creative controls — preset styles, lighting, composition,
+   * mood, camera/lens hints, and a free-form "avoid" list.
+   *
+   * When omitted the prompt is built from analysis + brand style only,
+   * preserving current behaviour.
+   */
+  imageControls?: ImageCreativeControls;
+  videoControls?: VideoCreativeControls;
+
+  /**
+   * Generate N image variants in one request (1-4). Each variant uses the
+   * same prompt but a different seed, so the agency can pick the best.
+   * Video count is always 1 because videos are expensive.
+   */
+  imageCount?: number;
 }
 
 export interface InspirationGenerationRecord {
@@ -156,11 +178,29 @@ export async function generateFromInspiration(
 
   const profileStyleHint = profilesToImageStyleHint(selectedProfiles);
 
-  const basePrompt = buildPrompt({
-    analysis,
-    directBrief: args.directBrief,
+  // Base brief: prefer the analysis' suggested prompt, then the user's
+  // free-form direction, then fall back to a short generic note so the
+  // builder always has something to work with.
+  const baseBrief = [
+    analysis?.suggestedPrompt,
+    args.directBrief?.trim(),
+  ]
+    .filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
+    .join(' ')
+    .trim();
+
+  const imagePrompt = buildImagePrompt({
+    baseBrief: baseBrief || 'A high-quality marketing image.',
     brandStyle,
     profileStyleHint,
+    controls: args.imageControls,
+  });
+
+  const videoPrompt = buildVideoPrompt({
+    baseBrief: baseBrief || 'A cinematic marketing clip.',
+    brandStyle,
+    profileStyleHint,
+    controls: args.videoControls,
   });
 
   /* ── 5. Execute generation(s) ────────────────────────────────── */
@@ -195,18 +235,32 @@ export async function generateFromInspiration(
       ...(primaryReferenceImage ? [primaryReferenceImage.url] : []),
       ...profileReferenceUrls,
     ];
-    const record = await runImageGeneration({
-      clientId: args.clientId,
-      modelId: args.imageModelId,
-      prompt: basePrompt,
-      aspectRatio: args.imageAspectRatio ?? '4:5',
-      referenceUrls: combinedReferences,
-      analysis,
-      directBrief: args.directBrief,
-      inspirationItemIds: inspirationIds(args.inspiration),
-    });
-    if (record.fromMock) anyMock = true;
-    outputs.push(record);
+    const imageCount = Math.max(1, Math.min(4, args.imageCount ?? 1));
+    for (let i = 0; i < imageCount; i++) {
+      try {
+        const record = await runImageGeneration({
+          clientId: args.clientId,
+          modelId: args.imageModelId,
+          prompt: imagePrompt,
+          aspectRatio: args.imageAspectRatio ?? '4:5',
+          referenceUrls: combinedReferences,
+          analysis,
+          directBrief: args.directBrief,
+          inspirationItemIds: inspirationIds(args.inspiration),
+        });
+        if (record.fromMock) anyMock = true;
+        outputs.push(record);
+      } catch (e) {
+        // First-variant failures bubble up so the UI can show a real
+        // error; subsequent-variant failures are logged only so the user
+        // still sees the ones that worked.
+        if (i === 0) throw e;
+        console.warn(
+          `[inspiration] image variant ${i + 1}/${imageCount} failed:`,
+          (e as Error).message,
+        );
+      }
+    }
   }
 
   if (outputType === 'video' || outputType === 'both') {
@@ -228,9 +282,11 @@ export async function generateFromInspiration(
     }
 
     if (!seedImageUrl) {
-      // Generate a seed still from the prompt so we can do image-to-video.
+      // Generate a seed still from the image prompt — Flux reads the image
+      // grammar better than the Kling video grammar, so we deliberately use
+      // the image prompt here even though we're feeding it into a video.
       try {
-        seedImageUrl = await withRetry(() => generateImage(basePrompt, args.videoAspectRatio ?? '9:16'), {
+        seedImageUrl = await withRetry(() => generateImage(imagePrompt, args.videoAspectRatio ?? '9:16'), {
           label: `inspiration_seed:${args.clientId}`,
           attempts: 2,
         });
@@ -242,7 +298,7 @@ export async function generateFromInspiration(
     const record = await runVideoGeneration({
       clientId: args.clientId,
       modelId: args.videoModelId,
-      prompt: basePrompt,
+      prompt: videoPrompt,
       aspectRatio: args.videoAspectRatio ?? '9:16',
       durationSeconds: args.videoDurationSeconds ?? 5,
       seedImageUrl,
@@ -337,29 +393,6 @@ function decideOutputType(args: {
   }
   if (args.hasVideoModel && !args.hasImageModel) return 'video';
   return 'image';
-}
-
-function buildPrompt(args: {
-  analysis: InspirationAnalysis | null;
-  directBrief?: string;
-  brandStyle: string;
-  profileStyleHint?: string;
-}): string {
-  const parts: string[] = [];
-  if (args.analysis) {
-    parts.push(args.analysis.suggestedPrompt);
-  }
-  if (args.directBrief && args.directBrief.trim().length > 0) {
-    parts.push(args.directBrief.trim());
-  }
-  if (args.brandStyle) {
-    parts.push(args.brandStyle);
-  }
-  if (args.profileStyleHint && args.profileStyleHint.trim().length > 0) {
-    parts.push(args.profileStyleHint);
-  }
-  parts.push('No fabricated text, no invented logos, no face generation of real people.');
-  return parts.join(' ');
 }
 
 /* ═══════════════════════════════════════════════════════════════════ */

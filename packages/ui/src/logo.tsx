@@ -45,8 +45,8 @@ export function Logo({
     <div className={cn('inline-flex items-center gap-2.5', className)}>
       <RocketMark size={icon} />
       {wordmark ? (
-        <div className="flex flex-col leading-none">
-          <span className={cn('font-bold tracking-tight', text)}>
+        <div className="flex min-w-0 flex-col leading-none">
+          <span className={cn('whitespace-nowrap font-bold tracking-tight', text)}>
             <span className={boostColor}>Boost</span>
             <span className="text-[#3CC878]">My</span>
             <span className={brandingColor}>Branding</span>
@@ -76,6 +76,12 @@ interface RocketMarkProps {
  * Just the rocket cutout, no wordmark. Transparent-background PNG served
  * from /logo/boost-rocket.png. Marked `unoptimized` so Next's image
  * optimizer doesn't re-encode the RGBA transparency.
+ *
+ * Sizing: when no `className` overrides dimensions, we lock to a fixed
+ * square box via inline style so the image can't blow out its container.
+ * When `className` is provided (e.g. `h-12 w-12`), we let CSS win by
+ * leaving the inline sizes `auto`. This avoids the Next.js "one-dimension-
+ * only" warning while keeping the logo compact in navbars and sidebars.
  */
 export function RocketMark({ size = 32, className }: RocketMarkProps) {
   return (
@@ -86,12 +92,12 @@ export function RocketMark({ size = 32, className }: RocketMarkProps) {
       height={size}
       priority
       unoptimized
-      // Next warns when a CSS-sized <Image> locks one dimension but not
-      // the other. Forcing both to `auto` lets any `className` override
-      // (e.g. `h-12`) scale the image proportionally without tripping
-      // the warning.
-      style={{ width: 'auto', height: 'auto' }}
-      className={cn('object-contain', className)}
+      style={
+        className
+          ? { width: 'auto', height: 'auto' }
+          : { width: size, height: size }
+      }
+      className={cn('shrink-0 object-contain', className)}
     />
   );
 }

@@ -1683,6 +1683,35 @@ export class BoostApi {
   listPersonalModels() {
     return this.request<PersonalAiModel[]>('/api/v1/personal/models');
   }
+
+  /* ─── Custom themes (user-editable library) ──────────────── */
+
+  listCustomThemes() {
+    return this.request<PersonalCustomTheme[]>('/api/v1/personal/custom-themes');
+  }
+  createCustomTheme(body: CreateCustomThemeBody) {
+    return this.request<PersonalCustomTheme>('/api/v1/personal/custom-themes', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+  updateCustomTheme(id: string, patch: Partial<CreateCustomThemeBody>) {
+    return this.request<PersonalCustomTheme>(`/api/v1/personal/custom-themes/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    });
+  }
+  deleteCustomTheme(id: string) {
+    return this.request<{ ok: true }>(`/api/v1/personal/custom-themes/${id}`, {
+      method: 'DELETE',
+    });
+  }
+  cloneBuiltinTheme(args: { builtinId: string; mode?: 'override' | 'duplicate' }) {
+    return this.request<PersonalCustomTheme>('/api/v1/personal/custom-themes/clone', {
+      method: 'POST',
+      body: JSON.stringify(args),
+    });
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════════ */
@@ -2017,4 +2046,63 @@ export interface PersonalGeneratorConfig {
     | 'high_contrast';
   letterbox?: boolean;
   filmGrain?: boolean;
+}
+
+/* ─── Custom themes (user-editable library) ──────────────── */
+
+export interface PersonalCustomTheme {
+  id: string;
+  slug: string;
+  name: string;
+  tagline: string;
+  description: string;
+  emoji: string;
+  accentColor: string;
+  viralityScore: number;
+  cpmTier: string;
+  preferredPlatforms: string[];
+  template: string;
+  mediaSources: string[];
+  useVoiceover: boolean;
+  useMusic: boolean;
+  hookFormulas: string[];
+  topicSeeds: string[];
+  voiceGuide: string;
+  visualStyle: string;
+  musicMood: string;
+  targetDurationSeconds: number;
+  defaultHashtags: string[];
+  requiresGroundedImages: boolean;
+  defaultFormat: 'video' | 'slideshow' | 'static_image' | null;
+  overridesBuiltin: boolean;
+  derivedFrom: string | null;
+  isBuiltin: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateCustomThemeBody {
+  slug: string;
+  name: string;
+  tagline: string;
+  description: string;
+  emoji?: string;
+  accentColor?: string;
+  viralityScore?: number;
+  cpmTier?: 'low' | 'medium' | 'high' | 'premium';
+  preferredPlatforms?: PersonalPlatform[];
+  template?: string;
+  mediaSources?: Array<'pexels' | 'unsplash' | 'pixabay' | 'wikipedia' | 'news' | 'ai' | 'gameplay'>;
+  useVoiceover?: boolean;
+  useMusic?: boolean;
+  hookFormulas?: string[];
+  topicSeeds?: string[];
+  voiceGuide?: string;
+  visualStyle?: string;
+  musicMood?: string;
+  targetDurationSeconds?: number;
+  defaultHashtags?: string[];
+  requiresGroundedImages?: boolean;
+  defaultFormat?: 'video' | 'slideshow' | 'static_image';
+  overridesBuiltin?: boolean;
 }

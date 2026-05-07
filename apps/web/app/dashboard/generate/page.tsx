@@ -21,7 +21,7 @@ import Link from 'next/link';
 import useSWR, { mutate as swrMutate } from 'swr';
 import { motion, AnimatePresence } from 'framer-motion';
 import Image from 'next/image';
-import { mockClients, postImageUrl, type ClientImage, type Post } from '@boost/core';
+import { postImageUrl, type ClientImage, type Post } from '@boost/core';
 import {
   Badge,
   Button,
@@ -119,14 +119,16 @@ const isValidUuid = (s: string) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 
 export default function GeneratePage() {
-  const { data: clients = [], isLoading: clientsLoading } = useSWR(
+  const {
+    data: clients = [],
+    isLoading: clientsLoading,
+    error: clientsError,
+  } = useSWR(
     'generate:clients',
     async () => {
-      try {
-        return await api.listClients();
-      } catch {
-        return mockClients;
-      }
+      // Real data only — a silent mock fallback used to hide API outages
+      // and let agency users accidentally generate against a fake client.
+      return api.listClients();
     },
   );
 
@@ -149,6 +151,17 @@ export default function GeneratePage() {
       />
 
       <div className="px-4 py-4 md:px-10 md:py-6 space-y-5">
+        {clientsError ? (
+          <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <div>
+              <div className="font-semibold">Could not load clients.</div>
+              <div className="mt-0.5 text-xs">
+                {(clientsError as Error).message ?? 'The API is not reachable.'} Try refreshing; if the issue persists, check that the API is running.
+              </div>
+            </div>
+          </div>
+        ) : null}
         {/* Client + mode switcher */}
         <Card>
           <CardContent className="p-5 md:p-6">

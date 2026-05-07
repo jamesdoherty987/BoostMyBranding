@@ -1,10 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import useSWR from 'swr';
 import { motion, AnimatePresence, useMotionValue, useTransform, type PanInfo } from 'framer-motion';
-import { mockClients, mockPosts, type Post, postImageUrl, postScheduledAt } from '@boost/core';
+import { type Post, postImageUrl, postScheduledAt } from '@boost/core';
 import {
   Badge,
   Button,
@@ -64,9 +64,20 @@ export default function ReviewQueuePage() {
   const { data, isLoading, mutate } = useSWR('dashboard:review', async () => {
     try {
       const posts = (await api.listPosts({ status: 'pending_approval' })) as Post[];
-      return posts.length ? posts : (mockPosts.filter((p) => p.status === 'pending_approval') as Post[]);
+      return posts;
+    } catch (e) {
+      console.warn('[review] load failed:', (e as Error).message);
+      return [] as Post[];
+    }
+  });
+
+  // Pull the real client list so filter chips can show every client
+  // that has posts in the queue (not just the mocked three).
+  const { data: clientList } = useSWR('dashboard:review:clients', async () => {
+    try {
+      return await api.listClients();
     } catch {
-      return mockPosts.filter((p) => p.status === 'pending_approval') as Post[];
+      return [] as Awaited<ReturnType<typeof api.listClients>>;
     }
   });
 
@@ -103,25 +114,35 @@ export default function ReviewQueuePage() {
   const { getLocker } = usePostLock(API_URL, top?.id ?? null, me?.id);
   const locker = top ? getLocker(top.id) : undefined;
 
+  // Guards against double-firing decisions — two rapid keyboard presses
+  // or a realtime event arriving between the first click and the
+  // optimistic removal both used to commit twice.
+  const inFlight = useRef<Set<string>>(new Set());
+
   const decide = async (action: Action, note?: string) => {
     if (!top) return;
+    if (inFlight.current.has(top.id)) return;
     if (locker && locker.userId !== me?.id) {
       toast.info(`${locker.name} is already reviewing this one`);
       return;
     }
-    setHistory((h) => [...h, { post: top, action, note }]);
-    setQueue((q) => q.filter((p) => p.id !== top.id));
+    inFlight.current.add(top.id);
+    const target = top;
+    setHistory((h) => [...h, { post: target, action, note }]);
+    setQueue((q) => q.filter((p) => p.id !== target.id));
     setEditing(false);
     setEditedCaption('');
 
     try {
-      if (action === 'approve') await api.approvePost(top.id);
-      else if (action === 'reject') await api.rejectPost(top.id, note ?? 'Send back for revision');
-      else if (action === 'edit') await api.updatePost(top.id, { caption: note, status: 'scheduled' });
+      if (action === 'approve') await api.approvePost(target.id);
+      else if (action === 'reject') await api.rejectPost(target.id, note ?? 'Send back for revision');
+      else if (action === 'edit') await api.updatePost(target.id, { caption: note, status: 'scheduled' });
     } catch (e) {
       toast.error('Could not save', (e as Error).message);
-      setQueue((q) => [top, ...q]);
+      setQueue((q) => [target, ...q]);
       setHistory((h) => h.slice(0, -1));
+    } finally {
+      inFlight.current.delete(target.id);
     }
   };
 
@@ -130,6 +151,13 @@ export default function ReviewQueuePage() {
     if (!last) return;
     setHistory((h) => h.slice(0, -1));
     setQueue((q) => [last.post, ...q]);
+    // Local-only undo: the server already processed the decision.
+    // Surface that to the reviewer so they're not surprised when a
+    // tab reload still shows the item gone from the queue.
+    toast.info(
+      'Restored in this tab',
+      'The server still recorded the decision — refresh to re-fetch from the server.',
+    );
   };
 
   useEffect(() => {
@@ -187,7 +215,7 @@ export default function ReviewQueuePage() {
           <button onClick={() => setFilter('all')} className={filterChipClass(filter === 'all')}>
             All clients ({queue.length})
           </button>
-          {mockClients.map((c) => {
+          {(clientList ?? []).map((c) => {
             const count = queue.filter((p) => p.clientId === c.id).length;
             if (count === 0) return null;
             return (

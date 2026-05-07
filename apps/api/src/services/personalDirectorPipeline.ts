@@ -26,6 +26,7 @@ import {
   type PersonalGeneratorConfig,
 } from '@boost/database';
 import { getTheme, type PersonalTheme } from './personalThemes.js';
+import { findThemeForUser } from './personalCustomThemes.js';
 import {
   planStoryboard,
   shotToPrompt,
@@ -81,7 +82,9 @@ export async function generateForAccountDirector(
     };
   }
 
-  const theme = getTheme(account.themeId);
+  const theme =
+    getTheme(account.themeId) ??
+    (await findThemeForUser(account.userId, account.themeId));
   if (!theme) throw new Error(`Theme not found: ${account.themeId}`);
 
   const genConfig: PersonalGeneratorConfig =

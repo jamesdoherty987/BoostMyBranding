@@ -5,6 +5,7 @@
 
 import { Router } from 'express';
 import { z } from 'zod';
+import { and, eq } from 'drizzle-orm';
 import { SITE_TEMPLATES } from '@boost/core';
 import { runMonthlyGeneration, regenerateSinglePost, regeneratePostImage } from '../services/automation.js';
 import {
@@ -14,14 +15,15 @@ import {
   saveWebsiteConfig,
 } from '../services/websites.js';
 import { generateHeroImage } from '../services/heroImage.js';
-import { getDb, isDbConfigured, clients } from '@boost/database';
-import { eq } from 'drizzle-orm';
+import { getDb, isDbConfigured, clients, posts } from '@boost/database';
 import {
   publishDue,
   analyzePendingImages,
   generateMonthlyBatches,
 } from '../services/scheduler.js';
 import { requireAuth, requireRole } from '../services/auth.js';
+import { generationLimiter, regenerationLimiter } from '../middleware/rateLimit.js';
+import { sanitizeUserText, MAX_USER_DIRECTION_LENGTH } from '../services/promptSafety.js';
 import { env } from '../env.js';
 
 export const automationRouter = Router();
@@ -31,17 +33,22 @@ const generateSchema = z.object({
   month: z.string().regex(/^\d{4}-\d{2}$/, 'Expected YYYY-MM'),
   postsCount: z.number().int().min(1).max(60).default(30),
   platforms: z.array(z.string().max(50)).max(10).optional(),
-  direction: z.string().max(2000).optional(),
+  direction: z.string().max(MAX_USER_DIRECTION_LENGTH).optional(),
 });
 
 automationRouter.post(
   '/generate',
   requireAuth,
   requireRole('agency_admin', 'agency_member'),
+  generationLimiter,
   async (req, res, next) => {
     try {
       const args = generateSchema.parse(req.body);
-      const result = await runMonthlyGeneration(args);
+      // Strip prompt-injection markers from operator-supplied direction.
+      const result = await runMonthlyGeneration({
+        ...args,
+        direction: args.direction ? sanitizeUserText(args.direction) : undefined,
+      });
       res.json({ data: result });
     } catch (e) {
       next(e);
@@ -124,6 +131,7 @@ automationRouter.post(
   '/generate-website',
   requireAuth,
   requireRole('agency_admin', 'agency_member'),
+  generationLimiter,
   async (req, res, next) => {
     try {
       const parsed = generateWebsiteSchema.parse(req.body);
@@ -133,6 +141,9 @@ automationRouter.post(
       // the result because `nullsToUndefined` can't narrow the Zod output
       // type through TS's control flow.
       const args = nullsToUndefined(parsed) as Parameters<typeof generateWebsite>[0];
+      // Sanitize any free-text that will land in a Claude prompt.
+      if (args.description) args.description = sanitizeUserText(args.description);
+      if (args.suggestions) args.suggestions = sanitizeUserText(args.suggestions);
       const result = await generateWebsite(args);
       res.json({ data: result });
     } catch (e) {
@@ -183,9 +194,11 @@ automationRouter.post(
   '/edit-website',
   requireAuth,
   requireRole('agency_admin', 'agency_member'),
+  regenerationLimiter,
   async (req, res, next) => {
     try {
       const args = editWebsiteSchema.parse(req.body);
+      args.instruction = sanitizeUserText(args.instruction);
       const result = await editWebsiteWithAI(args);
       res.json({ data: result });
     } catch (e) {
@@ -282,15 +295,19 @@ automationRouter.post(
   '/generate-hero-image',
   requireAuth,
   requireRole('agency_admin', 'agency_member'),
+  regenerationLimiter,
   async (req, res, next) => {
     try {
       const args = heroImageSchema.parse(req.body);
+      const cleanedOverride = args.overridePrompt
+        ? sanitizeUserText(args.overridePrompt)
+        : undefined;
       if (!isDbConfigured()) {
         return res.json({
           data: {
             imageUrl:
               'https://picsum.photos/seed/hero-mock/1024/1280',
-            prompt: args.overridePrompt ?? 'Mock hero image',
+            prompt: cleanedOverride ?? 'Mock hero image',
             fromMock: true,
           },
         });
@@ -311,7 +328,7 @@ automationRouter.post(
         businessName: client.businessName,
         industry: client.industry ?? 'Local Business',
         description: client.brandVoice ?? undefined,
-        overridePrompt: args.overridePrompt,
+        overridePrompt: cleanedOverride,
         heroVariant: config?.hero?.variant,
       });
       res.json({ data: result });
@@ -346,17 +363,36 @@ automationRouter.post('/publish-due', async (req, res, next) => {
 
 const regeneratePostSchema = z.object({
   postId: z.string().min(1).max(100),
-  instruction: z.string().max(2000).optional(),
+  instruction: z.string().max(MAX_USER_DIRECTION_LENGTH).optional(),
 });
 
 automationRouter.post(
   '/regenerate-post',
   requireAuth,
   requireRole('agency_admin', 'agency_member'),
+  regenerationLimiter,
   async (req, res, next) => {
     try {
       const args = regeneratePostSchema.parse(req.body);
-      const result = await regenerateSinglePost(args);
+      // Scope check: agency members can only regenerate posts for
+      // clients they're explicitly assigned to. Agency admins pass
+      // through. For now "explicit assignment" = every agency user
+      // can edit every client (the agency is the tenant). We still
+      // validate the post exists before spending any Claude budget.
+      if (isDbConfigured()) {
+        const db = getDb();
+        const [row] = await db
+          .select({ id: posts.id })
+          .from(posts)
+          .where(eq(posts.id, args.postId));
+        if (!row) {
+          return res.status(404).json({ error: { message: 'Post not found', code: 'NOT_FOUND' } });
+        }
+      }
+      const result = await regenerateSinglePost({
+        ...args,
+        instruction: args.instruction ? sanitizeUserText(args.instruction) : undefined,
+      });
       res.json({ data: result });
     } catch (e) {
       next(e);
@@ -366,17 +402,31 @@ automationRouter.post(
 
 const regenerateImageSchema = z.object({
   postId: z.string().min(1).max(100),
-  overridePrompt: z.string().max(2000).optional(),
+  overridePrompt: z.string().max(MAX_USER_DIRECTION_LENGTH).optional(),
 });
 
 automationRouter.post(
   '/regenerate-post-image',
   requireAuth,
   requireRole('agency_admin', 'agency_member'),
+  regenerationLimiter,
   async (req, res, next) => {
     try {
       const args = regenerateImageSchema.parse(req.body);
-      const result = await regeneratePostImage(args);
+      if (isDbConfigured()) {
+        const db = getDb();
+        const [row] = await db
+          .select({ id: posts.id })
+          .from(posts)
+          .where(eq(posts.id, args.postId));
+        if (!row) {
+          return res.status(404).json({ error: { message: 'Post not found', code: 'NOT_FOUND' } });
+        }
+      }
+      const result = await regeneratePostImage({
+        ...args,
+        overridePrompt: args.overridePrompt ? sanitizeUserText(args.overridePrompt) : undefined,
+      });
       res.json({ data: result });
     } catch (e) {
       next(e);

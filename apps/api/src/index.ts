@@ -154,6 +154,30 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
       .json({ error: { message: 'Validation failed', code: 'VALIDATION', details: anyErr.issues } });
   }
   console.error('[api] error:', err);
+
+  // Postgres driver errors surface a `.code` — give operators an
+  // actionable message when the cause is a missing column/table
+  // (almost always "you forgot to run migrations") or a bad enum value.
+  const pgCode = (anyErr?.code ?? '').toString();
+  if (pgCode === '42703' || pgCode === '42P01') {
+    // 42703 = undefined_column, 42P01 = undefined_table.
+    return res.status(500).json({
+      error: {
+        message:
+          env.NODE_ENV === 'production'
+            ? 'Database schema is out of date.'
+            : `Schema drift: ${err.message}. Run \`pnpm --filter @boost/database migrate\` to apply pending migrations.`,
+        code: 'SCHEMA_DRIFT',
+      },
+    });
+  }
+  if (pgCode === '22P02' || pgCode === '23514') {
+    // 22P02 = invalid_text_representation (bad enum/uuid), 23514 = check_violation.
+    return res.status(400).json({
+      error: { message: err.message, code: 'BAD_INPUT' },
+    });
+  }
+
   const safeMessage =
     env.NODE_ENV === 'production' ? 'Something went wrong. Please try again.' : err.message;
   res.status(500).json({ error: { message: safeMessage, code: 'INTERNAL' } });

@@ -22,6 +22,16 @@ import { z } from 'zod';
 import { requireAuth } from '../services/auth.js';
 import { listThemes, themeSummary, getTheme } from '../services/personalThemes.js';
 import {
+  listAllThemesForUser,
+  findThemeForUser,
+  listCustomThemes,
+  getCustomTheme,
+  createCustomTheme,
+  updateCustomTheme,
+  deleteCustomTheme,
+  cloneBuiltinForEdit,
+} from '../services/personalCustomThemes.js';
+import {
   createAccount,
   listAccounts,
   getAccount,
@@ -68,8 +78,142 @@ const PLATFORMS = [
 
 /* ─── Themes ─────────────────────────────────────────────────────── */
 
-personalRouter.get('/themes', requireAuth, (_req, res) => {
-  res.json({ data: listThemes().map(themeSummary) });
+personalRouter.get('/themes', requireAuth, async (req, res, next) => {
+  try {
+    const user = (req as any).user as { id: string };
+    const merged = await listAllThemesForUser(user.id);
+    res.json({ data: merged.map(themeSummary) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/* ─── Custom themes (user-editable library) ────────────────────── */
+
+const customThemeSchema = z.object({
+  slug: z
+    .string()
+    .min(2)
+    .max(64)
+    .regex(/^[a-z0-9-]+$/, 'Slug must be lowercase letters, numbers, or dashes.'),
+  name: z.string().min(1).max(120),
+  tagline: z.string().min(1).max(200),
+  description: z.string().min(1).max(2000),
+  emoji: z.string().min(1).max(10).optional(),
+  accentColor: z.string().max(20).optional(),
+  viralityScore: z.number().int().min(1).max(10).optional(),
+  cpmTier: z.enum(['low', 'medium', 'high', 'premium']).optional(),
+  preferredPlatforms: z
+    .array(
+      z.enum([
+        'instagram',
+        'facebook',
+        'linkedin',
+        'tiktok',
+        'x',
+        'pinterest',
+        'bluesky',
+        'youtube',
+        'google_business',
+      ]),
+    )
+    .max(9)
+    .optional(),
+  template: z
+    .enum([
+      'viral-text',
+      'news-reel',
+      'fact-drop',
+      'quote-card',
+      'language-card',
+      'listicle',
+      'brainrot',
+      'story-narration',
+      'slideshow',
+      'satisfying-loop',
+      'scripture-card',
+    ])
+    .optional(),
+  mediaSources: z
+    .array(
+      z.enum(['pexels', 'unsplash', 'pixabay', 'wikipedia', 'news', 'ai', 'gameplay']),
+    )
+    .optional(),
+  useVoiceover: z.boolean().optional(),
+  useMusic: z.boolean().optional(),
+  hookFormulas: z.array(z.string().max(300)).max(20).optional(),
+  topicSeeds: z.array(z.string().max(200)).max(50).optional(),
+  voiceGuide: z.string().max(2000).optional(),
+  visualStyle: z.string().max(2000).optional(),
+  musicMood: z.string().max(200).optional(),
+  targetDurationSeconds: z.number().int().min(8).max(120).optional(),
+  defaultHashtags: z.array(z.string().max(60)).max(20).optional(),
+  requiresGroundedImages: z.boolean().optional(),
+  defaultFormat: z.enum(['video', 'slideshow', 'static_image']).optional(),
+  overridesBuiltin: z.boolean().optional(),
+});
+
+personalRouter.get('/custom-themes', requireAuth, async (req, res, next) => {
+  try {
+    const user = (req as any).user as { id: string };
+    res.json({ data: await listCustomThemes(user.id) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+personalRouter.post('/custom-themes', requireAuth, async (req, res, next) => {
+  try {
+    const user = (req as any).user as { id: string };
+    const body = customThemeSchema.parse(req.body);
+    const row = await createCustomTheme({ userId: user.id, ...body });
+    res.status(201).json({ data: row });
+  } catch (e) {
+    next(e);
+  }
+});
+
+const customThemePatchSchema = customThemeSchema.partial().omit({ slug: true });
+
+personalRouter.patch('/custom-themes/:id', requireAuth, async (req, res, next) => {
+  try {
+    const user = (req as any).user as { id: string };
+    const body = customThemePatchSchema.parse(req.body);
+    const row = await updateCustomTheme(user.id, String(req.params.id), body);
+    if (!row)
+      return res.status(404).json({ error: { message: 'Not found', code: 'NOT_FOUND' } });
+    res.json({ data: row });
+  } catch (e) {
+    next(e);
+  }
+});
+
+personalRouter.delete('/custom-themes/:id', requireAuth, async (req, res, next) => {
+  try {
+    const user = (req as any).user as { id: string };
+    const ok = await deleteCustomTheme(user.id, String(req.params.id));
+    if (!ok)
+      return res.status(404).json({ error: { message: 'Not found', code: 'NOT_FOUND' } });
+    res.json({ data: { ok: true } });
+  } catch (e) {
+    next(e);
+  }
+});
+
+const cloneSchema = z.object({
+  builtinId: z.string().min(1).max(100),
+  mode: z.enum(['override', 'duplicate']).default('duplicate'),
+});
+
+personalRouter.post('/custom-themes/clone', requireAuth, async (req, res, next) => {
+  try {
+    const user = (req as any).user as { id: string };
+    const body = cloneSchema.parse(req.body);
+    const row = await cloneBuiltinForEdit({ userId: user.id, ...body });
+    res.status(201).json({ data: row });
+  } catch (e) {
+    next(e);
+  }
 });
 
 /* ─── Features snapshot ─────────────────────────────────────────── */
@@ -169,7 +313,10 @@ personalRouter.post('/accounts', requireAuth, async (req, res, next) => {
   try {
     const user = (req as any).user as { id: string };
     const body = createSchema.parse(req.body);
-    if (!getTheme(body.themeId)) {
+    // Look up the theme across built-ins + user customs. Built-ins are
+    // immediately resolvable; customs require a DB hit.
+    const theme = getTheme(body.themeId) ?? (await findThemeForUser(user.id, body.themeId));
+    if (!theme) {
       return res
         .status(400)
         .json({ error: { message: 'Unknown theme', code: 'BAD_THEME' } });

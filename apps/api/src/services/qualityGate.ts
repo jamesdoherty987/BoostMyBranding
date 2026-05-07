@@ -16,6 +16,11 @@
 import { generateJSON } from './claude.js';
 import { qualityGatePrompt } from './prompts.js';
 import { features } from '../env.js';
+import {
+  findBannedPhrase,
+  findPlaceholderLeak,
+  genericHashtagShare,
+} from './promptSafety.js';
 
 export interface GateInput {
   businessName: string;
@@ -152,13 +157,13 @@ export async function runQualityGate(
     };
 
     if (result.verdict === 'accept' || result.verdict === 'reject') {
-      return {
+      return auditAndReturn({
         caption: currentCaption,
         hashtags: currentHashtags,
-        ...lastResult,
+        lastResult,
         attempts,
         rewritten,
-      };
+      });
     }
 
     // verdict === 'rewrite' — adopt the rewrite, loop for re-audit.
@@ -168,21 +173,58 @@ export async function runQualityGate(
       rewritten = true;
     } else {
       // The gate wants a rewrite but didn't provide one — treat as accept.
-      return {
+      return auditAndReturn({
         caption: currentCaption,
         hashtags: currentHashtags,
-        ...lastResult,
+        lastResult,
         attempts,
         rewritten,
-      };
+      });
     }
   }
 
   // Exhausted rewrite budget — return the last draft with its audit.
-  return {
+  return auditAndReturn({
     caption: currentCaption,
     hashtags: currentHashtags,
-    scores: lastResult?.scores ?? {
+    lastResult,
+    attempts,
+    rewritten,
+  });
+}
+
+/**
+ * Deterministic post-audit: even when Claude says "accept", we run a
+ * final rule-based check for banned phrases, un-replaced placeholders,
+ * and hashtag genericness. The issues surface in the UI; the verdict
+ * stays unchanged because a rule-based reject would trap the reviewer.
+ */
+function auditAndReturn(args: {
+  caption: string;
+  hashtags: string[];
+  lastResult: {
+    scores: GateScores;
+    overall: number;
+    issues: string[];
+    verdict: 'accept' | 'rewrite' | 'reject';
+  } | null;
+  attempts: number;
+  rewritten: boolean;
+}): GateOutput {
+  const extraIssues: string[] = [];
+  const banned = findBannedPhrase(args.caption);
+  if (banned) extraIssues.push(`Contains banned phrase "${banned}"`);
+  const placeholder = findPlaceholderLeak(args.caption);
+  if (placeholder) extraIssues.push(`Placeholder not replaced: ${placeholder}`);
+  const share = genericHashtagShare(args.hashtags);
+  if (share > 0.34) {
+    extraIssues.push(`${Math.round(share * 100)}% of hashtags are generic`);
+  }
+  const issues = [...(args.lastResult?.issues ?? []), ...extraIssues];
+  return {
+    caption: args.caption,
+    hashtags: args.hashtags,
+    scores: args.lastResult?.scores ?? {
       factualIntegrity: 3,
       brandVoiceFit: 3,
       hookStrength: 3,
@@ -191,10 +233,10 @@ export async function runQualityGate(
       platformFit: 3,
       specificity: 3,
     },
-    overall: lastResult?.overall ?? 3,
-    issues: lastResult?.issues ?? [],
-    verdict: 'accept',
-    attempts,
-    rewritten,
+    overall: args.lastResult?.overall ?? 3,
+    issues,
+    verdict: args.lastResult?.verdict ?? 'accept',
+    attempts: args.attempts,
+    rewritten: args.rewritten,
   };
 }

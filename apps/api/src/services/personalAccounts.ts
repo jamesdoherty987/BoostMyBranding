@@ -16,6 +16,7 @@ import {
 } from '@boost/database';
 import type { Platform } from '@boost/core';
 import { getTheme, type PersonalTheme } from './personalThemes.js';
+import { findThemeForUser } from './personalCustomThemes.js';
 
 /* ─── Types ──────────────────────────────────────────────────────── */
 
@@ -92,7 +93,8 @@ export interface CreateAccountArgs {
 
 export async function createAccount(args: CreateAccountArgs) {
   assertDb();
-  const theme = getTheme(args.themeId);
+  const theme =
+    getTheme(args.themeId) ?? (await findThemeForUser(args.userId, args.themeId));
   if (!theme) throw new Error(`Unknown theme: ${args.themeId}`);
 
   const db = getDb();
@@ -147,12 +149,12 @@ export async function listAccounts(userId: string) {
     .from(personalAccounts)
     .where(eq(personalAccounts.userId, userId))
     .orderBy(desc(personalAccounts.createdAt));
-  return rows
-    .map((r) => {
-      const theme = getTheme(r.themeId);
-      return theme ? toPayload(r, theme) : null;
-    })
-    .filter((p): p is PersonalAccountPayload => Boolean(p));
+  const out: PersonalAccountPayload[] = [];
+  for (const r of rows) {
+    const theme = getTheme(r.themeId) ?? (await findThemeForUser(userId, r.themeId));
+    if (theme) out.push(toPayload(r, theme));
+  }
+  return out;
 }
 
 export async function getAccount(userId: string, accountId: string) {
@@ -165,7 +167,7 @@ export async function getAccount(userId: string, accountId: string) {
       and(eq(personalAccounts.userId, userId), eq(personalAccounts.id, accountId)),
     );
   if (!row) return null;
-  const theme = getTheme(row.themeId);
+  const theme = getTheme(row.themeId) ?? (await findThemeForUser(userId, row.themeId));
   return theme ? toPayload(row, theme) : null;
 }
 
@@ -227,7 +229,7 @@ export async function updateAccount(
     )
     .returning();
   if (!row) return null;
-  const theme = getTheme(row.themeId);
+  const theme = getTheme(row.themeId) ?? (await findThemeForUser(userId, row.themeId));
   return theme ? toPayload(row, theme) : null;
 }
 

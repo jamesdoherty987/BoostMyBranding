@@ -28,6 +28,7 @@ import {
   type PersonalGeneratorConfig,
 } from '@boost/database';
 import { getTheme, type PersonalTheme } from './personalThemes.js';
+import { findThemeForUser } from './personalCustomThemes.js';
 import { generateScript, chooseTopic, type PersonalScript } from './personalScript.js';
 import {
   searchAssets,
@@ -123,7 +124,9 @@ async function generateForAccountScript(
     };
   }
 
-  const theme = getTheme(account.themeId);
+  const theme =
+    getTheme(account.themeId) ??
+    (await findThemeForUser(account.userId, account.themeId));
   if (!theme) throw new Error(`Theme not found: ${account.themeId}`);
 
   // 0. pick topic + create row

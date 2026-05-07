@@ -31,6 +31,27 @@
       "breakpoints": true
     },
     {
+      "idx": 4,
+      "version": "7",
+      "when": 1777640094379,
+      "tag": "0004_custom_domains",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1777640094380,
+      "tag": "0005_custom_domain_status_enum",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1777640094381,
+      "tag": "0006_password_auth",
+      "breakpoints": true
+    },
+    {
       "idx": 7,
       "version": "7",
       "when": 1777640094382,
@@ -63,6 +84,13 @@
       "version": "7",
       "when": 1777640094386,
       "tag": "0011_personal_expand",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1777640094387,
+      "tag": "0012_personal_custom_themes",
       "breakpoints": true
     }
   ]

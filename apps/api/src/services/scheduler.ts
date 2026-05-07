@@ -11,7 +11,7 @@
  */
 
 import cron from 'node-cron';
-import { and, eq, gte, isNull, lt, lte } from 'drizzle-orm';
+import { and, eq, isNull, lt, lte } from 'drizzle-orm';
 import {
   getDb,
   isDbConfigured,
@@ -199,15 +199,18 @@ export async function generateMonthlyBatches() {
     .returning();
 
   const month = new Date().toISOString().slice(0, 7); // YYYY-MM
-  const startOfMonth = new Date(`${month}-01T00:00:00Z`);
 
   const activeClients = await db.select().from(clients).where(eq(clients.isActive, true));
 
-  // Skip any client that already has a batch for this month — idempotency.
+  // Idempotency: any batch that already exists for this month (regardless
+  // of when it was created) counts as done. The previous check scoped
+  // by `createdAt >= startOfMonth` which allowed the same month to be
+  // re-run if a cron retry fired within the first few seconds of month-
+  // rollover.
   const existing = await db
     .select({ clientId: contentBatches.clientId })
     .from(contentBatches)
-    .where(and(eq(contentBatches.month, month), gte(contentBatches.createdAt, startOfMonth)));
+    .where(eq(contentBatches.month, month));
   const alreadyDone = new Set(existing.map((e) => e.clientId));
 
   const results: Array<{ clientId: string; ok: boolean; generated?: number; error?: string }> = [];

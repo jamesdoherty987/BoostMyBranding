@@ -803,6 +803,33 @@ export class BoostApi {
     listPersonalModels() {
         return this.request('/api/v1/personal/models');
     }
+    /* ─── Custom themes (user-editable library) ──────────────── */
+    listCustomThemes() {
+        return this.request('/api/v1/personal/custom-themes');
+    }
+    createCustomTheme(body) {
+        return this.request('/api/v1/personal/custom-themes', {
+            method: 'POST',
+            body: JSON.stringify(body),
+        });
+    }
+    updateCustomTheme(id, patch) {
+        return this.request(`/api/v1/personal/custom-themes/${id}`, {
+            method: 'PATCH',
+            body: JSON.stringify(patch),
+        });
+    }
+    deleteCustomTheme(id) {
+        return this.request(`/api/v1/personal/custom-themes/${id}`, {
+            method: 'DELETE',
+        });
+    }
+    cloneBuiltinTheme(args) {
+        return this.request('/api/v1/personal/custom-themes/clone', {
+            method: 'POST',
+            body: JSON.stringify(args),
+        });
+    }
 }
 export function createApi(baseUrl) {
     return new BoostApi({ baseUrl });

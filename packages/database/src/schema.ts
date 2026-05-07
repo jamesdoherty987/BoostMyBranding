@@ -1199,3 +1199,59 @@ export interface PersonalCharacterSheet {
 /* getDb().execute for the typed-jsonb bits and through the existing   */
 /* column accessors for the rest.                                      */
 /* ═══════════════════════════════════════════════════════════════════ */
+
+
+/* ═══════════════════════════════════════════════════════════════════ */
+/* Personal custom themes                                               */
+/*                                                                      */
+/* Lets the user add their own niches (or clone-to-edit the built-in   */
+/* ones) without a code change. Stored per-user. On listing, these are */
+/* merged with the built-in THEMES from code; when the ids collide,    */
+/* the custom row wins ("override" semantics).                         */
+/* ═══════════════════════════════════════════════════════════════════ */
+
+export const personalCustomThemes = pgTable(
+  'personal_custom_themes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .references(() => users.id, { onDelete: 'cascade' })
+      .notNull(),
+    /** Stable slug used as theme id in personal_accounts.theme_id. */
+    slug: text('slug').notNull(),
+    name: text('name').notNull(),
+    tagline: text('tagline').notNull(),
+    description: text('description').notNull(),
+    emoji: text('emoji').notNull().default('✨'),
+    accentColor: text('accent_color').notNull().default('#6366F1'),
+    viralityScore: integer('virality_score').default(7).notNull(),
+    cpmTier: text('cpm_tier').default('medium').notNull(),
+    /** Array of platforms this theme posts to. */
+    preferredPlatforms: text('preferred_platforms').array().default([] as unknown as string[]),
+    /** Template id from PersonalTemplateId — viral-text, slideshow, etc. */
+    template: text('template').default('viral-text').notNull(),
+    /** Ordered media sources. */
+    mediaSources: text('media_sources').array().default([] as unknown as string[]),
+    useVoiceover: boolean('use_voiceover').default(true).notNull(),
+    useMusic: boolean('use_music').default(true).notNull(),
+    hookFormulas: text('hook_formulas').array().default([] as unknown as string[]),
+    topicSeeds: text('topic_seeds').array().default([] as unknown as string[]),
+    voiceGuide: text('voice_guide').notNull().default(''),
+    visualStyle: text('visual_style').notNull().default(''),
+    musicMood: text('music_mood').default(''),
+    targetDurationSeconds: integer('target_duration_seconds').default(35).notNull(),
+    defaultHashtags: text('default_hashtags').array().default([] as unknown as string[]),
+    requiresGroundedImages: boolean('requires_grounded_images').default(false).notNull(),
+    defaultFormat: text('default_format').default('video'),
+    /** When true, this row overrides a same-slug built-in. */
+    overridesBuiltin: boolean('overrides_builtin').default(false).notNull(),
+    /** Optional note shown in the UI ("cloned from Finance Bite"). */
+    derivedFrom: text('derived_from'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => ({
+    userIdx: index('personal_custom_themes_user_idx').on(table.userId),
+    slugIdx: uniqueIndex('personal_custom_themes_user_slug_idx').on(table.userId, table.slug),
+  }),
+);

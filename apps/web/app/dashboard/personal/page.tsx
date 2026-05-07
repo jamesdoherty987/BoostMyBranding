@@ -44,6 +44,7 @@ import { PageHeader } from '@/components/dashboard/PageHeader';
 import { MediaLibrary } from '@/components/dashboard/personal/MediaLibrary';
 import { CharacterStudio } from '@/components/dashboard/personal/CharacterStudio';
 import { GeneratorConfigPanel } from '@/components/dashboard/personal/GeneratorConfig';
+import { ThemesManager } from '@/components/dashboard/personal/ThemesManager';
 
 const PLATFORMS: PersonalPlatform[] = [
   'instagram', 'tiktok', 'facebook', 'youtube', 'x', 'linkedin', 'pinterest', 'bluesky', 'google_business',
@@ -213,12 +214,23 @@ function CreateAccountForm({
   const [handle, setHandle] = useState('');
   const [direction, setDirection] = useState('');
   const [busy, setBusy] = useState(false);
+  const [themeQuery, setThemeQuery] = useState('');
 
   useEffect(() => {
     if (!themeId && themes[0]) setThemeId(themes[0].id);
   }, [themes, themeId]);
 
   const selectedTheme = themes.find((t) => t.id === themeId);
+  const filteredThemes = themes.filter((t) => {
+    if (!themeQuery.trim()) return true;
+    const q = themeQuery.toLowerCase();
+    return (
+      t.name.toLowerCase().includes(q) ||
+      t.tagline.toLowerCase().includes(q) ||
+      t.description.toLowerCase().includes(q) ||
+      t.topicSeedExamples.some((s) => s.toLowerCase().includes(q))
+    );
+  });
 
   async function submit() {
     if (!accountName.trim() || !themeId) return;
@@ -256,9 +268,19 @@ function CreateAccountForm({
 
         <div className="space-y-6">
           <div>
-            <label className="mb-2 block text-sm font-semibold text-slate-900">Pick a theme</label>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {themes.map((t) => (
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <label className="block text-sm font-semibold text-slate-900">
+                Pick a theme <span className="text-xs font-normal text-slate-400">· {themes.length} available</span>
+              </label>
+              <Input
+                value={themeQuery}
+                onChange={(e) => setThemeQuery(e.target.value)}
+                placeholder="Search themes…"
+                className="max-w-xs"
+              />
+            </div>
+            <div className="grid max-h-[520px] grid-cols-1 gap-2 overflow-y-auto pr-1 sm:grid-cols-2 lg:grid-cols-3">
+              {filteredThemes.map((t) => (
                 <button
                   key={t.id}
                   onClick={() => setThemeId(t.id)}
@@ -291,6 +313,11 @@ function CreateAccountForm({
                   </div>
                 </button>
               ))}
+              {filteredThemes.length === 0 ? (
+                <div className="col-span-full rounded-lg border border-dashed border-slate-300 p-6 text-center text-xs text-slate-500">
+                  No themes match "{themeQuery}".
+                </div>
+              ) : null}
             </div>
           </div>
 
@@ -385,7 +412,7 @@ function AccountDetail({
   );
   const { data: characters } = useSWR('personal:characters', () => api.listCharacters());
 
-  const [tab, setTab] = useState<'overview' | 'media' | 'characters' | 'config'>('overview');
+  const [tab, setTab] = useState<'overview' | 'media' | 'characters' | 'themes' | 'config'>('overview');
   const [generating, setGenerating] = useState(false);
   const [topicOverride, setTopicOverride] = useState('');
 
@@ -465,8 +492,11 @@ function AccountDetail({
             <TabButton active={tab === 'characters'} onClick={() => setTab('characters')}>
               Characters
             </TabButton>
+            <TabButton active={tab === 'themes'} onClick={() => setTab('themes')}>
+              Themes
+            </TabButton>
             <TabButton active={tab === 'config'} onClick={() => setTab('config')}>
-              Style & config
+              Style &amp; config
             </TabButton>
           </div>
         </CardContent>
@@ -486,6 +516,8 @@ function AccountDetail({
       ) : null}
 
       {tab === 'characters' ? <CharacterStudio /> : null}
+
+      {tab === 'themes' ? <ThemesManager /> : null}
 
       {tab === 'config' ? (
         <GeneratorConfigPanel
@@ -972,31 +1004,77 @@ function StatusDot({ status }: { status: PersonalAccount['status'] }) {
 /* ═══════════════════════════════════════════════════════════════════ */
 
 function EmptyState({ themes, onStart }: { themes: PersonalThemeSummary[]; onStart: () => void }) {
+  const [query, setQuery] = useState('');
+  const filtered = themes.filter((t) => {
+    if (!query.trim()) return true;
+    const q = query.toLowerCase();
+    return (
+      t.name.toLowerCase().includes(q) ||
+      t.tagline.toLowerCase().includes(q) ||
+      t.description.toLowerCase().includes(q) ||
+      t.topicSeedExamples.some((s) => s.toLowerCase().includes(q))
+    );
+  });
   return (
     <Card>
-      <CardContent className="p-10 text-center">
-        <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-400 to-rose-400">
-          <Sparkles className="h-7 w-7 text-white" />
+      <CardContent className="p-10">
+        <div className="text-center">
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-400 to-rose-400">
+            <Sparkles className="h-7 w-7 text-white" />
+          </div>
+          <h2 className="text-xl font-bold text-slate-900">Create your first channel</h2>
+          <p className="mx-auto mt-2 max-w-lg text-sm text-slate-500">
+            Pick a viral niche, set a posting schedule, and the pipeline writes scripts, scrapes real imagery, mixes voice + music, and schedules to ContentStudio — every day, automatically.
+          </p>
+          <Button className="mt-6" onClick={onStart}>
+            <Plus className="h-4 w-4" />
+            New channel
+          </Button>
         </div>
-        <h2 className="text-xl font-bold text-slate-900">Create your first channel</h2>
-        <p className="mx-auto mt-2 max-w-lg text-sm text-slate-500">
-          Pick a viral niche, set a posting schedule, and the pipeline writes scripts, scrapes real imagery, mixes voice + music, and schedules to ContentStudio — every day, automatically.
-        </p>
-        <Button className="mt-6" onClick={onStart}>
-          <Plus className="h-4 w-4" />
-          New channel
-        </Button>
-        <div className="mt-8 grid grid-cols-2 gap-2 sm:grid-cols-3">
-          {themes.slice(0, 6).map((t) => (
-            <div
-              key={t.id}
-              className="rounded-lg border border-slate-200 bg-white p-3 text-left"
-            >
-              <div className="text-xl">{t.emoji}</div>
-              <div className="mt-1 text-xs font-semibold text-slate-900">{t.name}</div>
-              <div className="mt-0.5 text-[10px] text-slate-500">{t.tagline}</div>
+
+        <div className="mt-8">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-bold text-slate-900">
+                All {themes.length} themes
+              </div>
+              <div className="text-xs text-slate-500">
+                Sorted by virality score. Click <b>New channel</b> above to pick one.
+              </div>
             </div>
-          ))}
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search themes…"
+              className="max-w-xs"
+            />
+          </div>
+          <div className="grid max-h-[640px] grid-cols-2 gap-2 overflow-y-auto pr-1 sm:grid-cols-3 lg:grid-cols-4">
+            {filtered.map((t) => (
+              <button
+                key={t.id}
+                onClick={onStart}
+                className="flex flex-col items-start rounded-lg border border-slate-200 bg-white p-3 text-left transition hover:border-slate-400 hover:shadow-sm"
+              >
+                <div className="mb-1 flex w-full items-center justify-between">
+                  <span className="text-xl">{t.emoji}</span>
+                  <span
+                    className="rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider"
+                    style={{ background: t.accentColor + '22', color: t.accentColor }}
+                  >
+                    {t.cpmTier} CPM
+                  </span>
+                </div>
+                <div className="text-xs font-semibold text-slate-900">{t.name}</div>
+                <div className="mt-0.5 line-clamp-2 text-[10px] text-slate-500">{t.tagline}</div>
+              </button>
+            ))}
+            {filtered.length === 0 ? (
+              <div className="col-span-full rounded-lg border border-dashed border-slate-300 p-6 text-center text-xs text-slate-500">
+                No themes match "{query}".
+              </div>
+            ) : null}
+          </div>
         </div>
       </CardContent>
     </Card>

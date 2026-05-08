@@ -45,6 +45,7 @@ import { MediaLibrary } from '@/components/dashboard/personal/MediaLibrary';
 import { CharacterStudio } from '@/components/dashboard/personal/CharacterStudio';
 import { GeneratorConfigPanel } from '@/components/dashboard/personal/GeneratorConfig';
 import { ThemesManager } from '@/components/dashboard/personal/ThemesManager';
+import { LongformPanel } from '@/components/dashboard/personal/LongformPanel';
 
 const PLATFORMS: PersonalPlatform[] = [
   'instagram', 'tiktok', 'facebook', 'youtube', 'x', 'linkedin', 'pinterest', 'bluesky', 'google_business',
@@ -77,7 +78,7 @@ export default function PersonalDashboardPage() {
     <div className="min-h-screen bg-slate-50 pb-20">
       <PageHeader
         title="Personal channels"
-        subtitle="A secret, fully-automated pipeline for your own social accounts. Pick a viral niche, set a schedule, walk away."
+        subtitle="A private, fully-automated pipeline for your own social accounts. Pick a viral niche, set a schedule, walk away. Not linked from the client-facing dashboard."
       />
 
       <FeatureBanner features={features} />
@@ -290,14 +291,21 @@ function CreateAccountForm({
                       : 'border-slate-200 bg-white hover:border-slate-400'
                   }`}
                 >
-                  <div className="mb-1 flex w-full items-center justify-between">
+                  <div className="mb-1 flex w-full items-center justify-between gap-1">
                     <span className="text-2xl">{t.emoji}</span>
-                    <span
-                      className="rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider"
-                      style={{ background: t.accentColor + '22', color: t.accentColor }}
-                    >
-                      {t.cpmTier} CPM
-                    </span>
+                    <div className="flex items-center gap-1">
+                      {t.template === 'animated-explainer' ? (
+                        <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-violet-700">
+                          1–8 min · animated
+                        </span>
+                      ) : null}
+                      <span
+                        className="rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider"
+                        style={{ background: t.accentColor + '22', color: t.accentColor }}
+                      >
+                        {t.cpmTier} CPM
+                      </span>
+                    </div>
                   </div>
                   <div className="text-sm font-semibold text-slate-900">{t.name}</div>
                   <div className="mt-0.5 text-[12px] text-slate-500">{t.tagline}</div>
@@ -412,7 +420,7 @@ function AccountDetail({
   );
   const { data: characters } = useSWR('personal:characters', () => api.listCharacters());
 
-  const [tab, setTab] = useState<'overview' | 'media' | 'characters' | 'themes' | 'config'>('overview');
+  const [tab, setTab] = useState<'overview' | 'media' | 'characters' | 'themes' | 'config' | 'longform'>('overview');
   const [generating, setGenerating] = useState(false);
   const [topicOverride, setTopicOverride] = useState('');
 
@@ -498,6 +506,9 @@ function AccountDetail({
             <TabButton active={tab === 'config'} onClick={() => setTab('config')}>
               Style &amp; config
             </TabButton>
+            <TabButton active={tab === 'longform'} onClick={() => setTab('longform')}>
+              Long-form
+            </TabButton>
           </div>
         </CardContent>
       </Card>
@@ -524,6 +535,15 @@ function AccountDetail({
           account={account}
           characters={characters ?? []}
           onChanged={onChanged}
+        />
+      ) : null}
+
+      {tab === 'longform' ? (
+        <LongformPanel
+          account={account}
+          theme={theme}
+          onChanged={onChanged}
+          onSwitchTab={(t) => setTab(t)}
         />
       ) : null}
     </div>

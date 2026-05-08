@@ -40,8 +40,12 @@ export default function LoginPage() {
         await api.login(email.trim(), password);
         window.location.href = '/portal/dashboard';
       } else {
+        // Magic-link fallback: after clicking the link we want the
+        // signed-in client in *their* portal, not the team dashboard.
         const redirectTo =
-          typeof window !== 'undefined' ? `${window.location.origin}/dashboard` : undefined;
+          typeof window !== 'undefined'
+            ? `${window.location.origin}/portal/dashboard`
+            : undefined;
         const res = await api.sendMagicLink(email.trim(), redirectTo);
         setSent(true);
         if (res.devLink) setDevLink(res.devLink);

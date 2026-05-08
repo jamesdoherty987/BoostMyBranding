@@ -261,6 +261,12 @@ export class BoostApi {
     websiteUrl?: string;
     socialAccounts?: Record<string, string>;
     brandColors?: { primary: string; secondary: string; accent: string };
+    /**
+     * Free-text brand voice notes. The portal's onboarding flow writes
+     * the client's goals + chosen vibe here so the agency has a quick
+     * account-manager summary to start from.
+     */
+    brandVoice?: string;
   }) {
     return this.request<Client>('/api/v1/clients/me', {
       method: 'PATCH',
@@ -281,7 +287,15 @@ export class BoostApi {
       brandVoice?: string;
       logoUrl?: string;
       subscriptionTier?: 'social_only' | 'website_only' | 'full_package';
+      monthlyPriceCents?: number | null;
       isActive?: boolean;
+      brandColors?: { primary: string; secondary: string; accent: string };
+      socialAccounts?: Record<string, string>;
+      /**
+       * Per-client portal customization. Pass `null` to clear, an object
+       * to replace. Undefined leaves the existing config untouched.
+       */
+      portalConfig?: import('@boost/core').PortalConfig | null;
     },
   ) {
     return this.request<Client>(`/api/v1/clients/${encodeURIComponent(id)}`, {
@@ -2384,6 +2398,19 @@ export interface PersonalGeneratorConfig {
     | 'high_contrast';
   letterbox?: boolean;
   filmGrain?: boolean;
+
+  /* ── Long-form animated explainer (1–8 min) ───────────────── */
+  longformEnabled?: boolean;
+  longformTargetSeconds?: number;
+  longformAnimationStyle?:
+    | 'storybook'
+    | 'cartoon'
+    | 'stick_figure'
+    | 'claymation'
+    | 'pixel_art'
+    | 'watercolour'
+    | 'custom';
+  longformMaxAiVideoShots?: number;
 }
 
 /* ─── Custom themes (user-editable library) ──────────────── */

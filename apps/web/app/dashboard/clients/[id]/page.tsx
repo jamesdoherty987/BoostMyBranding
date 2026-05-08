@@ -28,6 +28,7 @@ import {
   Loader2,
   Target,
   Mic,
+  Settings,
 } from 'lucide-react';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { MediaLibrary } from '@/components/dashboard/content-hub/MediaLibrary';
@@ -35,9 +36,10 @@ import { PostsPanel } from '@/components/dashboard/content-hub/PostsPanel';
 import { VideosPanel } from '@/components/dashboard/content-hub/VideosPanel';
 import { BrandIntelTab } from '@/components/dashboard/brand-intel/BrandIntelTab';
 import { TalkingHeadTab } from '@/components/dashboard/brand-intel/TalkingHeadTab';
+import { ClientSettingsTab } from '@/components/dashboard/client-settings/ClientSettingsTab';
 import { api } from '@/lib/dashboard/api';
 
-type Tab = 'overview' | 'posts' | 'media' | 'videos' | 'messages' | 'brand-intel' | 'ugc';
+type Tab = 'overview' | 'posts' | 'media' | 'videos' | 'messages' | 'brand-intel' | 'ugc' | 'settings';
 
 const TABS: Array<{ id: Tab; label: string; icon: typeof LayoutGrid }> = [
   { id: 'overview', label: 'Overview', icon: LayoutGrid },
@@ -47,6 +49,7 @@ const TABS: Array<{ id: Tab; label: string; icon: typeof LayoutGrid }> = [
   { id: 'brand-intel', label: 'Brand Intel', icon: Target },
   { id: 'ugc', label: 'AI UGC', icon: Mic },
   { id: 'messages', label: 'Messages', icon: MessageSquare },
+  { id: 'settings', label: 'Settings', icon: Settings },
 ];
 
 export default function ClientDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -54,9 +57,29 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
   const router = useRouter();
   const [tab, setTab] = useState<Tab>('overview');
   const [inviting, setInviting] = useState(false);
+  // The Settings tab holds an uncommitted draft. We track its dirty
+  // flag here so the tab strip can prompt the user before discarding
+  // their work when they switch tabs mid-edit.
+  const [settingsDirty, setSettingsDirty] = useState(false);
+
+  /**
+   * Intercept tab switches when the Settings tab has unsaved edits.
+   * Native confirm() is good enough — matches browser-level UX the
+   * agency users are already familiar with, and avoids pulling in
+   * another modal primitive here.
+   */
+  const switchTab = (next: Tab) => {
+    if (next === tab) return;
+    if (tab === 'settings' && settingsDirty) {
+      const ok = window.confirm('Discard unsaved changes?');
+      if (!ok) return;
+      setSettingsDirty(false);
+    }
+    setTab(next);
+  };
 
   // Live client data with mock fallback so dev still works.
-  const { data: client, isLoading } = useSWR<Client | undefined>(
+  const { data: client, isLoading, mutate } = useSWR<Client | undefined>(
     `client:${id}`,
     async () => {
       try {
@@ -139,7 +162,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                 {inviting ? 'Sending…' : 'Send invite'}
               </span>
             </Button>
-            <Button size="sm" onClick={() => setTab('posts')}>
+            <Button size="sm" onClick={() => switchTab('posts')}>
               <Sparkles className="h-4 w-4" />
               <span className="hidden sm:inline">Create content</span>
               <span className="sm:hidden">Create</span>
@@ -231,9 +254,13 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                     })}
                   </div>
                 ) : (
-                  <p className="mt-2 text-xs text-slate-500">
-                    Not set yet. Add brand colors from the client&apos;s settings.
-                  </p>
+                  <button
+                    type="button"
+                    onClick={() => switchTab('settings')}
+                    className="mt-2 text-left text-xs text-slate-500 underline-offset-2 hover:text-[#1D9CA1] hover:underline"
+                  >
+                    Not set yet. Add brand colors in Settings.
+                  </button>
                 )}
               </CardContent>
             </Card>
@@ -254,7 +281,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                     key={t.id}
                     role="tab"
                     aria-selected={active}
-                    onClick={() => setTab(t.id)}
+                    onClick={() => switchTab(t.id)}
                     className={`inline-flex shrink-0 items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary ${
                       active
                         ? 'bg-gradient-cta text-white shadow-brand'
@@ -268,7 +295,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
               })}
             </div>
 
-            {tab === 'overview' ? <OverviewTab client={client} setTab={setTab} messages={messages} /> : null}
+            {tab === 'overview' ? <OverviewTab client={client} setTab={switchTab} messages={messages} /> : null}
             {tab === 'posts' ? (
               <PostsPanel clientId={client.id} businessName={client.businessName} />
             ) : null}
@@ -277,6 +304,14 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
             {tab === 'brand-intel' ? <BrandIntelTab clientId={client.id} /> : null}
             {tab === 'ugc' ? <TalkingHeadTab clientId={client.id} /> : null}
             {tab === 'messages' ? <MessagesTab messages={messages} /> : null}
+            {tab === 'settings' ? (
+              <ClientSettingsTab
+                client={client}
+                onChanged={() => mutate()}
+                onDeleted={() => router.push('/dashboard/clients')}
+                onDirtyChange={setSettingsDirty}
+              />
+            ) : null}
           </section>
         </div>
       </div>

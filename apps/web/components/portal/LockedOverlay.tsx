@@ -14,7 +14,7 @@ export function LockedOverlay({
   title = 'Subscribe to unlock',
   description = 'Pick a plan to turn on content generation and publishing.',
   cta = 'See plans',
-  href = '/subscription',
+  href = '/portal/subscription',
   className,
 }: {
   title?: string;

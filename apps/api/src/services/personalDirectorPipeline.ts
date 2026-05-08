@@ -31,6 +31,7 @@ import {
   planStoryboard,
   shotToPrompt,
   flattenStoryboard,
+  animationStyleHintFor,
   type Storyboard,
   type DirectorShot,
 } from './personalDirector.js';
@@ -53,6 +54,7 @@ import {
   generateAiImage,
   generateAiVideo,
   pickDefaultModel,
+  listAiModels,
 } from './personalAiModels.js';
 import { stitchShots, type StitchShotInput } from './personalStitcher.js';
 import type { GenerateForAccountArgs, GenerateForAccountResult } from './personalPipeline.js';
@@ -219,14 +221,45 @@ export async function generateForAccountDirector(
         })()
       : undefined;
 
+    /* ── Long-form mode ──────────────────────────────────────
+     * Auto-enabled when:
+     *   - the theme is `animated-explainer` (the themes built for it)
+     *   - OR the operator turns it on in generator config
+     *
+     * Duration is clamped to 60–480 seconds (1–8 minutes). When the
+     * operator picks an explicit `longformTargetSeconds` we use that
+     * directly; otherwise we fall back to the theme's target. Both
+     * conditions bypass the viral-format duration (which is tuned for
+     * shorts). */
+    const isAnimatedTheme = theme.template === 'animated-explainer';
+    const longformEnabled =
+      genConfig.longformEnabled === true || isAnimatedTheme;
+    const longformTargetSeconds = longformEnabled
+      ? clampLongformSeconds(
+          genConfig.longformTargetSeconds ?? theme.targetDurationSeconds,
+        )
+      : undefined;
+    const longformAnimationStyle =
+      genConfig.longformAnimationStyle ??
+      (theme.id === 'ancient-origins' || theme.id === 'storybook-myth'
+        ? 'storybook'
+        : theme.id === 'science-cartoon'
+          ? 'cartoon'
+          : theme.id === 'stick-figure-explainer'
+            ? 'stick_figure'
+            : undefined);
+
     const storyboard = await planStoryboard({
       theme,
       topic,
       // Respect the format's sweet-spot duration when it's been picked
-      // explicitly; otherwise fall back to the theme default.
-      targetDurationSeconds: genConfig.viralFormatId
-        ? chosenFormat.targetDurationSeconds
-        : theme.targetDurationSeconds,
+      // explicitly; otherwise fall back to the theme default. When
+      // long-form is on, the long-form target takes precedence.
+      targetDurationSeconds: longformEnabled
+        ? (longformTargetSeconds ?? theme.targetDurationSeconds)
+        : genConfig.viralFormatId
+          ? chosenFormat.targetDurationSeconds
+          : theme.targetDurationSeconds,
       styleBible,
       customDirection: account.customDirection ?? undefined,
       blacklist: account.topicBlacklist ?? undefined,
@@ -243,10 +276,17 @@ export async function generateForAccountDirector(
         : undefined,
       referenceMediaDigest: refMediaDigest,
       inspirationStyleBlock,
-      viralFormatBlock,
+      viralFormatBlock: longformEnabled ? undefined : viralFormatBlock,
       hookFormulaDirective,
       allowMultiAct: true,
-      maxAiVideoShots: maxAiShotsFor(genConfig),
+      maxAiVideoShots: maxAiShotsFor(genConfig, longformEnabled),
+      longform: longformEnabled
+        ? {
+            enabled: true,
+            targetDurationSeconds: longformTargetSeconds!,
+            animationStyle: longformAnimationStyle,
+          }
+        : undefined,
     });
     totalCostCents += 3;
 
@@ -291,7 +331,10 @@ export async function generateForAccountDirector(
 
     const defaultImageModel =
       genConfig.imageModelId ??
-      pickDefaultModel('image', genConfig.qualityTier ?? 'balanced')?.id;
+      pickImageModelForLongform(
+        longformEnabled ? longformAnimationStyle : undefined,
+        genConfig.qualityTier ?? 'balanced',
+      );
     const defaultVideoModel =
       genConfig.videoModelId ??
       pickDefaultModel('video', genConfig.qualityTier ?? 'balanced')?.id;
@@ -301,9 +344,33 @@ export async function generateForAccountDirector(
       fs: ReturnType<typeof flattenStoryboard>[number];
       asset: { url: string; kind: 'image' | 'video' } | null;
       costCents: number;
+      error?: string;
     }> = [];
 
-    for (const fs of flat) {
+    // Long-form animation style hint — one line per shot so every
+    // AI image/video in a long-form video keeps the same medium.
+    const animationStyleHint = longformEnabled
+      ? animationStyleHintFor(longformAnimationStyle ?? 'custom')
+      : undefined;
+
+    // Aspect ratio: long-form documentaries work best at 16:9 on
+    // YouTube / web. Short-form stays at 9:16 for Reels / TikTok. The
+    // user's explicit setting always wins.
+    const aspectRatio: '9:16' | '1:1' | '16:9' | '4:5' =
+      genConfig.aspectRatio ?? (longformEnabled ? '16:9' : '9:16');
+
+    // Per-shot generation as a separate function so we can pool it.
+    // Returns the resolved asset + cost + (on failure) the error message
+    // so the outer loop can surface a meaningful diagnostic if too many
+    // shots fail.
+    const generateShotAsset = async (
+      fs: (typeof flat)[number],
+    ): Promise<{
+      fs: (typeof flat)[number];
+      asset: { url: string; kind: 'image' | 'video' } | null;
+      costCents: number;
+      error?: string;
+    }> => {
       const prompt = shotToPrompt({
         shot: fs.shot,
         themeVisualStyle: theme.visualStyle,
@@ -311,6 +378,7 @@ export async function generateForAccountDirector(
         characterFragment: character?.promptFragment ?? undefined,
         globalColourGrade: storyboard.editPlan.colourGrade,
         inspirationStyleHint,
+        animationStyleHint,
       });
       const negativePrompt = [
         ...(styleBible.donts ?? []),
@@ -319,10 +387,16 @@ export async function generateForAccountDirector(
         .filter(Boolean)
         .join(', ');
 
-      const refs = [...characterAnchors.slice(0, 2), ...styleRefUrls.slice(0, 2)];
+      // In long-form mode we send up to 4 refs (nano-banana's cap) so
+      // character + style consistency holds across 40+ shots. Short-form
+      // keeps the tight 2+2 split for speed.
+      const refs = longformEnabled
+        ? [...characterAnchors.slice(0, 3), ...styleRefUrls.slice(0, 3)].slice(0, 6)
+        : [...characterAnchors.slice(0, 2), ...styleRefUrls.slice(0, 2)];
 
       let asset: { url: string; kind: 'image' | 'video' } | null = null;
       let shotCost = 0;
+      let error: string | undefined;
 
       try {
         if (fs.shot.kind === 'ai_video' && defaultVideoModel && features.fal) {
@@ -332,10 +406,16 @@ export async function generateForAccountDirector(
                 modelId: defaultVideoModel,
                 prompt,
                 negativePrompt: negativePrompt || undefined,
-                aspectRatio: videoAspectFrom(genConfig.aspectRatio ?? '9:16'),
+                aspectRatio: videoAspectFrom(aspectRatio),
                 durationSeconds: Math.min(
-                  genConfig.clipMaxSeconds ?? 5,
-                  Math.max(genConfig.clipMinSeconds ?? 2, fs.shot.durationSeconds),
+                  // Long-form allows up to 10s per AI video clip so
+                  // establishing and reveal shots have room; short-form
+                  // keeps the tight 5s default for snappy pacing.
+                  genConfig.clipMaxSeconds ?? (longformEnabled ? 10 : 5),
+                  Math.max(
+                    genConfig.clipMinSeconds ?? (longformEnabled ? 4 : 2),
+                    fs.shot.durationSeconds,
+                  ),
                 ),
                 referenceImageUrls: refs,
                 scopePath: `personal/${account.id}/ai-video`,
@@ -379,7 +459,7 @@ export async function generateForAccountDirector(
                 modelId: defaultImageModel,
                 prompt,
                 negativePrompt: negativePrompt || undefined,
-                aspectRatio: genConfig.aspectRatio ?? '9:16',
+                aspectRatio: aspectRatio,
                 referenceImageUrls: refs,
                 scopePath: `personal/${account.id}/ai-image`,
               }),
@@ -389,12 +469,45 @@ export async function generateForAccountDirector(
           shotCost = image.costCents;
         }
       } catch (e) {
-        console.warn(`[director] shot ${fs.shot.id} failed:`, (e as Error).message);
+        error = (e as Error).message;
+        console.warn(`[director] shot ${fs.shot.id} failed:`, error);
       }
 
-      shotAssets.push({ fs, asset, costCents: shotCost });
-      totalCostCents += shotCost;
-    }
+      return { fs, asset, costCents: shotCost, error };
+    };
+
+    // Bounded parallelism — generate shots 4 at a time. With 40 shots
+    // × 20s each sequential that's 13 minutes; at 4-way concurrency
+    // it's ~3 minutes. We also emit progress after every completion so
+    // the UI can show "Shot 17/40".
+    const concurrency = longformEnabled ? 4 : 2;
+    const shotResultsOrdered: Array<Awaited<ReturnType<typeof generateShotAsset>>> =
+      new Array(flat.length);
+    let completed = 0;
+    let nextIdx = 0;
+    const workers: Promise<void>[] = [];
+    const worker = async () => {
+      while (true) {
+        const idx = nextIdx++;
+        if (idx >= flat.length) return;
+        const result = await generateShotAsset(flat[idx]!);
+        shotResultsOrdered[idx] = result;
+        completed++;
+        totalCostCents += result.costCents;
+        broadcast({
+          type: 'personal:progress',
+          payload: {
+            accountId: account.id,
+            postId,
+            phase: 'sourcing_media',
+            progress: { done: completed, total: flat.length },
+          },
+        });
+      }
+    };
+    for (let w = 0; w < concurrency; w++) workers.push(worker());
+    await Promise.all(workers);
+    shotAssets.push(...shotResultsOrdered);
 
     // Drop shots with no asset.
     const resolved = shotAssets.filter((s) => s.asset !== null) as Array<{
@@ -402,10 +515,19 @@ export async function generateForAccountDirector(
       asset: { url: string; kind: 'image' | 'video' };
       costCents: number;
     }>;
-    if (resolved.length < 3) {
+    const failedSamples = shotAssets
+      .filter((s) => s.asset === null && (s as any).error)
+      .slice(0, 3)
+      .map((s) => (s as any).error as string);
+    const minShotsRequired = longformEnabled ? 8 : 3;
+    if (resolved.length < minShotsRequired) {
+      const label = longformEnabled ? 'long-form video' : 'short';
+      const hint = failedSamples.length
+        ? ` First failures: ${failedSamples.join(' | ')}`
+        : '';
       await markFailed(
         postId,
-        `Only ${resolved.length} shots resolved — need at least 3 for a watchable short.`,
+        `Only ${resolved.length}/${flat.length} shots resolved — need at least ${minShotsRequired} for a watchable ${label}.${hint}`,
       );
       return {
         postId,
@@ -472,10 +594,16 @@ export async function generateForAccountDirector(
     } else {
       const useMusic = genConfig.useMusic ?? theme.useMusic;
       if (useMusic) {
+        // For long-form we cap the "min length" request at 60s because the
+        // stitcher loops music anyway — asking for 480s tracks will
+        // frequently miss the available pool and return nothing.
+        const minMusicSeconds = longformEnabled
+          ? Math.min(60, Math.ceil(estimatedDuration))
+          : Math.ceil(estimatedDuration);
         const music = await pickMusic({
           mood: theme.musicMood,
           seed: postId,
-          minDurationSeconds: Math.ceil(estimatedDuration),
+          minDurationSeconds: minMusicSeconds,
         }).catch(() => null);
         if (music) {
           musicUrl = music.url;
@@ -520,6 +648,26 @@ export async function generateForAccountDirector(
       focalY: r.fs.shot.focalY,
     }));
 
+    // Pick the stitcher's target duration. Priority:
+    //   1. Real voiceover duration (ffmpeg-probed) if we have one.
+    //   2. Long-form user target.
+    //   3. Sum of shot durations (falls through to no scaling).
+    // The goal is to never cut narration mid-sentence: whichever of
+    // (narration, visuals, target) is longest wins.
+    const shotSum = stitchInputs.reduce((a, s) => a + s.durationSeconds, 0);
+    let stitchTarget: number | undefined;
+    if (longformEnabled) {
+      stitchTarget = Math.max(
+        longformTargetSeconds ?? 0,
+        estimatedDuration,
+        shotSum,
+      );
+    } else if (useVoiceover && estimatedDuration > shotSum + 1) {
+      // For short-form, only extend visuals when narration is obviously
+      // longer than the planned visuals so we don't chop off words.
+      stitchTarget = estimatedDuration;
+    }
+
     const stitched = await stitchShots({
       accountId: account.id,
       postId,
@@ -528,10 +676,11 @@ export async function generateForAccountDirector(
         voiceoverUrl: voiceoverUrl ?? undefined,
         musicUrl: musicUrl ?? undefined,
       },
-      aspectRatio: genConfig.aspectRatio ?? '9:16',
+      aspectRatio: aspectRatio,
       colourGrade: mapGrade(storyboard.editPlan.colourGrade),
       useGrain: storyboard.editPlan.useGrain,
       letterbox: storyboard.editPlan.letterbox,
+      targetDurationSeconds: stitchTarget,
     });
     totalCostCents += 3;
 
@@ -611,12 +760,79 @@ export async function generateForAccountDirector(
 /* Helpers                                                              */
 /* ═══════════════════════════════════════════════════════════════════ */
 
-function maxAiShotsFor(cfg: PersonalGeneratorConfig): number {
+function maxAiShotsFor(
+  cfg: PersonalGeneratorConfig,
+  longform = false,
+): number {
   const tier = cfg.qualityTier ?? 'balanced';
   if (cfg.useAiVideo === false) return 0;
+  if (longform) {
+    // Long-form can afford more AI-video money shots without the cost
+    // dominating, but still keeps ai_image as the bulk of the video.
+    if (cfg.longformMaxAiVideoShots && cfg.longformMaxAiVideoShots > 0) {
+      return Math.min(20, Math.max(0, cfg.longformMaxAiVideoShots));
+    }
+    if (tier === 'max') return 10;
+    if (tier === 'balanced') return 5;
+    return 2;
+  }
   if (tier === 'max') return 5;
   if (tier === 'balanced') return 3;
   return 1;
+}
+
+/** Clamp long-form duration to 60–480 seconds (1–8 minutes). */
+function clampLongformSeconds(s: number | undefined): number {
+  const n = typeof s === 'number' && Number.isFinite(s) ? s : 240;
+  return Math.max(60, Math.min(480, Math.round(n)));
+}
+
+/**
+ * Choose an image model tuned for long-form animation.
+ *
+ *   - stick_figure / cartoon / pixel_art → prefer `recraft-v3` or
+ *     `ideogram-v3` (illustration-native, non-photoreal).
+ *   - storybook / watercolour / claymation → prefer `nano-banana`
+ *     (best multi-ref character consistency) then `flux-pro-ultra`
+ *     because painterly AI images can get away with subtle photoreal
+ *     undertones.
+ *   - custom / not-longform → pickDefaultModel() default chain.
+ *
+ * We only recommend models that are `available` in the current deploy
+ * — if the preferred model isn't configured we walk down the list.
+ */
+function pickImageModelForLongform(
+  style:
+    | 'storybook'
+    | 'cartoon'
+    | 'stick_figure'
+    | 'claymation'
+    | 'pixel_art'
+    | 'watercolour'
+    | 'custom'
+    | undefined,
+  tier: 'max' | 'balanced' | 'budget',
+): string | undefined {
+  if (!style || style === 'custom') {
+    return pickDefaultModel('image', tier)?.id;
+  }
+
+  const priority: Record<string, string[]> = {
+    stick_figure: ['recraft-v3', 'ideogram-v3', 'nano-banana', 'flux-dev'],
+    cartoon: ['recraft-v3', 'ideogram-v3', 'nano-banana', 'flux-pro-ultra'],
+    pixel_art: ['recraft-v3', 'ideogram-v3', 'flux-dev'],
+    storybook: ['nano-banana', 'flux-pro-ultra', 'seedream-v4', 'ideogram-v3'],
+    watercolour: ['nano-banana', 'flux-pro-ultra', 'seedream-v4', 'recraft-v3'],
+    claymation: ['flux-pro-ultra', 'nano-banana', 'seedream-v4'],
+  };
+
+  const preferred = priority[style] ?? [];
+  const available = listAiModels();
+  for (const id of preferred) {
+    const m = available.find((x) => x.id === id && x.available && x.kind === 'image');
+    if (m) return m.id;
+  }
+  return pickDefaultModel('image', tier)?.id;
 }
 
 function videoAspectFrom(a: '9:16' | '1:1' | '16:9' | '4:5'): '9:16' | '1:1' | '16:9' {

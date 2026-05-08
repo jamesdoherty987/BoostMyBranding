@@ -49,10 +49,20 @@ export default function CalendarPage() {
   }
 
   const posts = data;
-  // Group posts by date (YYYY-MM-DD)
+  // Group posts by local calendar date (YYYY-MM-DD). Using toISOString
+  // would key off UTC, which shifts posts into the wrong cell for anyone
+  // east or west of UTC (e.g. a 23:30 BST schedule would otherwise land
+  // on the previous UTC day). `localDateKey` uses the browser's local
+  // timezone — matches what the client actually sees on the grid.
+  const localDateKey = (d: Date) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
   const byDay = new Map<string, Post[]>();
   for (const p of posts) {
-    const d = postScheduledAt(p).toISOString().slice(0, 10);
+    const d = localDateKey(postScheduledAt(p));
     const list = byDay.get(d) ?? [];
     list.push(p);
     byDay.set(d, list);
@@ -70,7 +80,7 @@ export default function CalendarPage() {
   for (let i = 0; i < startOffset; i++) cells.push({ date: null, posts: [] });
   for (let d = 1; d <= daysInMonth; d++) {
     const date = new Date(year, month, d);
-    const key = date.toISOString().slice(0, 10);
+    const key = localDateKey(date);
     cells.push({ date, posts: byDay.get(key) ?? [] });
   }
   const monthName = now.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });

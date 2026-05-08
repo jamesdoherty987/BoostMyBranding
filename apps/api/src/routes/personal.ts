@@ -132,6 +132,7 @@ const customThemeSchema = z.object({
       'slideshow',
       'satisfying-loop',
       'scripture-card',
+      'animated-explainer',
     ])
     .optional(),
   mediaSources: z
@@ -146,7 +147,9 @@ const customThemeSchema = z.object({
   voiceGuide: z.string().max(2000).optional(),
   visualStyle: z.string().max(2000).optional(),
   musicMood: z.string().max(200).optional(),
-  targetDurationSeconds: z.number().int().min(8).max(120).optional(),
+  // Up to 480s (8 min) so users can create custom long-form animated
+  // explainer themes alongside the built-in ones.
+  targetDurationSeconds: z.number().int().min(8).max(480).optional(),
   defaultHashtags: z.array(z.string().max(60)).max(20).optional(),
   requiresGroundedImages: z.boolean().optional(),
   defaultFormat: z.enum(['video', 'slideshow', 'static_image']).optional(),

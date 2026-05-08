@@ -80,6 +80,13 @@ export interface StitchArgs {
   useGrain?: boolean;
   /** Apply subtle letterbox bars. */
   letterbox?: boolean;
+  /**
+   * If provided, every shot's per-shot duration is uniformly scaled so
+   * the total video matches this target (±100ms). Keeps the voiceover
+   * and the visuals in lockstep — without this, long-form narrations
+   * run past the end of the last shot and get truncated.
+   */
+  targetDurationSeconds?: number;
 }
 
 export interface StitchResult {
@@ -113,9 +120,18 @@ export async function stitchShots(args: StitchArgs): Promise<StitchResult> {
   const cleanups: string[] = [];
 
   try {
+    // Uniformly scale shot durations to match the target if provided.
+    // This keeps voiceover + visuals in lockstep. Without this, a
+    // 4-minute narration over 3-minute visuals gets its last minute
+    // cut by the stitcher's -shortest / amix:duration=first behaviour.
+    const workingShots = scaleShotsToTarget(
+      args.shots,
+      args.targetDurationSeconds,
+    );
+
     // 1. Download every shot asset to local disk for FFmpeg.
     const localShots = await Promise.all(
-      args.shots.map(async (s, i) => {
+      workingShots.map(async (s, i) => {
         const local = await download(s.url, path.join(workDir, `shot-${i}.${s.kind === 'video' ? 'mp4' : 'jpg'}`));
         cleanups.push(local);
         return { ...s, localPath: local };
@@ -158,7 +174,7 @@ export async function stitchShots(args: StitchArgs): Promise<StitchResult> {
     await concatSegments({
       ffmpegBin,
       segmentPaths,
-      transitions: args.shots.slice(0, -1).map((s) => s.transitionOut),
+      transitions: workingShots.slice(0, -1).map((s) => s.transitionOut),
       output: concatPath,
       fps,
       width,
@@ -199,11 +215,11 @@ export async function stitchShots(args: StitchArgs): Promise<StitchResult> {
       'video/mp4',
     );
 
-    const totalDuration = args.shots.reduce((a, s) => a + s.durationSeconds, 0);
+    const totalDuration = workingShots.reduce((a, s) => a + s.durationSeconds, 0);
     return {
       videoUrl: upload.url,
       durationSeconds: totalDuration,
-      shotCount: args.shots.length,
+      shotCount: workingShots.length,
       renderer: 'ffmpeg',
     };
   } finally {
@@ -251,6 +267,53 @@ function dimsFor(ar: '9:16' | '1:1' | '16:9' | '4:5'): { width: number; height: 
     default:
       return { width: 1080, height: 1920 };
   }
+}
+
+/**
+ * Scale every shot's duration so the full video hits `target` seconds.
+ * Only runs when target is set and differs from the current sum by more
+ * than 2%. Per-shot floor of 1s so no shot becomes a single frame.
+ * Per-shot ceiling of 18s so one shot doesn't become a 45-second stare.
+ *
+ * Rounds every shot to the nearest 0.1s and fixes the rounding drift
+ * by adjusting the longest shot so the sum is exactly `target`.
+ */
+function scaleShotsToTarget<T extends { durationSeconds: number }>(
+  shots: T[],
+  target: number | undefined,
+): T[] {
+  if (!target || shots.length === 0) return shots;
+  const current = shots.reduce((a, s) => a + s.durationSeconds, 0);
+  if (current <= 0) return shots;
+  if (Math.abs(current - target) / target < 0.02) return shots;
+
+  const ratio = target / current;
+  const scaled = shots.map((s) => ({
+    ...s,
+    durationSeconds: Math.max(
+      1,
+      Math.min(18, Math.round(s.durationSeconds * ratio * 10) / 10),
+    ),
+  }));
+  // Correct rounding drift by nudging the longest shot.
+  const scaledSum = scaled.reduce((a, s) => a + s.durationSeconds, 0);
+  const delta = target - scaledSum;
+  if (Math.abs(delta) > 0.05) {
+    let longestIdx = 0;
+    for (let i = 1; i < scaled.length; i++) {
+      if (scaled[i]!.durationSeconds > scaled[longestIdx]!.durationSeconds) {
+        longestIdx = i;
+      }
+    }
+    scaled[longestIdx] = {
+      ...scaled[longestIdx]!,
+      durationSeconds: Math.max(
+        1,
+        Math.round((scaled[longestIdx]!.durationSeconds + delta) * 10) / 10,
+      ),
+    };
+  }
+  return scaled;
 }
 
 /* ─── Download ───────────────────────────────────────────────── */
@@ -510,14 +573,31 @@ interface MixArgs {
 }
 
 async function mixAudio(a: MixArgs): Promise<void> {
+  // Input layout: [0]=video, then VO (if any), then music (if any).
+  //
+  // Two behaviours we need:
+  //
+  // 1. Music must LOOP to cover the whole video. A 3-minute pixabay track
+  //    over a 6-minute video goes silent halfway through without this.
+  //    FFmpeg's -stream_loop -1 on the music input handles this cheaply.
+  //
+  // 2. Audio must END when the video ends — not when the first of the
+  //    two audio inputs ends. We map video+mixed-audio and pass -shortest
+  //    so amix continues until video's audio-less stream ends.
+  //
+  // We also explicitly duck the music whenever VO is present. amix on
+  // its own just sums the two signals and clips — it's not what we
+  // want. We take the ducked music + raw VO through amix.
   const args: string[] = ['-i', a.videoInput];
-  const inputs: string[] = [];
+  const inputs: Array<'vo' | 'music'> = [];
   if (a.voiceoverPath) {
     args.push('-i', a.voiceoverPath);
     inputs.push('vo');
   }
   if (a.musicPath) {
-    args.push('-i', a.musicPath);
+    // -stream_loop -1 tells ffmpeg to seamlessly loop the file so short
+    // tracks cover long videos. Must appear BEFORE -i.
+    args.push('-stream_loop', '-1', '-i', a.musicPath);
     inputs.push('music');
   }
 
@@ -526,26 +606,33 @@ async function mixAudio(a: MixArgs): Promise<void> {
     return;
   }
 
-  // Build filter_complex. Video stays on [0:v]; audio is mixed.
-  const filterParts: string[] = [];
   const voIdx = inputs.indexOf('vo');
   const muIdx = inputs.indexOf('music');
-  const voInput = voIdx !== -1 ? `[${voIdx + 1}:a]` : undefined;
-  const muInput = muIdx !== -1 ? `[${muIdx + 1}:a]` : undefined;
+  // Inputs are 1-indexed in filter labels because [0] is the video.
+  const voLabel = voIdx !== -1 ? `[${voIdx + 1}:a]` : undefined;
+  const muLabel = muIdx !== -1 ? `[${muIdx + 1}:a]` : undefined;
 
-  if (voInput && muInput) {
-    // Duck music while VO plays.
-    filterParts.push(`${muInput}volume=${a.musicDuckLowVolume}[mu]`);
-    filterParts.push(`${voInput}${'[mu]'}amix=inputs=2:duration=first:dropout_transition=0[a]`);
-  } else if (voInput) {
-    filterParts.push(`${voInput}volume=1[a]`);
-  } else if (muInput) {
-    filterParts.push(`${muInput}volume=0.55[a]`);
+  const filterParts: string[] = [];
+  if (voLabel && muLabel) {
+    // Duck music under VO.
+    filterParts.push(`${muLabel}volume=${a.musicDuckLowVolume}[mu]`);
+    filterParts.push(
+      `${voLabel}[mu]amix=inputs=2:duration=longest:dropout_transition=0[a]`,
+    );
+  } else if (voLabel) {
+    filterParts.push(`${voLabel}volume=1[a]`);
+  } else if (muLabel) {
+    filterParts.push(`${muLabel}volume=0.55[a]`);
   }
 
   args.push('-filter_complex', filterParts.join(';'));
   args.push('-map', '0:v:0', '-map', '[a]');
-  args.push('-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-shortest');
+  args.push('-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k');
+  // -shortest against the video (mapped from [0]) stops us extending
+  // the file past the last frame of video. Combined with the
+  // -stream_loop on music + duration=longest on amix, the audio track
+  // runs the full video length and then ends cleanly.
+  args.push('-shortest');
   args.push('-movflags', '+faststart');
   args.push('-y', a.output);
 

@@ -79,10 +79,16 @@ export default function DashboardPage() {
     .slice(0, 3);
   const noContentYet = posts.length === 0;
   const isLocked = subscription ? !subscription.active : false;
+  // Agencies can set a per-client greeting. When empty/null we fall back
+  // to the friendly default.
+  const firstName = (client.contactName ?? 'there').split(' ')[0];
+  const defaultTitle = `Hi, ${firstName} 👋`;
+  const customGreeting = client.portalConfig?.welcomeMessage?.trim();
+  const heroTitle = customGreeting || defaultTitle;
 
   return (
     <Shell
-      title={`Hi, ${(client.contactName ?? 'there').split(' ')[0]} 👋`}
+      title={heroTitle}
       subtitle={client.businessName}
       action={
         <div className="h-10 w-10 overflow-hidden rounded-full bg-slate-100">

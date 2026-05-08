@@ -214,6 +214,30 @@ export const clients = pgTable(
     customDomainStatus: customDomainStatusEnum('custom_domain_status'),
     customDomainVerifiedAt: timestamp('custom_domain_verified_at'),
     customDomainError: text('custom_domain_error'),
+    /**
+     * Per-client portal customization. Null means "use portal defaults".
+     * When set, lets the agency hide/rename/reorder nav tabs, add extra
+     * links, and override the dashboard welcome message — all on a
+     * per-company basis so a restaurant's portal can surface a "Menu"
+     * link and a plumber's can surface "Book a call".
+     *
+     * Shape documented in packages/core/src/types.ts as `PortalConfig`.
+     */
+    portalConfig: jsonb('portal_config').$type<{
+      tabs?: Array<{
+        key: string;
+        label?: string;
+        hidden?: boolean;
+        order?: number;
+      }>;
+      customLinks?: Array<{
+        id: string;
+        label: string;
+        href: string;
+        icon?: string;
+      }>;
+      welcomeMessage?: string | null;
+    }>(),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
   },
@@ -1169,6 +1193,47 @@ export interface PersonalGeneratorConfig {
    * must follow the formula.
    */
   hookFormulaId?: string;
+
+  /* ── Long-form animated explainer (1–8 min) ───────────────── */
+  /**
+   * When true the director plans a CHAPTER-structured storyboard
+   * (5-8 chapters × 3-5 shots each) suitable for 60–480s videos. The
+   * pipeline drops the usual short-form caps so we can render minutes
+   * of content instead of seconds.
+   */
+  longformEnabled?: boolean;
+  /**
+   * Target runtime in seconds when longform is on. Clamped to 60–480
+   * (1–8 minutes). Ignored when `longformEnabled` is false.
+   */
+  longformTargetSeconds?: number;
+  /**
+   * Visual style preset. Layered into every AI shot prompt so the
+   * look stays consistent across all 30–60+ shots in the video.
+   *
+   *   storybook       — painterly, hand-drawn folk-tale look
+   *   cartoon         — Kurzgesagt-style flat vector cartoon
+   *   stick_figure    — minimalist whiteboard / napkin sketches
+   *   claymation      — stop-motion clay / felt textures
+   *   pixel_art       — retro 16-bit pixel scenes
+   *   watercolour     — soft painted illustration
+   *   custom          — no preset; fall back to the theme's visual
+   *                     style plus any inspiration refs
+   */
+  longformAnimationStyle?:
+    | 'storybook'
+    | 'cartoon'
+    | 'stick_figure'
+    | 'claymation'
+    | 'pixel_art'
+    | 'watercolour'
+    | 'custom';
+  /**
+   * Max AI-video shots in longform mode. Defaults scale with quality
+   * tier (budget: 2, balanced: 5, max: 10). The rest of the shots
+   * fall back to AI-image + Ken Burns, which is ~10× cheaper.
+   */
+  longformMaxAiVideoShots?: number;
 }
 
 /** Shape of a character sheet distilled from reference images. */

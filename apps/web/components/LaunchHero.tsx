@@ -141,8 +141,9 @@ export function LaunchHero() {
           </h1>
 
           <p className="mx-auto mt-3 max-w-2xl text-balance text-[14px] leading-relaxed text-slate-600 sm:mt-5 sm:text-lg md:mt-6 md:text-xl">
-            A boutique team running your Instagram and TikTok. We plan, write, shoot,
-            and publish every post so your brand keeps showing up looking sharp.
+            A small, dedicated team plans, writes, shoots, and publishes every post for
+            your Instagram and TikTok. You stop worrying about content and get back to
+            running your business.
           </p>
 
           <div className="mt-4 flex w-full max-w-sm flex-col items-stretch gap-2.5 sm:w-auto sm:max-w-none sm:flex-row sm:items-center md:mt-8 md:gap-3">
@@ -162,13 +163,13 @@ export function LaunchHero() {
 
           <ul className="mt-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[11px] text-slate-500 sm:mt-6 sm:gap-x-5 sm:text-sm">
             <li className="inline-flex items-center gap-1">
-              <CheckCircle2 className="h-3.5 w-3.5 text-[#48D886] sm:h-4 sm:w-4" /> Live in a week
+              <CheckCircle2 className="h-3.5 w-3.5 text-[#48D886] sm:h-4 sm:w-4" /> First posts live in 7 days
             </li>
             <li className="inline-flex items-center gap-1">
-              <CheckCircle2 className="h-3.5 w-3.5 text-[#48D886] sm:h-4 sm:w-4" /> Flat monthly fee
+              <CheckCircle2 className="h-3.5 w-3.5 text-[#48D886] sm:h-4 sm:w-4" /> Flat monthly fee, no hours
             </li>
             <li className="inline-flex items-center gap-1">
-              <CheckCircle2 className="h-3.5 w-3.5 text-[#48D886] sm:h-4 sm:w-4" /> Cancel any time
+              <CheckCircle2 className="h-3.5 w-3.5 text-[#48D886] sm:h-4 sm:w-4" /> Monthly rolling after 3 months
             </li>
           </ul>
         </motion.div>

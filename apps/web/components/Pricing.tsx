@@ -37,7 +37,7 @@ export function Pricing() {
               {t.highlight ? <BorderBeam duration={6} /> : null}
               {t.highlight ? (
                 <div className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-gradient-cta px-3 py-1 text-xs font-semibold text-white">
-                  Most popular
+                  Best value
                 </div>
               ) : null}
 

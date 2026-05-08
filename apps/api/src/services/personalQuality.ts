@@ -21,41 +21,83 @@ import type { PersonalTheme } from './personalThemes.js';
 /**
  * Phrases that scream "AI wrote this". Case-insensitive substring match.
  * This list is intentionally opinionated — every phrase here has been
- * flagged in enough AI-generated content to be a tell.
+ * flagged in enough AI-generated content to be a tell. Updated for 2026
+ * based on analysis of the most common "looks AI-generated" openers
+ * and transitions circulating on TikTok / Reels / Shorts.
  */
 export const BANNED_PHRASES: string[] = [
+  // Classic GPT-isms
   "let's dive in",
+  "let's get into it",
   'in the realm of',
   'in the world of',
   "it's no secret that",
-  'did you know that', // too generic — the theme-specific version "did you know?" is fine
+  'did you know that', // the theme-specific version "did you know?" alone is fine
+  'ever wondered',
+  'ever wonder',
+  "here's the thing",
+  "here's the deal",
+  'the truth is',
+  'believe it or not',
+  'what if i told you',
+  '— but what if i told you',
+  'little did they know',
+  'spoiler alert',
+  'the elephant in the room',
+  'in a world where',
+  // Over-used narrator clichés
   'tapestry of',
   'delve into',
+  'delve deep',
+  'embark on',
+  'embark on a journey',
   'navigate the',
+  'navigate through',
+  'the harsh reality',
+  'the cold hard truth',
+  'the bitter truth',
+  // Hype / hollow superlatives
   'unleash',
   'unlock the',
+  'unlock the power',
+  'unlock the secret',
   'game-changer',
   'game changer',
-  'in this article',
-  'in this video',
-  'as an ai',
-  'as a language model',
-  "i'm sorry, but",
-  "certainly! here",
-  'moreover,',
-  'furthermore,',
-  'in conclusion',
-  'at the end of the day',
+  'next-level',
   'cutting-edge',
   'revolutionary',
   'paradigm shift',
-  'next-level',
+  'disrupting the',
+  'mind-blowing',
+  'mind blowing',
+  'jaw-dropping',
+  'life-changing',
   'literally changed my life',
-  'you won\'t believe',
+  'this will blow your mind',
+  "you won't believe",
+  "you'll never believe",
   'this one simple trick',
   'doctors hate',
-  'this will blow your mind',
-  '— but what if i told you',
+  // AI self-identification leaks
+  'as an ai',
+  'as a language model',
+  "i'm sorry, but",
+  'certainly! here',
+  'i hope this helps',
+  // LLM transition words that sound like Wikipedia
+  'moreover,',
+  'furthermore,',
+  'additionally,',
+  'in conclusion',
+  'to conclude',
+  'at the end of the day',
+  'when all is said and done',
+  // Lazy YouTube-essay openers
+  'buckle up',
+  'strap in',
+  'grab a seat',
+  'get this',
+  'check this out',
 ];
 
 /* ═══════════════════════════════════════════════════════════════════ */
@@ -146,14 +188,15 @@ export function checkScriptRules(
 
   // 7. Voiceover length vs theme duration.
   const totalWords = script.beats.reduce(
-    (acc, b) => acc + b.voiceover.split(/\s+/).length,
+    (acc, b) => acc + b.voiceover.split(/\s+/).filter(Boolean).length,
     0,
   );
-  const estSeconds = totalWords / 2.58;
+  // Match the real TTS pace (~165 wpm / 2.75 wps) used in personalVoice.ts.
+  const estSeconds = totalWords / 2.75;
   const target = theme.targetDurationSeconds;
   if (estSeconds > target * 1.4) {
     issues.push(
-      `Script is too long (~${Math.round(estSeconds)}s vs target ${target}s). Trim beats.`,
+      `Script is too long (~${Math.round(estSeconds)}s of narration vs target ${target}s). Trim beats.`,
     );
   }
 
@@ -178,7 +221,13 @@ function normalize(s: string): string {
     .trim();
 }
 
-/** Approximate count of "concrete" tokens — numbers, capitalised names, units. */
+/**
+ * Approximate count of "concrete" tokens in the script — numbers, units,
+ * currency, years, and multi-syllable proper nouns (names, places). This
+ * is a heuristic: we ignore single-capital words at the start of a
+ * sentence ("The") and common filler capitalisations, counting only
+ * tokens that look like real specificity.
+ */
 function countConcreteTokens(text: string): number {
   let n = 0;
   // Numbers (integers and decimals).
@@ -187,8 +236,16 @@ function countConcreteTokens(text: string): number {
   n += (text.match(/\b(?:19|20)\d{2}\b/g) ?? []).length;
   // Currency amounts.
   n += (text.match(/[$€£¥]\s*\d[\d,\.]*/g) ?? []).length;
-  // Capitalised proper nouns (rough).
-  n += (text.match(/\b[A-Z][a-z]{2,}\b/g) ?? []).length;
+  // Percentages.
+  n += (text.match(/\b\d+(?:\.\d+)?\s*%/g) ?? []).length;
+  // Units (kg, km, cm, ml, hours, mins, days, years, minutes, seconds).
+  n += (text.match(/\b\d+(?:\.\d+)?\s*(?:kg|g|km|cm|mm|ml|l|oz|lb|hrs?|hours?|mins?|minutes?|secs?|seconds?|days?|weeks?|months?|years?|%|x|×)\b/gi) ?? []).length;
+  // Proper nouns: ≥4-letter Capitalised words NOT at sentence start.
+  // We strip sentence-leading capitals by keeping only caps that follow
+  // a non-punctuation character, plus words that contain at least one
+  // internal vowel (filtering out single-letter ALL-CAPS artefacts).
+  const properNouns = text.match(/(?<=[^.!?\n]\s)[A-Z][a-z]{3,}\b/g) ?? [];
+  n += properNouns.length;
   return n;
 }
 

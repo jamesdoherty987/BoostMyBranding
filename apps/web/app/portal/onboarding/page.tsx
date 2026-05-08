@@ -59,15 +59,22 @@ export default function OnboardingPage() {
         clientId = mockClients[0]!.id;
       }
 
-      // Save the voice details. This is a best-effort save — if it fails,
-      // we continue so the user still completes onboarding.
-      try {
-        await api.updateMyClient({
-          // brandVoice is a free-text field where we stash tone + goals.
-          industry: undefined,
-        });
-      } catch {
-        /* non-fatal */
+      // Persist the voice details. Compact one-line summary the account
+      // manager can scan at a glance in the dashboard — the full
+      // conversation can evolve in chat. Best-effort save: if it fails
+      // we still continue so the user isn't stranded on onboarding.
+      const voiceSummary = [
+        `Brand vibe: ${vibe}`,
+        goals.trim() ? `Focus this month: ${goals.trim()}` : null,
+      ]
+        .filter(Boolean)
+        .join('\n');
+      if (voiceSummary) {
+        try {
+          await api.updateMyClient({ brandVoice: voiceSummary });
+        } catch {
+          /* non-fatal */
+        }
       }
 
       if (files.length > 0 && clientId) {

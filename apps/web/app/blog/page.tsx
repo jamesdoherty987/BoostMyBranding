@@ -27,7 +27,7 @@ const CARD_ACCENTS = [
 export const metadata: Metadata = {
   title: 'Blog',
   description:
-    'Practical social media and marketing advice for local businesses. Tips on content, photography, strategy, and growing your brand online.',
+    'Honest, practical advice for local business owners running their own social media. Writing better captions, shooting better photos, and picking the posts that actually bring bookings in.',
   alternates: { canonical: '/blog' },
 };
 

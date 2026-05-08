@@ -8,35 +8,39 @@ import { ChevronDown } from 'lucide-react';
 const faqs = [
   {
     q: 'How long until my first posts go live?',
-    a: "Around a week. We spend the first few days learning your business, your site, your tone, how you talk to customers, then we build your brand brief and start publishing.",
+    a: "About a week. The first few days we spend learning your business — your site, your tone, the way you talk to customers — and building your brand brief. Posts start going up in week two.",
   },
   {
     q: 'Why only 10 posts a month?',
-    a: "Because 10 posts people actually stop for beats 30 posts they scroll past. We put the effort into each one: the hook, the photo, the caption. That's what moves bookings, not volume.",
+    a: "Because 10 posts people stop for beats 30 posts they scroll past. Every post gets a proper hook, a clean photo, and a caption written for you. That's what moves bookings, not a volume contest.",
   },
   {
     q: "What if I don't have good photos?",
-    a: "We can work with whatever you've got, even quick phone shots. If you're short on content, we shoot fresh photos on our visits or create on-brand imagery in-house to fill the gaps.",
+    a: "Most clients don't when they start. We can work with what you have — even quick phone shots — and we shoot fresh photos on our visits or create on-brand imagery in-house to fill the gaps.",
   },
   {
     q: 'Do I have to approve every post?',
-    a: "No. We handle the writing, scheduling, and publishing. You can check in any time through your portal, but you never have to approve or review anything. That's the whole point.",
+    a: "Not unless you want to. We write, schedule, and publish. You can check the calendar in the portal any time, drop a note, or leave it to us entirely. Most clients leave it to us after month one.",
   },
   {
     q: 'Which platforms do you cover?',
-    a: "Instagram and TikTok for now. They're where our clients see the most pull, and focusing on two lets us do both properly: Reels, Stories, and grid posts, each tailored to the platform.",
+    a: "Instagram and TikTok for now. They're where our clients see the strongest pull, and doing two platforms properly beats doing five half-heartedly. Reels, Stories, and grid posts, each written for the platform.",
   },
   {
     q: 'Can you add LinkedIn, Facebook, or others later?',
-    a: "Yes. If your business grows into a platform that makes sense, we'll add it. We'd rather recommend it than upsell it.",
+    a: "Yes, if it makes sense for your business. We'd rather recommend staying on two platforms when three wouldn't help, than upsell you onto a channel you don't need.",
   },
   {
     q: 'Who writes the posts?',
-    a: "Our in-house writers and editors. Every client gets a dedicated account manager who knows your business. The team reviews everything internally before it goes live.",
+    a: "Our in-house writers and editors. Every client gets a dedicated account manager who knows your business and owns your output. A second editor reviews everything before it goes live.",
   },
   {
     q: 'Can I cancel?',
-    a: "Yes, monthly after the first 3 months. We ask for a short runway so we can properly build your brand voice and deliver results, not just activity.",
+    a: "Yes, monthly after the first three months. The first three are a commitment so we can properly build your brand voice and measure what's actually working. After that it rolls month-to-month with no notice period.",
+  },
+  {
+    q: "What if I don't see results?",
+    a: "We agree measurable goals in the first week — saves, shares, profile visits, bookings, whichever matters to you — and the Friday report tracks them against your baseline. If month three doesn't show movement, we'll tell you before you ask, and fix the plan.",
   },
 ];
 

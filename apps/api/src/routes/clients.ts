@@ -7,7 +7,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { eq, desc } from 'drizzle-orm';
 import { getDb, isDbConfigured, clients, clientImages } from '@boost/database';
-import { mockClients, getClient, slugify, type WebsiteConfig } from '@boost/core';
+import { mockClients, getClient, slugify, validatePortalConfig, type WebsiteConfig, type PortalConfig } from '@boost/core';
 import { requireAuth, requireRole } from '../services/auth.js';
 import { publicLimiter } from '../middleware/rateLimit.js';
 import { sendEmail, clientInviteEmail } from '../services/resend.js';
@@ -65,6 +65,13 @@ const updateMeSchema = z.object({
       accent: hexColor,
     })
     .optional(),
+  /**
+   * Free-text brand voice notes. The portal's onboarding flow writes the
+   * client's goals + chosen vibe here so the agency has an account-manager-
+   * ready summary on day one. Capped at 4000 chars to match the agency-
+   * side edit schema.
+   */
+  brandVoice: z.string().max(4000).optional(),
 });
 
 clientsRouter.patch('/me', requireAuth, async (req, res, next) => {
@@ -85,6 +92,7 @@ clientsRouter.patch('/me', requireAuth, async (req, res, next) => {
         ...(patch.websiteUrl !== undefined ? { websiteUrl: patch.websiteUrl || null } : {}),
         ...(patch.socialAccounts !== undefined ? { socialAccounts: patch.socialAccounts } : {}),
         ...(patch.brandColors !== undefined ? { brandColors: patch.brandColors } : {}),
+        ...(patch.brandVoice !== undefined ? { brandVoice: patch.brandVoice } : {}),
         updatedAt: new Date(),
       })
       .where(eq(clients.id, user.clientId))
@@ -414,7 +422,48 @@ const updateClientSchema = z.object({
   brandVoice: z.string().max(4000).optional(),
   logoUrl: z.string().url().max(500).optional().or(z.literal('')),
   subscriptionTier: z.enum(['social_only', 'website_only', 'full_package']).optional(),
+  monthlyPriceCents: z.number().int().nonnegative().max(1_000_000).nullable().optional(),
   isActive: z.boolean().optional(),
+  brandColors: z
+    .object({
+      primary: z.string().regex(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/),
+      secondary: z.string().regex(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/),
+      accent: z.string().regex(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/),
+    })
+    .optional(),
+  socialAccounts: z.record(z.string(), z.string().max(200)).optional(),
+  /**
+   * Per-client portal customization. Null clears the override. Undefined
+   * leaves the existing value alone. See `PortalConfig` for the shape.
+   */
+  portalConfig: z
+    .object({
+      tabs: z
+        .array(
+          z.object({
+            key: z.string().min(1).max(40),
+            label: z.string().max(40).optional(),
+            hidden: z.boolean().optional(),
+            order: z.number().int().min(0).max(100).optional(),
+          }),
+        )
+        .max(20)
+        .optional(),
+      customLinks: z
+        .array(
+          z.object({
+            id: z.string().min(1).max(40),
+            label: z.string().min(1).max(40),
+            href: z.string().min(1).max(500),
+            icon: z.string().max(40).optional(),
+          }),
+        )
+        .max(10)
+        .optional(),
+      welcomeMessage: z.string().max(200).nullable().optional(),
+    })
+    .nullable()
+    .optional(),
 });
 
 /** Agency-side update of any client field. */
@@ -426,6 +475,20 @@ clientsRouter.patch(
     try {
       const id = String(req.params.id);
       const patch = updateClientSchema.parse(req.body);
+      // Cross-field validation for portalConfig (duplicate ids, URL shape).
+      // Zod handles the per-field shape; the shared validator catches the
+      // structural errors so the client gets one source of truth.
+      if (patch.portalConfig) {
+        const issues = validatePortalConfig(patch.portalConfig as PortalConfig);
+        if (issues.length > 0) {
+          return res.status(400).json({
+            error: {
+              message: `Invalid portal config: ${issues.join('; ')}`,
+              code: 'INVALID_PORTAL_CONFIG',
+            },
+          });
+        }
+      }
       if (!isDbConfigured()) {
         return res.json({ data: { id, ...patch } });
       }

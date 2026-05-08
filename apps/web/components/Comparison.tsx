@@ -42,19 +42,19 @@ const ROWS = [
 
 const QUOTES = [
   {
-    text: "Our Instagram went from three posts a month to three posts a week, and every one of them actually sounds like us.",
+    text: "We went from posting maybe twice a month to three times a week, and our Instagram saves tripled. Everything sounds like us, not a template.",
     name: 'Sean Murphy',
-    role: "Murphy's Plumbing",
+    role: "Murphy's Plumbing · Galway",
   },
   {
-    text: "Finally, social media I don't have to think about. Our account manager just gets it.",
+    text: "The Friday report is my favourite. I can see exactly which Reels landed and why — and I don't have to write a single caption.",
     name: 'Nora Kelly',
-    role: 'Atlas Fitness',
+    role: 'Atlas Fitness · Cork',
   },
   {
-    text: "Website and social for one price, way cheaper than hiring a marketer. Bookings doubled in two months.",
+    text: "Website and social for one flat fee. We stopped juggling freelancers and our booking form traffic nearly doubled in the first two months.",
     name: 'Luca Romano',
-    role: 'Verde Cafe',
+    role: 'Verde Cafe · Dublin',
   },
 ];
 

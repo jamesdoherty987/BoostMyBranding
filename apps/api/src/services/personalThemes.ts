@@ -42,7 +42,10 @@ export type PersonalTemplateId =
   | 'story-narration'    // long-form story with image ken burns
   | 'slideshow'          // pure image carousel with beat transitions
   | 'satisfying-loop'    // hypnotic loop with minimal text
-  | 'scripture-card';    // verse-centric with cinematic wide shot
+  | 'scripture-card'     // verse-centric with cinematic wide shot
+  | 'animated-explainer'; // long-form (1–8 min) animated narration with
+                          // cartoon / stick-figure / storyboard style
+                          // AI imagery and chapter-based storyboard
 
 export interface PersonalTheme {
   id: string;
@@ -174,11 +177,11 @@ export const THEMES: PersonalTheme[] = [
     useVoiceover: true,
     useMusic: true,
     hookFormulas: [
-      'Did you know {subject} can actually {surprising}?',
+      '{subject} can actually {surprising} — here is why.',
       'This is why {familiar} works the way it does.',
       '{number} things you never noticed about {everyday}.',
-      'The reason {thing} exists will blow your mind.',
-      'Scientists just found out that {discovery}.',
+      'The reason {thing} exists is not what you think.',
+      '{Year}: the year we learned that {discovery}.',
     ],
     topicSeeds: [
       'Why the ocean is salty',
@@ -345,10 +348,11 @@ export const THEMES: PersonalTheme[] = [
     useVoiceover: true,
     useMusic: true,
     hookFormulas: [
-      'A thought for today.',
+      'The one line from {philosopher} I think about every day.',
       'Read this when you feel {emotion}.',
-      '{philosopher} on {virtue}.',
-      'The {adjective} truth nobody tells you about {subject}.',
+      '{philosopher} on {virtue}, in two sentences.',
+      "The hard part about {virtue} nobody warns you about.",
+      "A quieter way to think about {subject}.",
     ],
     topicSeeds: [
       'Marcus Aurelius on mornings',
@@ -386,10 +390,10 @@ export const THEMES: PersonalTheme[] = [
     useVoiceover: true,
     useMusic: true,
     hookFormulas: [
-      'The {adjective} story of {figure}.',
-      'Why {event} changed everything.',
-      'You will not believe what happened in {year}.',
-      'The {adjective} truth about {myth}.',
+      'The story of {figure} — you will not have heard this part.',
+      'Why {event} changed everything, in one minute.',
+      '{year}: the day {figure} {did thing}.',
+      'The letter / diary / photograph that rewrote what we knew about {event}.',
     ],
     topicSeeds: [
       'Pompeii last day',
@@ -430,9 +434,9 @@ export const THEMES: PersonalTheme[] = [
     useMusic: true,
     hookFormulas: [
       'How does {phenomenon} actually work?',
-      'Scientists just figured out why {thing}.',
-      'The physics behind {everyday}.',
-      'What happens when {scenario}?',
+      "We just figured out why {thing}. Here is the paper.",
+      'The physics behind {everyday}, explained without equations.',
+      'What happens inside a {thing} in {time}?',
     ],
     topicSeeds: [
       'why the sky is blue',
@@ -515,7 +519,8 @@ export const THEMES: PersonalTheme[] = [
       'POV: you finally learn {topic}.',
       'So basically {subject} is…',
       'They never taught you this in school.',
-      'Bro did you know {fact}?',
+      '{fact} — no cap.',
+      'This is genuinely unserious.',
     ],
     topicSeeds: [
       'how compound interest works',
@@ -525,7 +530,7 @@ export const THEMES: PersonalTheme[] = [
       'what causes jet lag',
     ],
     voiceGuide:
-      'Zoomer-friendly. Fast, punchy, lots of "actually", occasional "unreal", "mad", "real talk". Never try too hard.',
+      'Late-2025 / 2026 Gen Z & Gen Alpha idiom — fast, dry, casually confident. Allowed, used sparingly: "no cap", "it\'s giving", "low-key", "actually", "genuinely", "not the…", "unserious", "the way…". Avoid: "mad", "real talk", "slaps", "lit", "it\'s lit", "big yikes" — all dated. Never "let\'s dive in", never narrator voice.',
     visualStyle:
       'Vertical split: top 60% is your content, bottom 40% is gameplay (Subway Surfers / Minecraft parkour). Caption burned in.',
     musicMood: '',
@@ -1686,6 +1691,201 @@ export const THEMES: PersonalTheme[] = [
     musicMood: '',
     targetDurationSeconds: 60,
     defaultHashtags: ['#storytime', '#reddit', '#fyp'],
+  },
+
+  /* ═══════════════════════════════════════════════════════════════════
+   * LONG-FORM ANIMATED EXPLAINERS (1–8 min)
+   *
+   * These themes are tuned for longer-form, narrated videos with
+   * AI-generated animated imagery (cartoon, stick-figure, storybook).
+   * They render through the director pipeline with chapter-structured
+   * storyboards (5-8 chapters × 3-5 shots each).
+   *
+   * The user can attach an inspiration character image (e.g. a
+   * hunter-gatherer sketch, a scientist-style drawing) in the media
+   * library under `inspiration` or `avatar_reference` — the director
+   * automatically passes those to every AI shot so the look stays
+   * consistent across all 30–60+ shots.
+   * ═══════════════════════════════════════════════════════════════════ */
+
+  /* ═══ Hunter-gatherer documentary animation ══════════════════════ */
+  {
+    id: 'ancient-origins',
+    name: 'Ancient Origins',
+    tagline: 'Long-form animated documentaries about humanity’s earliest days.',
+    description:
+      'Cartoon / storybook-style animated shorts (1–8 min) about hunter-gatherers, neolithic villages, cave art, early farming. Narrated like a BBC documentary over richly illustrated scenes. Upload inspiration drawings of your characters and the animation style will follow.',
+    viralityScore: 7,
+    cpmTier: 'high',
+    emoji: '🔥',
+    accentColor: '#B45309',
+    preferredPlatforms: ['youtube', 'tiktok', 'instagram'],
+    template: 'animated-explainer',
+    mediaSources: ['ai'],
+    useVoiceover: true,
+    useMusic: true,
+    hookFormulas: [
+      'Imagine it is {year} years ago, and you are {action}.',
+      'This is how our ancestors {activity} — long before {modernThing}.',
+      'Long before cities, long before writing — there was this.',
+      'A single {object} can tell us {insight} about {era}.',
+    ],
+    topicSeeds: [
+      'a day in the life of a Palaeolithic hunter-gatherer',
+      'how early humans first controlled fire',
+      'the cave paintings at Lascaux, 17,000 years ago',
+      'Ötzi the Iceman — a 5,000-year-old murder mystery',
+      'Çatalhöyük, the first proto-city in Neolithic Turkey',
+      'Blombos Cave, 75,000 years ago — the oldest known abstract drawing',
+      'flint knapping: how stone-age toolmakers shaped obsidian blades',
+      'how hunter-gatherer bands shared food and survived lean seasons',
+      'the Dolní Věstonice burial, 26,000 years ago',
+      'the Bronze Age collapse of 1177 BCE',
+    ],
+    voiceGuide:
+      'Calm, curious, documentary narrator — Attenborough without the flourishes. Measured pacing. Specific numbers, place names, and plausible sensory detail. Never anachronistic slang, never "mind-blowing".',
+    visualStyle:
+      'Warm, hand-drawn storybook animation. Earthy palette — ochre, burnt sienna, forest green, charcoal. Characters drawn consistently across shots — short, sturdy builds, furs and animal hide, weathered faces. Wide natural landscapes (savannah, steppe, forest). Firelight for dusk scenes, blue-grey for dawn. Treat every frame like an illustrated children’s history book page, not a photoreal render.',
+    musicMood: 'cinematic tribal percussion low orchestral strings',
+    targetDurationSeconds: 240,
+    defaultHashtags: [
+      '#history', '#ancienthistory', '#prehistory', '#archaeology',
+      '#documentary', '#huntergatherer', '#neolithic', '#learnontiktok',
+    ],
+  },
+
+  /* ═══ Science cartoon explainer ═════════════════════════════════ */
+  {
+    id: 'science-cartoon',
+    name: 'Science Cartoon',
+    tagline: 'Cartoon-style science explainers, 1–5 min. Cells, planets, forces.',
+    description:
+      'Friendly animated cartoons that teach one science concept per video — how a cell divides, why the sky is blue, how vaccines actually work, what happens inside a black hole. Think "Kurzgesagt meets a patient tutor". Upload character drawings (a scientist, a mascot, a little bird) and the same character will host every video.',
+    viralityScore: 8,
+    cpmTier: 'high',
+    emoji: '🧪',
+    accentColor: '#0EA5E9',
+    preferredPlatforms: ['youtube', 'tiktok', 'instagram'],
+    template: 'animated-explainer',
+    mediaSources: ['ai'],
+    useVoiceover: true,
+    useMusic: true,
+    hookFormulas: [
+      'How does {phenomenon} actually work? Let’s zoom in.',
+      'In the next {minutes} minutes you’ll understand {concept} better than most people ever do.',
+      'What if I told you {counterIntuitive}?',
+      'Inside every {thing}, something incredible is happening right now.',
+    ],
+    topicSeeds: [
+      'how your immune system fights off a virus',
+      'what happens inside a star when it dies',
+      'why time slows down near a black hole',
+      'how DNA copies itself during cell division',
+      'what atoms are actually made of',
+      'why sunsets turn red — Rayleigh scattering in one minute',
+      'how ants coordinate without a leader',
+      'what the Higgs boson really is, explained without maths',
+      'why antibiotics stop working — resistance in 3 minutes',
+      'how mRNA vaccines actually work',
+    ],
+    voiceGuide:
+      'Friendly science communicator — warm, precise, occasionally playful. Use analogies that hold up. Never dumb down. Acknowledge uncertainty. No hype words.',
+    visualStyle:
+      'Flat-shaded 2D cartoon with bold outlines, soft gradients, bright but not neon palette (teal, coral, cream, deep navy). Consistent mascot / character across every shot. Simple backgrounds so the concept stays legible — labelled diagrams, abstracted cells / planets / particles. Think Kurzgesagt illustration style: clean vectors, clear shapes, tiny visual jokes in corners.',
+    musicMood: 'curious playful electronic orchestral build',
+    targetDurationSeconds: 240,
+    defaultHashtags: [
+      '#science', '#stem', '#physics', '#biology', '#education',
+      '#learnontiktok', '#scienceforkids', '#cartoon',
+    ],
+  },
+
+  /* ═══ Stick-figure whiteboard explainer ═════════════════════════ */
+  {
+    id: 'stick-figure-explainer',
+    name: 'Stick Figure Explainer',
+    tagline: 'Whiteboard / stick-figure animations for any topic, 1–6 min.',
+    description:
+      'Minimalist stick-figure animations on a clean notebook background. Works for any topic — finance, psychology, philosophy, startups, "how things work". Cheap to render and ridiculously effective — looks hand-drawn and personal. Upload sketches of your stick figure and it will keep the same style.',
+    viralityScore: 8,
+    cpmTier: 'medium',
+    emoji: '✏️',
+    accentColor: '#1F2937',
+    preferredPlatforms: ['youtube', 'tiktok', 'instagram', 'linkedin'],
+    template: 'animated-explainer',
+    mediaSources: ['ai'],
+    useVoiceover: true,
+    useMusic: true,
+    hookFormulas: [
+      'Let me draw you something that changed how I think about {topic}.',
+      'Here is {concept} — explained in stick figures.',
+      'If I only had a whiteboard and {minutes} minutes to teach you {idea}, here is what I would draw.',
+      'Everyone overcomplicates {topic}. Here it is in {number} drawings.',
+    ],
+    topicSeeds: [
+      'how compound interest really works',
+      'the prisoner’s dilemma in under 3 minutes',
+      'how to actually think in systems',
+      'why your brain procrastinates',
+      'the idea of opportunity cost',
+      'supply and demand without the jargon',
+      'Bayes theorem for normal people',
+      'what negotiation actually is',
+    ],
+    voiceGuide:
+      'Warm, patient teacher. Conversational. Thinks out loud. Says "let me draw this" and "watch what happens". Never condescending.',
+    visualStyle:
+      'Hand-drawn stick figures on warm off-white paper or whiteboard. Black ink lines, occasional single accent colour (yellow highlighter or red marker). Arrows, labels, speech bubbles. Imperfect — wobble is welcome. Think RSA Animate meets Sal Khan’s napkin sketches.',
+    musicMood: 'calm acoustic piano lofi',
+    targetDurationSeconds: 180,
+    defaultHashtags: [
+      '#education', '#learnontiktok', '#explainer', '#whiteboard',
+      '#stickfigure', '#financialliteracy', '#psychology',
+    ],
+  },
+
+  /* ═══ Storybook folk-tale / myth animation ═════════════════════ */
+  {
+    id: 'storybook-myth',
+    name: 'Storybook Myth',
+    tagline: 'Illustrated folk tales, myths, and fables, 2–8 min.',
+    description:
+      'Long-form animated folk tales, mythology retellings, and fables — Greek myths, Norse sagas, African folk stories, Japanese yokai tales. Fully narrated in a storybook-animation style. Upload inspiration illustrations of your hero and the director will keep the same character look across chapters.',
+    viralityScore: 7,
+    cpmTier: 'medium',
+    emoji: '📖',
+    accentColor: '#7C3AED',
+    preferredPlatforms: ['youtube', 'tiktok', 'instagram', 'facebook'],
+    template: 'animated-explainer',
+    mediaSources: ['ai'],
+    useVoiceover: true,
+    useMusic: true,
+    hookFormulas: [
+      'Long ago, in the {place}, {character} faced a choice no one had faced before.',
+      'They say {subject} was once {transformation} — and this is how.',
+      'Every {culture} child grows up hearing this story. Here is why it still matters.',
+      'Before there was {modernThing}, there was a story about {subject}.',
+    ],
+    topicSeeds: [
+      'the Norse myth of Ragnarok',
+      'the tale of Anansi the spider',
+      'how Prometheus stole fire',
+      'the legend of Momotaro the peach boy',
+      'the story of the Monkey King',
+      'Baba Yaga and the lost child',
+      'the Epic of Gilgamesh in one sitting',
+      'the Ramayana for beginners',
+    ],
+    voiceGuide:
+      'Warm storyteller by a fire. Measured, unhurried. Long sentences welcome. Repeats names for rhythm. Lets silence breathe between chapters.',
+    visualStyle:
+      'Painterly storybook illustration — think Studio Ghibli meets classic Grimm fairy-tale books. Rich textured backgrounds, hand-painted look, soft lighting. Characters drawn consistently across shots with clear silhouettes. Chapter title cards in ornate serif type.',
+    musicMood: 'cinematic celtic orchestral folk ambient',
+    targetDurationSeconds: 300,
+    defaultHashtags: [
+      '#mythology', '#folktales', '#storytime', '#animation',
+      '#history', '#bedtimestory', '#fairytale',
+    ],
   },
 ];
 

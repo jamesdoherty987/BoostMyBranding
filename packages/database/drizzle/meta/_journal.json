@@ -92,6 +92,13 @@
       "when": 1777640094387,
       "tag": "0012_personal_custom_themes",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1777640094388,
+      "tag": "0013_portal_config",
+      "breakpoints": true
     }
   ]
 }

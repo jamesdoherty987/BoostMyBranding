@@ -292,20 +292,41 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
 
   // Ken Burns on stills: we add a zoompan filter with a duration-based
   // step so the whole clip scales 1.00 → 1.12 over the shot duration.
+  // Focal is clamped to a safe interior (0.15–0.85) so the pan doesn't
+  // walk off the source and introduce black bars.
   if (a.kind === 'image') {
     const totalFrames = Math.round(a.durationSeconds * a.fps);
     const zoomStep = 0.0008;
-    const panXCenter = Math.round(a.focalX * (a.width * 0.12));
-    const panYCenter = Math.round(a.focalY * (a.height * 0.12));
+    const safeFocalX = Math.max(0.15, Math.min(0.85, a.focalX));
+    const safeFocalY = Math.max(0.15, Math.min(0.85, a.focalY));
+    // zoompan's x/y equations below move linearly toward the focal point
+    // as zoom increases. iw/ih are the SOURCE width/height (post-scale).
+    const xExpr = `'iw*${safeFocalX}-(iw/zoom/2)'`;
+    const yExpr = `'ih*${safeFocalY}-(ih/zoom/2)'`;
     filters.push(
-      `scale=${a.width * 2}:${a.height * 2},zoompan=z='min(zoom+${zoomStep},1.12)':x='iw/2-iw/(2*zoom)+${panXCenter}':y='ih/2-ih/(2*zoom)+${panYCenter}':d=${totalFrames}:s=${a.width}x${a.height}:fps=${a.fps}`,
+      `scale=${a.width * 2}:${a.height * 2}:flags=lanczos,` +
+        `zoompan=z='min(zoom+${zoomStep},1.12)':x=${xExpr}:y=${yExpr}:` +
+        `d=${totalFrames}:s=${a.width}x${a.height}:fps=${a.fps}`,
     );
   } else {
-    // Scale/crop videos into the target dimensions while preserving fps.
+    // Scale + crop videos into the target dimensions while preserving fps.
+    // force_original_aspect_ratio=increase makes sure at least one
+    // dimension overflows; `crop=w:h` defaults to centre-crop, so the
+    // framing matches what a photographer would call "fill crop".
+    //
+    // Why the tpad + trim dance: AI video models frequently return
+    // clips SHORTER than asked (kling returns 5s when asked for 10s,
+    // some hailuo runs come back 4s when asked 6s). Without this the
+    // stitched output ends in a black frame when it reaches the end
+    // of the source. We freeze-frame-extend by 30s (far longer than
+    // we'd ever need) and then hard-trim to the desired length.
     filters.push(
-      `scale=${a.width}:${a.height}:force_original_aspect_ratio=increase`,
+      `scale=${a.width}:${a.height}:force_original_aspect_ratio=increase:flags=lanczos`,
       `crop=${a.width}:${a.height}`,
       `fps=${a.fps}`,
+      `tpad=stop_mode=clone:stop_duration=30`,
+      `trim=end=${a.durationSeconds}`,
+      `setpts=PTS-STARTPTS`,
     );
   }
 
@@ -376,6 +397,11 @@ async function concatSegments(a: ConcatArgs): Promise<void> {
     a.segmentPaths.map((p) => probeDurationSeconds(a.ffmpegBin, p)),
   );
 
+  // Shrink the xfade overlap if any segment is too short for a 0.3s
+  // transition. An 0.3s fade on a 1s clip would eat 30% of the shot.
+  const minDur = Math.min(...durations);
+  const xfadeDur = Math.max(0.15, Math.min(0.5, minDur * 0.4));
+
   const inputArgs: string[] = [];
   for (const p of a.segmentPaths) inputArgs.push('-i', p);
 
@@ -383,7 +409,6 @@ async function concatSegments(a: ConcatArgs): Promise<void> {
   // labels intermediates v0, v1, …. Each xfade offset is the running sum
   // of prior segment durations minus the transition overlap.
   const steps: string[] = [];
-  const xfadeDur = 0.3;
   let runningOffset = 0;
   for (let i = 0; i < n - 1; i++) {
     const transition = a.transitions[i] ?? 'cross_dissolve';

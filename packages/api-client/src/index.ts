@@ -37,6 +37,8 @@ export class ApiError extends Error {
     message: string,
     public readonly status: number,
     public readonly code?: string,
+    /** Present when API returns `error.details` (e.g. Zod issues on validation). */
+    public readonly details?: unknown,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -55,13 +57,17 @@ export class BoostApi {
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
     let res: Response;
     try {
+      const { headers: initHeaders, ...restInit } = init;
+      const headers = new Headers(initHeaders as HeadersInit | undefined);
+      if (!headers.has('Content-Type')) {
+        headers.set('Content-Type', 'application/json');
+      }
       res = await fetch(this.config.baseUrl + path, {
+        ...restInit,
         credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(init.headers ?? {}),
-        },
-        ...init,
+        /** Avoid stale dashboard data from HTTP caches / conditional 304 responses. */
+        cache: 'no-store',
+        headers,
       });
     } catch (e) {
       // Network-level failure (DNS, offline, CORS preflight blocked, etc).
@@ -70,7 +76,8 @@ export class BoostApi {
     const payload = (await res.json().catch(() => ({}))) as ApiResponse<T>;
     if (!res.ok || payload.error) {
       const msg = payload.error?.message ?? `Request failed (${res.status})`;
-      throw new ApiError(msg, res.status, payload.error?.code);
+      const errObj = payload.error as { code?: string; details?: unknown } | undefined;
+      throw new ApiError(msg, res.status, errObj?.code, errObj?.details);
     }
     return payload.data as T;
   }
@@ -1243,7 +1250,13 @@ export class BoostApi {
       Array<{ url: string; mimeType: string; fileName: string; sizeBytes: number }>
     >;
     if (!res.ok || payload.error) {
-      throw new ApiError(payload.error?.message ?? `Upload failed (${res.status})`, res.status, payload.error?.code);
+      const errObj = payload.error as { code?: string; details?: unknown } | undefined;
+      throw new ApiError(
+        payload.error?.message ?? `Upload failed (${res.status})`,
+        res.status,
+        errObj?.code,
+        errObj?.details,
+      );
     }
     return payload.data ?? [];
   }
@@ -1483,10 +1496,12 @@ export class BoostApi {
       .then(async (res) => {
         const payload = (await res.json().catch(() => ({}))) as ApiResponse<any>;
         if (!res.ok || payload.error) {
+          const errObj = payload.error as { code?: string; details?: unknown } | undefined;
           throw new ApiError(
             payload.error?.message ?? `Upload failed (${res.status})`,
             res.status,
-            payload.error?.code,
+            errObj?.code,
+            errObj?.details,
           );
         }
         return payload.data;
@@ -1827,6 +1842,8 @@ export class BoostApi {
       db: boolean;
       claude: boolean;
       contentStudio: boolean;
+      /** Server has CONTENTSTUDIO_WORKSPACE_ID (boolean only; id is never sent). */
+      contentStudioDefaultWorkspace: boolean;
       fal: boolean;
       scrapers: {
         pexels: boolean;
@@ -1867,9 +1884,22 @@ export class BoostApi {
     });
   }
 
+  cancelPersonalPost(accountId: string, postId: string) {
+    return this.request<{ ok: true }>(
+      `/api/v1/personal/accounts/${accountId}/posts/${postId}/cancel`,
+      { method: 'POST' },
+    );
+  }
+
   generatePersonalPost(
     id: string,
-    args: { topic?: string; autoSchedule?: boolean; scheduledAt?: string; dryRun?: boolean } = {},
+    args: {
+      topic?: string;
+      autoSchedule?: boolean;
+      scheduleToContentStudio?: boolean;
+      scheduledAt?: string;
+      dryRun?: boolean;
+    } = {},
   ) {
     return this.request<{
       kicked: boolean;
@@ -1885,8 +1915,31 @@ export class BoostApi {
     });
   }
 
-  listPersonalPosts(id: string) {
-    return this.request<PersonalPost[]>(`/api/v1/personal/accounts/${id}/posts`);
+  /** Connected social accounts in ContentStudio for the given workspace (defaults from env). */
+  listPersonalContentStudioAccounts(workspaceId?: string) {
+    const q =
+      workspaceId && workspaceId.trim()
+        ? `?workspaceId=${encodeURIComponent(workspaceId.trim())}`
+        : '';
+    return this.request<{
+      configured: boolean;
+      accounts: Array<{ platform: string; handle: string; id: string }>;
+    }>(`/api/v1/personal/contentstudio/accounts${q}`);
+  }
+
+  listPersonalPosts(id: string, opts?: { limit?: number }) {
+    const q =
+      opts?.limit != null && Number.isFinite(opts.limit)
+        ? `?limit=${Math.min(500, Math.max(1, Math.round(opts.limit)))}`
+        : '';
+    return this.request<PersonalPost[]>(`/api/v1/personal/accounts/${id}/posts${q}`);
+  }
+
+  deleteFailedPersonalPosts(accountId: string) {
+    return this.request<{ deleted: number }>(
+      `/api/v1/personal/accounts/${accountId}/posts/failed`,
+      { method: 'DELETE' },
+    );
   }
 
   /* ─── Personal account media library ─────────────────────── */
@@ -1915,7 +1968,7 @@ export class BoostApi {
       pinned?: boolean;
     },
     onProgress?: (pct: number) => void,
-  ): Promise<PersonalAccountMediaItem[]> {
+  ): Promise<PersonalMediaUploadResult> {
     const form = new FormData();
     form.append('role', meta.role);
     if (meta.description) form.append('description', meta.description);
@@ -1924,7 +1977,7 @@ export class BoostApi {
     if (meta.pinned) form.append('pinned', 'true');
     files.forEach((f) => form.append('files', f));
 
-    return new Promise<PersonalAccountMediaItem[]>((resolve, reject) => {
+    return new Promise<PersonalMediaUploadResult>((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open('POST', `${this.config.baseUrl}/api/v1/personal/accounts/${accountId}/media`);
       xhr.withCredentials = true;
@@ -1935,11 +1988,21 @@ export class BoostApi {
       xhr.onload = () => {
         try {
           const payload = JSON.parse(xhr.responseText || '{}') as ApiResponse<
-            PersonalAccountMediaItem[]
+            PersonalMediaUploadResult | PersonalAccountMediaItem[]
           >;
           if (xhr.status >= 200 && xhr.status < 300 && !payload.error) {
             onProgress?.(100);
-            resolve(payload.data ?? []);
+            const raw = payload.data;
+            if (raw && !Array.isArray(raw) && 'uploaded' in raw) {
+              resolve({
+                uploaded: raw.uploaded ?? [],
+                skipped: raw.skipped ?? [],
+              });
+            } else if (Array.isArray(raw)) {
+              resolve({ uploaded: raw, skipped: [] });
+            } else {
+              resolve({ uploaded: [], skipped: [] });
+            }
           } else {
             reject(
               new ApiError(
@@ -2192,6 +2255,7 @@ export interface PersonalAccount {
   platform: PersonalPlatform;
   handle: string | null;
   contentStudioWorkspaceId: string | null;
+  contentStudioAccountId: string | null;
   themeId: string;
   themeName: string;
   themeEmoji: string;
@@ -2207,6 +2271,7 @@ export interface PersonalAccount {
   postSpacingMinutes: number;
   autoApprove: boolean;
   autoSchedule: boolean;
+  autoGenerateOnSchedule: boolean;
   accentColor: string | null;
   logoUrl: string | null;
   watermarkHandle: string | null;
@@ -2229,7 +2294,8 @@ export interface CreatePersonalAccountBody {
   platform: PersonalPlatform;
   themeId: string;
   handle?: string;
-  contentStudioWorkspaceId?: string;
+  contentStudioWorkspaceId?: string | null;
+  contentStudioAccountId?: string | null;
   customDirection?: string;
   topicSeeds?: string[];
   topicBlacklist?: string[];
@@ -2242,6 +2308,7 @@ export interface CreatePersonalAccountBody {
   postSpacingMinutes?: number;
   autoApprove?: boolean;
   autoSchedule?: boolean;
+  autoGenerateOnSchedule?: boolean;
   accentColor?: string;
   logoUrl?: string;
   watermarkHandle?: string;
@@ -2264,7 +2331,11 @@ export interface PersonalPost {
   topic: string;
   title: string;
   hook: string;
+  /** Output frame aspect; older API rows may omit (UI defaults to 9:16). */
+  aspectRatio?: '9:16' | '1:1' | '16:9' | '4:5';
   videoUrl: string | null;
+  /** Custom poster / YouTube thumbnail (JPEG URL). */
+  thumbnailUrl?: string | null;
   voiceoverUrl: string | null;
   musicUrl: string | null;
   caption: string | null;
@@ -2285,6 +2356,12 @@ export interface PersonalPost {
   }>;
   costCents: number;
   createdAt: string;
+  /** 0–100 during server-side encode; null when not encoding. */
+  renderProgress?: number | null;
+  /** Short status line while encoding (e.g. elapsed time on current shot). */
+  renderProgressLabel?: string | null;
+  /** Recent encode activity from the API (timestamps + messages). */
+  renderActivityLog?: Array<{ at: string; m: string }>;
 }
 
 /* ─── Account media library ──────────────────────────────── */
@@ -2316,6 +2393,18 @@ export interface PersonalAccountMediaItem {
   characterId: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** One file in a batch upload that was not stored (conversion, size, R2, etc.). */
+export interface PersonalMediaUploadSkipped {
+  fileName: string;
+  message: string;
+  code?: string;
+}
+
+export interface PersonalMediaUploadResult {
+  uploaded: PersonalAccountMediaItem[];
+  skipped: PersonalMediaUploadSkipped[];
 }
 
 /* ─── AI influencer characters ───────────────────────────── */
@@ -2365,6 +2454,10 @@ export interface PersonalAccountStyleBible {
   typography?: string;
   motifs?: string[];
   copySamples?: string[];
+  exampleVideoTitles?: string[];
+  exampleScriptSnippets?: string[];
+  /** Full scripts to learn structure / pacing from — never copy verbatim. */
+  referenceFullScripts?: string[];
   bannedPhrases?: string[];
 }
 
@@ -2373,6 +2466,8 @@ export interface PersonalGeneratorConfig {
   videoModelId?: string;
   ttsProvider?: 'elevenlabs' | 'openai' | 'cartesia' | 'none';
   ttsVoiceId?: string;
+  voiceAccent?: 'american' | 'british';
+  voiceGender?: 'female' | 'male';
   useVoiceover?: boolean;
   useMusic?: boolean;
   useSubtitles?: boolean;
@@ -2384,10 +2479,23 @@ export interface PersonalGeneratorConfig {
   aspectRatio?: '9:16' | '1:1' | '16:9' | '4:5';
   clipMinSeconds?: number;
   clipMaxSeconds?: number;
+  averageClipSeconds?: number;
+  mediaPreference?: 'mixed' | 'stills_only' | 'motion_preferred' | 'video_only';
+  cutPace?: 'relaxed' | 'normal' | 'rapid';
+  keywordPopStyle?: 'off' | 'subtle' | 'bold';
+  allowSparseImageText?: boolean;
+  ttsSpeed?: number;
+  musicDuckUnderVoice?: number;
+  musicSoloVolume?: number;
+  musicBedVolume?: number;
+  trueStoriesOnly?: boolean;
+  extraContentRules?: string;
   minQualityScore?: number;
   allowWebResearch?: boolean;
   scriptModel?: 'sonnet' | 'opus';
   useDirector?: boolean;
+  viralFormatId?: string;
+  hookFormulaId?: string;
   colourGrade?:
     | 'natural'
     | 'warm'
@@ -2411,6 +2519,13 @@ export interface PersonalGeneratorConfig {
     | 'watercolour'
     | 'custom';
   longformMaxAiVideoShots?: number;
+  /** FFmpeg encode tier when server env preset/crf unset (director stitch). */
+  stitchEncodePreset?: 'fast' | 'balanced' | 'high';
+  /**
+   * When false, still images in the final stitch are static (no Ken Burns zoom).
+   * Default true.
+   */
+  kenBurnsOnStills?: boolean;
 }
 
 /* ─── Custom themes (user-editable library) ──────────────── */

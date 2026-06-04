@@ -341,36 +341,38 @@ export default function ReviewQueuePage() {
       />
 
       <div className="px-4 py-4 md:px-10 md:py-6">
-        <div className="mb-5 flex flex-wrap items-center gap-2">
-          <button onClick={() => setFilter('all')} className={filterChipClass(filter === 'all')}>
-            All clients ({queue.length})
-          </button>
-          {(clientList ?? []).map((c) => {
-            const count = queue.filter((p) => p.clientId === c.id).length;
-            if (count === 0) return null;
-            return (
-              <button
-                key={c.id}
-                onClick={() => setFilter(c.id)}
-                className={filterChipClass(filter === c.id)}
-              >
-                {c.businessName} ({count})
-              </button>
-            );
-          })}
-          <div className="ml-auto flex gap-2 text-xs">
+        <div className="mb-5 flex flex-col gap-3">
+          <div className="flex min-w-0 flex-wrap gap-2">
+            <button onClick={() => setFilter('all')} className={filterChipClass(filter === 'all')}>
+              All clients ({queue.length})
+            </button>
+            {(clientList ?? []).map((c) => {
+              const count = queue.filter((p) => p.clientId === c.id).length;
+              if (count === 0) return null;
+              return (
+                <button
+                  key={c.id}
+                  onClick={() => setFilter(c.id)}
+                  className={filterChipClass(filter === c.id)}
+                >
+                  {c.businessName} ({count})
+                </button>
+              );
+            })}
+          </div>
+          <div className="flex min-w-0 flex-wrap gap-2">
             <Badge tone="success">{approved} approved</Badge>
             <Badge tone="warning">{edited} edited</Badge>
             <Badge tone="danger">{rejected} rejected</Badge>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_380px]">
+        <div className="grid min-w-0 grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
           <div className="relative mx-auto aspect-[3/4] w-full max-w-md lg:aspect-auto lg:h-[640px]">
             {locker ? (
-              <div className="absolute left-1/2 top-2 z-30 -translate-x-1/2 rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-800 ring-1 ring-amber-200 backdrop-blur">
-                <Lock className="mr-1 inline h-3 w-3" />
-                {locker.name} is reviewing this
+              <div className="absolute left-1/2 top-2 z-30 max-w-[min(calc(100%-1rem),22rem)] -translate-x-1/2 rounded-full bg-amber-50 px-3 py-1 text-center text-xs font-medium leading-snug text-amber-800 ring-1 ring-amber-200 backdrop-blur">
+                <Lock className="mr-1 inline h-3 w-3 shrink-0" />
+                <span className="break-words">{locker.name} is reviewing this</span>
               </div>
             ) : null}
             <AnimatePresence>
@@ -414,7 +416,9 @@ export default function ReviewQueuePage() {
                 <div className="text-xs font-medium uppercase tracking-widest text-slate-400">
                   Client
                 </div>
-                <div className="mt-1 text-base font-semibold text-slate-900">{top.clientName ?? 'Client'}</div>
+                <div className="mt-1 break-words text-base font-semibold text-slate-900">
+                  {top.clientName ?? 'Client'}
+                </div>
                 <div className="text-xs text-slate-500">
                   Scheduled{' '}
                   {postScheduledAt(top).toLocaleDateString(undefined, {
@@ -425,16 +429,17 @@ export default function ReviewQueuePage() {
                 </div>
               </div>
               <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                <div className="flex items-center justify-between">
-                  <div className="text-xs font-medium uppercase tracking-widest text-slate-400">
+                <div className="flex min-w-0 items-center justify-between gap-2">
+                  <div className="min-w-0 text-xs font-medium uppercase tracking-widest text-slate-400">
                     Caption
                   </div>
                   <button
+                    type="button"
                     onClick={() => {
                       setEditing((v) => !v);
                       setEditedCaption(top.caption);
                     }}
-                    className="inline-flex items-center gap-1 text-xs font-medium text-[#1D9CA1] hover:text-[#48D886]"
+                    className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-[#1D9CA1] hover:text-[#48D886]"
                   >
                     <Edit3 className="h-3 w-3" />
                     {editing ? 'Cancel' : 'Edit'}
@@ -453,9 +458,9 @@ export default function ReviewQueuePage() {
                     </Button>
                   </div>
                 ) : (
-                  <p className="mt-2 text-sm text-slate-700">{top.caption}</p>
+                  <p className="mt-2 break-words text-sm text-slate-700">{top.caption}</p>
                 )}
-                <p className="mt-2 text-xs text-[#1D9CA1]">{top.hashtags?.join(' ')}</p>
+                <p className="mt-2 break-words text-xs text-[#1D9CA1]">{top.hashtags?.join(' ')}</p>
               </div>
               <div className="rounded-2xl border border-slate-200 bg-white p-4">
                 <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-widest text-slate-400">
@@ -543,10 +548,10 @@ export default function ReviewQueuePage() {
 
 function filterChipClass(active: boolean) {
   return [
-    'rounded-full px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap',
+    'max-w-full rounded-2xl border px-3 py-1.5 text-left text-xs font-medium break-words transition-colors sm:text-center',
     active
-      ? 'bg-slate-900 text-white'
-      : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200',
+      ? 'border-slate-900 bg-slate-900 text-white'
+      : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100',
   ].join(' ');
 }
 

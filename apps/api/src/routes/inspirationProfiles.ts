@@ -28,6 +28,7 @@ import {
 import { uploadFile } from '../services/r2.js';
 import { requireAuth, requireRole } from '../services/auth.js';
 import { uploadLimiter } from '../middleware/rateLimit.js';
+import { normalizeUploadImageIfAvif } from '../lib/normalizeUploadImage.js';
 
 export const inspirationProfilesRouter = Router({ mergeParams: true });
 
@@ -37,6 +38,7 @@ const ALLOWED_MIME = new Set([
   'image/jpeg',
   'image/png',
   'image/webp',
+  'image/avif',
   'video/mp4',
   'video/quicktime',
 ]);
@@ -46,7 +48,7 @@ const upload = multer({
   limits: { fileSize: MAX_FILE_BYTES, files: MAX_FILES },
   fileFilter: (_req, file, cb) => {
     if (ALLOWED_MIME.has(file.mimetype)) cb(null, true);
-    else cb(new Error('Supported: JPG, PNG, WEBP, MP4, MOV'));
+    else cb(new Error('Supported: JPG, PNG, WEBP, AVIF (→PNG), MP4, MOV'));
   },
 });
 
@@ -218,18 +220,44 @@ inspirationProfilesRouter.post(
             .status(400)
             .json({ error: { message: 'Unsupported file', code: 'BAD_FILE' } });
         }
+        let buffer = file.buffer;
+        let mimeType = file.mimetype;
+        let fileName = file.originalname;
+        const isVideo =
+          mimeType.startsWith('video/') &&
+          (mimeType === 'video/mp4' || mimeType === 'video/quicktime');
+        if (!isVideo) {
+          try {
+            const n = await normalizeUploadImageIfAvif({ buffer, mimeType, fileName });
+            buffer = n.buffer;
+            mimeType = n.mimeType;
+            fileName = n.fileName;
+          } catch {
+            return res.status(400).json({
+              error: {
+                message: 'Could not convert AVIF image to PNG',
+                code: 'AVIF_CONVERT',
+              },
+            });
+          }
+          if (buffer.length > MAX_FILE_BYTES) {
+            return res.status(400).json({
+              error: { message: 'File too large after conversion', code: 'TOO_LARGE' },
+            });
+          }
+        }
         const { url } = await uploadFile(
           `${clientId}/inspiration-profiles/${profileId}`,
-          file.buffer,
-          file.originalname,
-          file.mimetype,
+          buffer,
+          fileName,
+          mimeType,
         );
         const ref = await addMediaToProfile({
           clientId,
           profileId,
           fileUrl: url,
-          fileName: file.originalname,
-          mimeType: file.mimetype,
+          fileName,
+          mimeType,
           source: 'upload',
         });
         if (!ref) {
@@ -237,7 +265,7 @@ inspirationProfilesRouter.post(
             .status(404)
             .json({ error: { message: 'Profile not found', code: 'NOT_FOUND' } });
         }
-        added.push({ id: ref.id, url, mimeType: file.mimetype, fileName: file.originalname });
+        added.push({ id: ref.id, url, mimeType, fileName });
       }
       res.status(201).json({ data: added });
     } catch (e) {

@@ -18,6 +18,8 @@
 import { generateJSON } from './claude.js';
 import { withRetry } from './retry.js';
 import type { PersonalTheme } from './personalThemes.js';
+import type { PersonalAccountStyleBible } from '@boost/database';
+import { buildStyleExamplesPrompt } from './personalContentHints.js';
 
 export interface PersonalScript {
   title: string;
@@ -62,15 +64,8 @@ export interface GenerateScriptArgs {
   targetDurationSeconds?: number;
   /** Optional recent-news context for news-style themes. */
   newsContext?: string;
-  /** Per-account style bible: vibe, dos, donts, banned phrases. */
-  styleBible?: {
-    vibe?: string;
-    dos?: string[];
-    donts?: string[];
-    motifs?: string[];
-    copySamples?: string[];
-    bannedPhrases?: string[];
-  };
+  /** Per-account style bible (vibe, palette, examples, etc.). */
+  styleBible?: PersonalAccountStyleBible;
   /** Character guidance — dropped into the prompt when the account uses an AI persona. */
   characterGuide?: {
     name: string;
@@ -81,6 +76,12 @@ export interface GenerateScriptArgs {
   };
   /** Descriptions + tags of the user's uploaded reference media. */
   referenceMediaDigest?: string;
+  /** Extra blocks (content rules, style examples, pacing, media bias). */
+  promptAppendix?: string;
+  /** Target seconds per beat — centers the duration clamp when set. */
+  averageClipSeconds?: number;
+  /** Claude model for script JSON. */
+  scriptModel?: 'sonnet' | 'opus';
 }
 
 export async function generateScript(
@@ -88,7 +89,11 @@ export async function generateScript(
 ): Promise<PersonalScript> {
   const prompt = buildScriptPrompt(args);
   const script = await withRetry(
-    () => generateJSON<PersonalScript>(prompt, { model: 'sonnet', maxTokens: 2048 }),
+    () =>
+      generateJSON<PersonalScript>(prompt, {
+        model: args.scriptModel ?? 'sonnet',
+        maxTokens: 2048,
+      }),
     { label: `personal_script:${args.theme.id}:${args.topic.slice(0, 40)}`, attempts: 2 },
   );
 
@@ -100,7 +105,7 @@ export async function generateScript(
       onScreen: (b.onScreen ?? '').trim(),
       imageQuery: (b.imageQuery ?? args.topic).trim(),
       eyebrow: b.eyebrow?.trim() || undefined,
-      durationSeconds: clampDuration(b.durationSeconds),
+      durationSeconds: clampDuration(b.durationSeconds, args.averageClipSeconds),
     }))
     .filter((b) => b.voiceover.length > 0 || b.onScreen.length > 0)
     .slice(0, 8);
@@ -112,9 +117,15 @@ export async function generateScript(
   return script;
 }
 
-function clampDuration(n: number | undefined): number {
-  if (!n || Number.isNaN(n)) return 3;
-  return Math.max(1.5, Math.min(8, n));
+function clampDuration(n: number | undefined, averageSeconds?: number): number {
+  const lo = 1.5;
+  const hi = 8;
+  const center =
+    averageSeconds != null && Number.isFinite(averageSeconds)
+      ? Math.min(hi, Math.max(lo, Math.min(7, Math.max(2, averageSeconds))))
+      : 3;
+  if (n == null || Number.isNaN(n)) return center;
+  return Math.max(lo, Math.min(hi, n));
 }
 
 function buildScriptPrompt(args: GenerateScriptArgs): string {
@@ -147,14 +158,26 @@ function buildScriptPrompt(args: GenerateScriptArgs): string {
 
   // ── Style bible (the biggest anti-slop lever we have) ───────
   const sb = args.styleBible;
-  const styleBibleBlock = sb
+  const styleExamples = buildStyleExamplesPrompt(sb);
+  const exampleTitleCount = sb?.exampleVideoTitles?.filter(Boolean).length ?? 0;
+  const scriptTitleContract =
+    exampleTitleCount > 0
+      ? '<title for THIS topic — match PATTERN of STYLE REFERENCES example titles (length, punctuation, specificity); 5-12 words typical when examples exist>'
+      : '<catchy title, 5-9 words>';
+  const coreStyleBible = sb
     ? [
         '',
-        'ACCOUNT STYLE BIBLE (this is the vibe the operator wants — match it):',
+        'ACCOUNT STYLE BIBLE (this is the vibe the operator wants — match it; your title + hook + beats must feel like this voice):',
         sb.vibe ? `- Vibe: ${sb.vibe}` : '',
         sb.dos && sb.dos.length > 0 ? `- Always do: ${sb.dos.join(' · ')}` : '',
         sb.donts && sb.donts.length > 0 ? `- Never do: ${sb.donts.join(' · ')}` : '',
         sb.motifs && sb.motifs.length > 0 ? `- Recurring motifs: ${sb.motifs.join(' · ')}` : '',
+        sb.palette && sb.palette.length > 0
+          ? `- Brand palette (use in imagery and mood): ${sb.palette.join(', ')}`
+          : '',
+        sb.typography?.trim()
+          ? `- Typography / on-screen text: ${sb.typography.trim()}`
+          : '',
         sb.bannedPhrases && sb.bannedPhrases.length > 0
           ? `- BANNED phrases (never write these verbatim): ${sb.bannedPhrases.join(' · ')}`
           : '',
@@ -165,6 +188,7 @@ function buildScriptPrompt(args: GenerateScriptArgs): string {
         .filter(Boolean)
         .join('\n')
     : '';
+  const styleBibleBlock = [coreStyleBible.trim(), styleExamples.trim()].filter(Boolean).join('\n');
 
   // ── Character ─────────────────────────────────────────────
   const charBlock = args.characterGuide
@@ -176,6 +200,8 @@ function buildScriptPrompt(args: GenerateScriptArgs): string {
     ? `\n\nUSER-UPLOADED REFERENCES (pull visual cues from these when choosing imageQuery — match the vibe):\n${args.referenceMediaDigest}`
     : '';
 
+  const appendix = args.promptAppendix?.trim() ? `\n\n${args.promptAppendix.trim()}` : '';
+
   return `You are a short-form video scriptwriter specialised in the "${args.theme.name}" niche, writing for an operator who HATES generic AI-slop content. Your job is to produce a script a skilled human editor would not be embarrassed to ship.
 
 THEME: ${args.theme.name} — ${args.theme.tagline}
@@ -184,7 +210,7 @@ VOICE GUIDE: ${args.theme.voiceGuide}
 VISUAL STYLE HINT: ${args.theme.visualStyle}
 TARGET DURATION: ~${target} seconds
 HOOK FORMULAS (pick and adapt one): ${args.theme.hookFormulas.join(' | ')}
-TOPIC FOR THIS VIDEO: ${args.topic}${direction}${newsContext}${blacklist}${langLine}${formatNote}${styleBibleBlock}${charBlock}${refBlock}
+TOPIC FOR THIS VIDEO: ${args.topic}${direction}${newsContext}${blacklist}${langLine}${formatNote}${styleBibleBlock}${charBlock}${refBlock}${appendix}
 
 ANTI-SLOP RULES (non-negotiable):
 1. No LLM clichés. Never write: "let's dive in", "in the realm of", "it's no secret", "game-changer", "paradigm shift", "at the end of the day", "moreover", "furthermore", "in conclusion", "unleash", "revolutionary", "cutting-edge", "this will blow your mind", "you won't believe", "this one simple trick".
@@ -214,7 +240,7 @@ SAFETY CONSTRAINT: If the topic requires medical, legal, or financial advice, ke
 
 Return ONLY JSON matching:
 {
-  "title": "<catchy title, 5-9 words>",
+  "title": "${scriptTitleContract}",
   "hook": "<spoken opener>",
   "topic": "<normalised topic>",
   "beats": [

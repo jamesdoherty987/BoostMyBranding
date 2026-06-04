@@ -78,6 +78,10 @@ export interface ViralShortExtras {
   accentColor?: string;
   /** Theme-provided color for progress bar / chyron. */
   themeColor?: string;
+  /** Background music linear gain (Remotion). Default 0.15. */
+  musicBedVolume?: number;
+  /** When false, hide burned-in hook / beat / outro text (audio unchanged). Default true. */
+  showBurnedInText?: boolean;
 }
 
 /* ═══════════════════════════════════════════════════════════════════ */
@@ -90,6 +94,8 @@ export const ViralShort: React.FC<VideoProps> = (props) => {
   const variant = extras.variant ?? 'fact-drop';
   const beats = extras.personalBeats ?? [];
   const palette = props.brand;
+  const musicVol = extras.musicBedVolume ?? 0.15;
+  const showBurnedInText = extras.showBurnedInText !== false;
 
   // Figure out cumulative duration. Each beat's duration is in seconds.
   const beatFrames = beats.map((b) =>
@@ -102,7 +108,7 @@ export const ViralShort: React.FC<VideoProps> = (props) => {
     <AbsoluteFill style={{ background: palette.dark }}>
       {/* Audio tracks — Remotion mixes them automatically. */}
       {extras.musicUrl ? (
-        <Audio src={extras.musicUrl} volume={0.15} />
+        <Audio src={extras.musicUrl} volume={musicVol} />
       ) : null}
       {extras.voiceoverUrl ? (
         <Audio src={extras.voiceoverUrl} volume={1.0} />
@@ -119,6 +125,7 @@ export const ViralShort: React.FC<VideoProps> = (props) => {
               backgroundUrl={beats[0]?.imageUrl}
               backgroundLoopUrl={extras.backgroundLoopUrl}
               watermark={extras.watermarkHandle}
+              showBurnedInText={showBurnedInText}
             />
           </Series.Sequence>
         ) : null}
@@ -134,6 +141,7 @@ export const ViralShort: React.FC<VideoProps> = (props) => {
               variant={variant}
               backgroundLoopUrl={extras.backgroundLoopUrl}
               watermark={extras.watermarkHandle}
+              showBurnedInText={showBurnedInText}
             />
           </Series.Sequence>
         ))}
@@ -145,6 +153,7 @@ export const ViralShort: React.FC<VideoProps> = (props) => {
               palette={palette}
               accent={extras.accentColor ?? extras.themeColor ?? palette.accent}
               watermark={extras.watermarkHandle}
+              showBurnedInText={showBurnedInText}
             />
           </Series.Sequence>
         ) : null}
@@ -166,7 +175,18 @@ const BeatScene: React.FC<{
   variant: ViralShortExtras['variant'];
   backgroundLoopUrl?: string;
   watermark?: string;
-}> = ({ beat, index, total, palette, accent, variant, backgroundLoopUrl, watermark }) => {
+  showBurnedInText?: boolean;
+}> = ({
+  beat,
+  index,
+  total,
+  palette,
+  accent,
+  variant,
+  backgroundLoopUrl,
+  watermark,
+  showBurnedInText = true,
+}) => {
   const frame = useCurrentFrame();
   const { fps, durationInFrames } = useVideoConfig();
 
@@ -275,36 +295,38 @@ const BeatScene: React.FC<{
       ) : null}
 
       {/* ───── Top-bar progress ───── */}
-      <div
-        style={{
-          position: 'absolute',
-          top: 56,
-          left: 48,
-          right: 48,
-          display: 'flex',
-          gap: 8,
-        }}
-      >
-        {Array.from({ length: total }).map((_, i) => (
-          <div
-            key={i}
-            style={{
-              flex: 1,
-              height: 4,
-              borderRadius: 3,
-              background:
-                i < index
-                  ? accent
-                  : i === index
-                    ? accent + 'cc'
-                    : 'rgba(255,255,255,0.22)',
-            }}
-          />
-        ))}
-      </div>
+      {showBurnedInText ? (
+        <div
+          style={{
+            position: 'absolute',
+            top: 56,
+            left: 48,
+            right: 48,
+            display: 'flex',
+            gap: 8,
+          }}
+        >
+          {Array.from({ length: total }).map((_, i) => (
+            <div
+              key={i}
+              style={{
+                flex: 1,
+                height: 4,
+                borderRadius: 3,
+                background:
+                  i < index
+                    ? accent
+                    : i === index
+                      ? accent + 'cc'
+                      : 'rgba(255,255,255,0.22)',
+              }}
+            />
+          ))}
+        </div>
+      ) : null}
 
       {/* ───── Eyebrow (small label top-left) ───── */}
-      {beat.eyebrow ? (
+      {showBurnedInText && beat.eyebrow ? (
         <div
           style={{
             position: 'absolute',
@@ -327,38 +349,36 @@ const BeatScene: React.FC<{
       ) : null}
 
       {/* ───── Main on-screen text ───── */}
-      {isNews ? (
-        <NewsChyron
-          text={beat.onScreen}
-          palette={palette}
-          accent={accent}
-          attribution={beat.attribution}
-          opacity={textFade}
-        />
-      ) : isLanguage ? (
-        <LanguageCard
-          text={beat.onScreen}
-          eyebrow={beat.eyebrow}
-          palette={palette}
-          accent={accent}
-          opacity={textFade}
-        />
-      ) : isQuote ? (
-        <QuoteCard
-          text={beat.onScreen}
-          palette={palette}
-          opacity={textFade}
-        />
-      ) : (
-        <BigText
-          text={beat.onScreen}
-          variant={variant}
-          palette={palette}
-          accent={accent}
-          isBrainrot={isBrainrot}
-          opacity={textFade}
-        />
-      )}
+      {showBurnedInText ? (
+        isNews ? (
+          <NewsChyron
+            text={beat.onScreen}
+            palette={palette}
+            accent={accent}
+            attribution={beat.attribution}
+            opacity={textFade}
+          />
+        ) : isLanguage ? (
+          <LanguageCard
+            text={beat.onScreen}
+            eyebrow={beat.eyebrow}
+            palette={palette}
+            accent={accent}
+            opacity={textFade}
+          />
+        ) : isQuote ? (
+          <QuoteCard text={beat.onScreen} palette={palette} opacity={textFade} />
+        ) : (
+          <BigText
+            text={beat.onScreen}
+            variant={variant}
+            palette={palette}
+            accent={accent}
+            isBrainrot={isBrainrot}
+            opacity={textFade}
+          />
+        )
+      ) : null}
 
       {/* ───── Watermark ───── */}
       {watermark ? (
@@ -601,7 +621,17 @@ const HookCard: React.FC<{
   backgroundUrl?: string;
   backgroundLoopUrl?: string;
   watermark?: string;
-}> = ({ text, palette, accent, variant, backgroundUrl, backgroundLoopUrl, watermark }) => {
+  showBurnedInText?: boolean;
+}> = ({
+  text,
+  palette,
+  accent,
+  variant,
+  backgroundUrl,
+  backgroundLoopUrl,
+  watermark,
+  showBurnedInText = true,
+}) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const scale = spring({
@@ -636,30 +666,32 @@ const HookCard: React.FC<{
           background: `linear-gradient(to bottom, ${palette.dark}77 0%, ${palette.dark}dd 100%)`,
         }}
       />
-      <AbsoluteFill
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          padding: 60,
-        }}
-      >
-        <div
+      {showBurnedInText ? (
+        <AbsoluteFill
           style={{
-            transform: `scale(${scale})`,
-            color: '#fff',
-            fontFamily: FONTS.display,
-            fontWeight: 900,
-            fontSize: 128,
-            lineHeight: 1.03,
-            textAlign: 'center',
-            letterSpacing: -2,
-            textShadow: `0 6px 36px ${palette.dark}`,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 60,
           }}
         >
-          {text}
-        </div>
-      </AbsoluteFill>
+          <div
+            style={{
+              transform: `scale(${scale})`,
+              color: '#fff',
+              fontFamily: FONTS.display,
+              fontWeight: 900,
+              fontSize: 128,
+              lineHeight: 1.03,
+              textAlign: 'center',
+              letterSpacing: -2,
+              textShadow: `0 6px 36px ${palette.dark}`,
+            }}
+          >
+            {text}
+          </div>
+        </AbsoluteFill>
+      ) : null}
       {watermark ? (
         <div
           style={{
@@ -684,7 +716,8 @@ const OutroCard: React.FC<{
   palette: BrandPalette;
   accent: string;
   watermark?: string;
-}> = ({ text, palette, accent, watermark }) => {
+  showBurnedInText?: boolean;
+}> = ({ text, palette, accent, watermark, showBurnedInText = true }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const fade = interpolate(frame, [0, 8], [0, 1], { extrapolateRight: 'clamp' });
@@ -700,19 +733,21 @@ const OutroCard: React.FC<{
       }}
     >
       <div style={{ textAlign: 'center' }}>
-        <div
-          style={{
-            fontFamily: FONTS.display,
-            color: '#fff',
-            fontWeight: 800,
-            fontSize: 92,
-            lineHeight: 1.08,
-            letterSpacing: -1,
-            marginBottom: 48,
-          }}
-        >
-          {text}
-        </div>
+        {showBurnedInText ? (
+          <div
+            style={{
+              fontFamily: FONTS.display,
+              color: '#fff',
+              fontWeight: 800,
+              fontSize: 92,
+              lineHeight: 1.08,
+              letterSpacing: -1,
+              marginBottom: 48,
+            }}
+          >
+            {text}
+          </div>
+        ) : null}
         {watermark ? (
           <div
             style={{

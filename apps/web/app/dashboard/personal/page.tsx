@@ -6,7 +6,7 @@
  * Intentionally not linked from the main sidebar (reach it via
  * /dashboard/personal). Lets the authenticated user create multiple
  * personal social accounts, lock each to a viral-content theme, and
- * kick off daily fully-automated video generation.
+ * kick off video generation (manual or optional scheduled autopilot).
  *
  * Three columns at desktop:
  *   1. account list + add button
@@ -14,7 +14,7 @@
  *   3. posts grid for that account
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import useSWR from 'swr';
 import { motion } from 'framer-motion';
 import {
@@ -29,8 +29,8 @@ import {
   Clock,
   Music2,
   Mic,
-  Eye,
-  EyeOff,
+  CircleStop,
+  CalendarPlus,
 } from 'lucide-react';
 import { Badge, Button, Card, CardContent, Input, Textarea, Spinner, toast } from '@boost/ui';
 import type {
@@ -83,8 +83,8 @@ export default function PersonalDashboardPage() {
 
       <FeatureBanner features={features} />
 
-      <div className="mx-auto max-w-[1400px] px-6 lg:px-10">
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[280px_1fr]">
+      <div className="mx-auto max-w-[1400px] px-4 sm:px-6 lg:px-10">
+        <div className="grid min-w-0 grid-cols-1 gap-6 lg:grid-cols-[280px_minmax(0,1fr)]">
           {/* ── Column 1: account list ─────────────────────── */}
           <aside className="lg:sticky lg:top-6 lg:h-[calc(100vh-120px)] lg:overflow-y-auto">
             <Button
@@ -148,6 +148,7 @@ export default function PersonalDashboardPage() {
                 key={selected.id}
                 account={selected}
                 themes={themes ?? []}
+                features={features}
                 onChanged={refetchAccounts}
               />
             ) : (
@@ -183,15 +184,32 @@ function FeatureBanner({
   if (!features.voice.elevenlabs && !features.voice.openai) {
     missing.push('TTS provider');
   }
-  if (missing.length === 0) return null;
+  const showCsWorkspaceHint =
+    features.contentStudio && !features.contentStudioDefaultWorkspace;
+  if (missing.length === 0 && !showCsWorkspaceHint) return null;
   return (
-    <div className="mx-auto mb-4 max-w-[1400px] px-6 lg:px-10">
-      <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-        <div>
-          <span className="font-semibold">Running with mocks:</span> {missing.join(', ')} not configured. Videos will still generate but with placeholder assets. Add API keys in <code className="rounded bg-amber-100 px-1">.env</code> to go live.
+    <div className="mx-auto mb-4 max-w-[1400px] space-y-2 px-4 sm:px-6 lg:px-10">
+      {missing.length > 0 ? (
+        <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-900 sm:px-4">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <div className="min-w-0 flex-1 break-words">
+            <span className="font-semibold">Running with mocks:</span> {missing.join(', ')} not configured. Videos will
+            still generate but with placeholder assets. Add API keys in{' '}
+            <code className="rounded bg-amber-100 px-1 [overflow-wrap:anywhere]">.env</code> to go live.
+          </div>
         </div>
-      </div>
+      ) : null}
+      {showCsWorkspaceHint ? (
+        <div className="flex items-start gap-3 rounded-xl border border-sky-200 bg-sky-50 px-3 py-3 text-sm text-sky-950 sm:px-4">
+          <Clock className="mt-0.5 h-4 w-4 shrink-0 text-sky-700" />
+          <div className="min-w-0 flex-1 break-words">
+            <span className="font-semibold">ContentStudio workspace:</span> there is no default{' '}
+            <code className="rounded bg-sky-100 px-1 [overflow-wrap:anywhere]">CONTENTSTUDIO_WORKSPACE_ID</code> in server
+            .env. Set it, or enter a workspace id on each channel&apos;s Publishing card, so account lists and &quot;Generate
+            &amp; schedule post&quot; can resolve a workspace.
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -257,27 +275,29 @@ function CreateAccountForm({
   return (
     <Card>
       <CardContent className="p-6">
-        <div className="mb-6 flex items-center justify-between">
-          <div>
+        <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+          <div className="min-w-0">
             <h2 className="text-xl font-bold text-slate-900">Create a channel</h2>
-            <p className="mt-1 text-sm text-slate-500">
+            <p className="mt-1 break-words text-sm text-slate-500">
               Each channel locks to one viral niche and posts on its own schedule.
             </p>
           </div>
-          <Button variant="ghost" onClick={onCancel}>Cancel</Button>
+          <Button variant="ghost" onClick={onCancel} className="shrink-0 self-start sm:self-auto">
+            Cancel
+          </Button>
         </div>
 
         <div className="space-y-6">
           <div>
-            <div className="mb-2 flex items-center justify-between gap-3">
-              <label className="block text-sm font-semibold text-slate-900">
+            <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+              <label className="block min-w-0 text-sm font-semibold text-slate-900">
                 Pick a theme <span className="text-xs font-normal text-slate-400">· {themes.length} available</span>
               </label>
               <Input
                 value={themeQuery}
                 onChange={(e) => setThemeQuery(e.target.value)}
                 placeholder="Search themes…"
-                className="max-w-xs"
+                className="w-full sm:max-w-xs sm:shrink-0"
               />
             </div>
             <div className="grid max-h-[520px] grid-cols-1 gap-2 overflow-y-auto pr-1 sm:grid-cols-2 lg:grid-cols-3">
@@ -291,9 +311,9 @@ function CreateAccountForm({
                       : 'border-slate-200 bg-white hover:border-slate-400'
                   }`}
                 >
-                  <div className="mb-1 flex w-full items-center justify-between gap-1">
-                    <span className="text-2xl">{t.emoji}</span>
-                    <div className="flex items-center gap-1">
+                  <div className="mb-1 flex w-full min-w-0 items-center justify-between gap-1">
+                    <span className="shrink-0 text-2xl">{t.emoji}</span>
+                    <div className="flex min-w-0 flex-wrap items-center justify-end gap-1">
                       {t.template === 'animated-explainer' ? (
                         <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-violet-700">
                           1–8 min · animated
@@ -307,8 +327,8 @@ function CreateAccountForm({
                       </span>
                     </div>
                   </div>
-                  <div className="text-sm font-semibold text-slate-900">{t.name}</div>
-                  <div className="mt-0.5 text-[12px] text-slate-500">{t.tagline}</div>
+                  <div className="w-full min-w-0 break-words text-sm font-semibold text-slate-900">{t.name}</div>
+                  <div className="mt-0.5 break-words text-[12px] text-slate-500">{t.tagline}</div>
                   <div className="mt-2 flex flex-wrap gap-1">
                     {Array.from(new Set(t.preferredPlatforms)).slice(0, 3).map((p, i) => (
                       <span
@@ -406,23 +426,65 @@ function CreateAccountForm({
 function AccountDetail({
   account,
   themes,
+  features,
   onChanged,
 }: {
   account: PersonalAccount;
   themes: PersonalThemeSummary[];
+  features: Awaited<ReturnType<typeof api.personalFeatures>> | undefined;
   onChanged: () => void;
 }) {
   const theme = themes.find((t) => t.id === account.themeId);
-  const { data: posts, mutate: refetchPosts } = useSWR(
+  const {
+    data: posts,
+    isLoading: postsLoading,
+    mutate: refetchPosts,
+  } = useSWR(
     ['personal:posts', account.id],
-    () => api.listPersonalPosts(account.id),
-    { refreshInterval: 10_000 },
+    () => api.listPersonalPosts(account.id, { limit: 300 }),
+    {
+      // Poll only while a generation is in flight — failed/ready posts
+      // should not keep hammering the API or look like "still loading".
+      refreshInterval: (list) => {
+        if (!list?.length) return 0;
+        const rendering = list.some((p) => p.status === 'rendering');
+        if (rendering) return 2_500;
+        const busy = list.some((p) =>
+          ['queued', 'scripting', 'sourcing_media', 'rendering'].includes(p.status),
+        );
+        return busy ? 5_000 : 0;
+      },
+    },
   );
   const { data: characters } = useSWR('personal:characters', () => api.listCharacters());
+
+  /** When posts SWR updates (poll, cancel, generate, etc.), refresh accounts so the sidebar `totalPosts` / metadata match the server. */
+  const postsLifecycleSig = useMemo(
+    () =>
+      (posts ?? [])
+        .map((p) => `${p.id}:${p.status}:${p.videoUrl ? '1' : '0'}`)
+        .sort()
+        .join('|'),
+    [posts],
+  );
+  useEffect(() => {
+    if (!postsLifecycleSig) return;
+    void onChanged();
+  }, [postsLifecycleSig, onChanged]);
 
   const [tab, setTab] = useState<'overview' | 'media' | 'characters' | 'themes' | 'config' | 'longform'>('overview');
   const [generating, setGenerating] = useState(false);
   const [topicOverride, setTopicOverride] = useState('');
+
+  const hasResolvableCsWorkspace = useMemo(
+    () =>
+      Boolean(
+        (account.contentStudioWorkspaceId ?? '').trim() ||
+          (features?.contentStudioDefaultWorkspace ?? false),
+      ),
+    [account.contentStudioWorkspaceId, features?.contentStudioDefaultWorkspace],
+  );
+  const canGenerateAndSchedulePost = Boolean(features?.contentStudio && hasResolvableCsWorkspace);
 
   async function runNow() {
     setGenerating(true);
@@ -433,13 +495,39 @@ function AccountDetail({
       toast.success(
         res.pending ? 'Generation started' : 'Generation kicked off',
         res.pending
-          ? 'This takes ~30-60s. Posts list refreshes automatically.'
+          ? 'This channel runs one encode at a time; long videos can still take many minutes.'
           : 'Check the Posts tab shortly.',
       );
       setTopicOverride('');
-      setTimeout(() => refetchPosts(), 2000);
+      void refetchPosts();
+      setTimeout(() => void refetchPosts(), 2000);
+      setTimeout(() => void refetchPosts(), 8000);
     } catch (e) {
       toast.error('Could not generate', (e as Error).message);
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  async function generateAndSchedulePost() {
+    setGenerating(true);
+    try {
+      const res = await api.generatePersonalPost(account.id, {
+        topic: topicOverride.trim() || undefined,
+        scheduleToContentStudio: true,
+      });
+      toast.success(
+        res.pending ? 'Generate & post started' : 'Video queued',
+        res.pending
+          ? 'When the render finishes, the video is scheduled in ContentStudio in the next ~1h slot (using this channel’s workspace and connected account).'
+          : 'Check Recent posts for status.',
+      );
+      setTopicOverride('');
+      void refetchPosts();
+      setTimeout(() => void refetchPosts(), 2000);
+      setTimeout(() => void refetchPosts(), 8000);
+    } catch (e) {
+      toast.error('Could not start', (e as Error).message);
     } finally {
       setGenerating(false);
     }
@@ -450,18 +538,18 @@ function AccountDetail({
       {/* ── Header + tabs ──────────────────────────────────── */}
       <Card>
         <CardContent className="p-6">
-          <div className="flex items-start justify-between">
-            <div className="flex items-center gap-3">
-              <span className="text-3xl">{account.themeEmoji}</span>
-              <div>
-                <h2 className="text-xl font-bold text-slate-900">{account.accountName}</h2>
-                <p className="text-sm text-slate-500">
+          <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="shrink-0 text-3xl">{account.themeEmoji}</span>
+              <div className="min-w-0">
+                <h2 className="break-words text-xl font-bold text-slate-900">{account.accountName}</h2>
+                <p className="break-words text-sm text-slate-500">
                   {account.platform} · {account.themeName}
                   {account.handle ? ` · ${account.handle}` : ''}
                 </p>
               </div>
             </div>
-            <Badge tone={account.status === 'active' ? 'success' : 'default'}>
+            <Badge className="shrink-0 self-start sm:self-auto" tone={account.status === 'active' ? 'success' : 'default'}>
               {account.status}
             </Badge>
           </div>
@@ -472,20 +560,51 @@ function AccountDetail({
               <Zap className="h-4 w-4 text-amber-500" />
               <span className="text-sm font-semibold text-slate-900">Generate now</span>
             </div>
-            <div className="flex flex-col gap-2 sm:flex-row">
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
               <Input
                 value={topicOverride}
                 onChange={(e) => setTopicOverride(e.target.value)}
                 placeholder={`Optional topic (${theme?.topicSeedExamples[0] ?? 'auto-pick'})`}
-                className="flex-1"
+                className="min-w-0 flex-1 sm:min-w-[200px]"
               />
-              <Button onClick={runNow} disabled={generating}>
-                {generating ? <Spinner className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
-                {generating ? 'Starting…' : 'Generate post'}
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  onClick={runNow}
+                  disabled={generating || account.status === 'archived'}
+                  title={account.status === 'archived' ? 'Archived channels cannot generate new posts.' : undefined}
+                >
+                  {generating ? <Spinner className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
+                  {generating ? 'Starting…' : 'Generate post'}
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={generateAndSchedulePost}
+                  disabled={
+                    generating ||
+                    account.status === 'archived' ||
+                    !canGenerateAndSchedulePost
+                  }
+                  title={
+                    account.status === 'archived'
+                      ? 'Archived channels cannot generate new posts.'
+                      : !features?.contentStudio
+                        ? 'Set CONTENTSTUDIO_API_KEY in .env and restart the API.'
+                        : !hasResolvableCsWorkspace
+                          ? 'Set CONTENTSTUDIO_WORKSPACE_ID in server .env or a workspace id under Overview → Publishing for this channel.'
+                          : 'Render then schedule to ContentStudio (~1h from now) using this channel’s workspace and connected account below.'
+                  }
+                >
+                  <CalendarPlus className="h-4 w-4" />
+                  Generate &amp; schedule post
+                </Button>
+              </div>
             </div>
             <p className="mt-2 text-[11px] text-slate-400">
-              Scripts with Claude, scrapes real imagery, renders with voiceover + music, schedules to ContentStudio.
+              <span className="font-medium text-slate-500">Generate post</span> — video only. To publish after render, use
+              Overview → Publishing, or turn on Auto-approve + Auto-schedule on the schedule card.{' '}
+              <span className="font-medium text-slate-500">Generate &amp; schedule post</span> — requires ContentStudio API
+              key and a resolvable workspace (server default or per-channel Publishing). With ContentStudio off, the API
+              uses mock scheduling only.
             </p>
           </div>
 
@@ -517,8 +636,16 @@ function AccountDetail({
       {tab === 'overview' ? (
         <>
           <ScheduleCard account={account} onChanged={onChanged} />
+          <PublishingCard account={account} features={features} onChanged={onChanged} />
           <TopicsCard account={account} onChanged={onChanged} theme={theme} />
-          <PostsGrid posts={posts ?? []} />
+          <PostsGrid
+            accountId={account.id}
+            posts={posts}
+            isLoading={postsLoading}
+            onPostsChanged={() => {
+              void refetchPosts();
+            }}
+          />
         </>
       ) : null}
 
@@ -543,10 +670,173 @@ function AccountDetail({
           account={account}
           theme={theme}
           onChanged={onChanged}
+          onPostsChanged={() => void refetchPosts()}
           onSwitchTab={(t) => setTab(t)}
         />
       ) : null}
     </div>
+  );
+}
+
+function PublishingCard({
+  account,
+  features,
+  onChanged,
+}: {
+  account: PersonalAccount;
+  features: Awaited<ReturnType<typeof api.personalFeatures>> | undefined;
+  onChanged: () => void;
+}) {
+  const [workspaceId, setWorkspaceId] = useState(account.contentStudioWorkspaceId ?? '');
+  const [accountIdPick, setAccountIdPick] = useState(account.contentStudioAccountId ?? '');
+  const [connected, setConnected] = useState<Array<{ platform: string; handle: string; id: string }>>([]);
+  const [loadBusy, setLoadBusy] = useState(false);
+  const [saveBusy, setSaveBusy] = useState(false);
+  const [listBanner, setListBanner] = useState<'empty' | 'mismatch' | null>(null);
+
+  useEffect(() => {
+    setWorkspaceId(account.contentStudioWorkspaceId ?? '');
+    setAccountIdPick(account.contentStudioAccountId ?? '');
+    setConnected([]);
+    setListBanner(null);
+  }, [account.id, account.contentStudioWorkspaceId, account.contentStudioAccountId]);
+
+  const platformMatches = connected.filter((a) => a.platform === account.platform);
+  const savedPickMissingFromList =
+    Boolean(accountIdPick.trim()) && !platformMatches.some((a) => a.id === accountIdPick);
+
+  async function loadConnected() {
+    setLoadBusy(true);
+    try {
+      const res = await api.listPersonalContentStudioAccounts(workspaceId.trim() || undefined);
+      const accounts = res.accounts ?? [];
+      setConnected(accounts);
+      if (!res.configured) {
+        setListBanner(null);
+        toast.error('ContentStudio API key missing', 'Set CONTENTSTUDIO_API_KEY in .env and restart the API.');
+      } else if (accounts.length === 0) {
+        setListBanner('empty');
+        toast.info(
+          'No connected accounts in this workspace',
+          'Check the workspace id, server CONTENTSTUDIO_WORKSPACE_ID, and that social accounts are linked in ContentStudio.',
+        );
+      } else {
+        const matches = accounts.filter((a) => a.platform === account.platform);
+        setListBanner(matches.length === 0 ? 'mismatch' : null);
+        toast.success('Loaded connected accounts', `${accounts.length} from ContentStudio.`);
+      }
+    } catch (e) {
+      setListBanner(null);
+      toast.error('Could not load accounts', (e as Error).message);
+    } finally {
+      setLoadBusy(false);
+    }
+  }
+
+  async function savePublishing() {
+    setSaveBusy(true);
+    try {
+      await api.updatePersonalAccount(account.id, {
+        contentStudioWorkspaceId: workspaceId.trim() ? workspaceId.trim() : null,
+        contentStudioAccountId: accountIdPick.trim() || null,
+      });
+      toast.success('Publishing settings saved');
+      onChanged();
+    } catch (e) {
+      toast.error('Could not save', (e as Error).message);
+    } finally {
+      setSaveBusy(false);
+    }
+  }
+
+  const csOk = Boolean(features?.contentStudio);
+  const envDefaultWorkspace = Boolean(features?.contentStudioDefaultWorkspace);
+
+  return (
+    <Card>
+      <CardContent className="p-6">
+        <h3 className="mb-1 text-sm font-bold uppercase tracking-wide text-slate-600">Publishing (ContentStudio)</h3>
+        <p className="mb-4 text-xs text-slate-500">
+          API key and default workspace live in server <code className="rounded bg-slate-100 px-1">.env</code>. Per channel
+          you can override the workspace and pick which connected social account receives posts (same platform as this
+          channel: <span className="font-medium">{account.platform}</span>).
+        </p>
+
+        {!csOk ? (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            ContentStudio integration is off — configure CONTENTSTUDIO_API_KEY to enable scheduling.
+          </div>
+        ) : null}
+
+        {csOk && !envDefaultWorkspace && !(account.contentStudioWorkspaceId ?? '').trim() && !workspaceId.trim() ? (
+          <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-950">
+            No server-wide default workspace is set. Enter a workspace id here (or set{' '}
+            <code className="rounded bg-sky-100 px-1">CONTENTSTUDIO_WORKSPACE_ID</code> in .env) before Refresh list will
+            return accounts.
+          </div>
+        ) : null}
+
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <Field label="Workspace id (optional override)">
+            <Input
+              value={workspaceId}
+              onChange={(e) => setWorkspaceId(e.target.value)}
+              placeholder="Defaults from CONTENTSTUDIO_WORKSPACE_ID"
+              className="font-mono text-xs"
+            />
+          </Field>
+          <Field label="Connected account for this platform">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <select
+                value={accountIdPick}
+                onChange={(e) => setAccountIdPick(e.target.value)}
+                className="w-full min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+              >
+                <option value="">Auto — first {account.platform} account in workspace</option>
+                {savedPickMissingFromList ? (
+                  <option value={accountIdPick}>
+                    Saved account (not in current list — refresh or pick another)
+                  </option>
+                ) : null}
+                {platformMatches.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.handle || a.id} ({a.platform})
+                  </option>
+                ))}
+              </select>
+              <Button type="button" variant="ghost" size="sm" onClick={loadConnected} disabled={loadBusy || !csOk}>
+                {loadBusy ? <Spinner className="h-4 w-4" /> : 'Refresh list'}
+              </Button>
+            </div>
+            <p className="mt-1 text-[11px] text-slate-400">
+              Click Refresh list after setting workspace id (or leave blank to use env default). Only accounts matching
+              this channel&apos;s platform are listed.
+            </p>
+          </Field>
+        </div>
+
+        {csOk && listBanner === 'empty' ? (
+          <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
+            The last refresh returned no accounts for this workspace. Confirm the workspace id, that{' '}
+            <code className="rounded bg-slate-200 px-1">CONTENTSTUDIO_WORKSPACE_ID</code> is set if you rely on the
+            default, and that ContentStudio has at least one connected social account.
+          </div>
+        ) : null}
+        {csOk && listBanner === 'mismatch' ? (
+          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+            This workspace has connected accounts, but none match this channel&apos;s platform ({account.platform}).
+            Connect the right network in ContentStudio or pick a workspace that includes it.
+          </div>
+        ) : null}
+
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Button onClick={savePublishing} disabled={saveBusy || !csOk} size="sm">
+            {saveBusy ? <Spinner className="h-4 w-4" /> : <Save className="h-4 w-4" />}
+            Save publishing settings
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -590,15 +880,44 @@ function ScheduleCard({
   const [spacing, setSpacing] = useState(account.postSpacingMinutes);
   const [autoApprove, setAutoApprove] = useState(account.autoApprove);
   const [autoSchedule, setAutoSchedule] = useState(account.autoSchedule);
+  const [autoGenerateOnSchedule, setAutoGenerateOnSchedule] = useState(
+    account.autoGenerateOnSchedule ?? false,
+  );
   const [busy, setBusy] = useState(false);
 
-  async function togglePause() {
+  useEffect(() => {
+    setPostsPerDay(account.postsPerDay);
+    setHour(account.postingHourUtc);
+    setMinute(account.postingMinuteUtc);
+    setSpacing(account.postSpacingMinutes);
+    setAutoApprove(account.autoApprove);
+    setAutoSchedule(account.autoSchedule);
+    setAutoGenerateOnSchedule(account.autoGenerateOnSchedule ?? false);
+  }, [account]);
+
+  async function toggleScheduleAutopilot() {
     setBusy(true);
     try {
+      const next = !(account.autoGenerateOnSchedule ?? false);
       await api.updatePersonalAccount(account.id, {
-        status: account.status === 'active' ? 'paused' : 'active',
+        autoGenerateOnSchedule: next,
       });
       onChanged();
+    } catch (e) {
+      toast.error('Could not update schedule', (e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function reactivateChannelStatus() {
+    setBusy(true);
+    try {
+      await api.updatePersonalAccount(account.id, { status: 'active' });
+      toast.success('Channel resumed — scheduled runs can run when autopilot is on.');
+      onChanged();
+    } catch (e) {
+      toast.error('Could not update channel', (e as Error).message);
     } finally {
       setBusy(false);
     }
@@ -614,6 +933,7 @@ function ScheduleCard({
         postSpacingMinutes: spacing,
         autoApprove,
         autoSchedule,
+        autoGenerateOnSchedule,
       });
       toast.success('Schedule saved');
       onChanged();
@@ -641,17 +961,39 @@ function ScheduleCard({
   return (
     <Card>
       <CardContent className="p-6">
-        <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-sm font-bold uppercase tracking-wide text-slate-600">Schedule</h3>
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={togglePause} disabled={busy}>
-              {account.status === 'active' ? (
+        {account.status === 'paused' && (
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+            <span>
+              This channel was fully paused (legacy). Scheduled runs stay off until you resume the channel.
+              Manual Generate still works.
+            </span>
+            <Button variant="outline" size="sm" className="shrink-0 border-amber-300" onClick={reactivateChannelStatus} disabled={busy}>
+              Resume channel
+            </Button>
+          </div>
+        )}
+
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+          <h3 className="min-w-0 text-sm font-bold uppercase tracking-wide text-slate-600">Schedule</h3>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={toggleScheduleAutopilot}
+              disabled={busy || account.status === 'archived' || account.status === 'paused'}
+              title={
+                account.status === 'paused'
+                  ? 'Resume the channel first — full pause blocks scheduled runs until then.'
+                  : undefined
+              }
+            >
+              {account.autoGenerateOnSchedule ? (
                 <>
-                  <Pause className="h-4 w-4" /> Pause
+                  <Pause className="h-4 w-4" /> Pause schedule
                 </>
               ) : (
                 <>
-                  <Play className="h-4 w-4" /> Activate
+                  <Play className="h-4 w-4" /> Resume schedule
                 </>
               )}
             </Button>
@@ -713,16 +1055,30 @@ function ScheduleCard({
         </div>
 
         <div className="mt-4 flex flex-wrap gap-6">
+          <Toggle
+            label="Automatically generate videos on this schedule"
+            checked={autoGenerateOnSchedule}
+            onChange={setAutoGenerateOnSchedule}
+            disabled={account.status === 'paused' || account.status === 'archived'}
+          />
           <Toggle label="Auto-approve" checked={autoApprove} onChange={setAutoApprove} />
           <Toggle label="Auto-schedule to ContentStudio" checked={autoSchedule} onChange={setAutoSchedule} />
         </div>
 
-        <div className="mt-4 flex items-center justify-between border-t border-slate-200 pt-4">
-          <div className="text-xs text-slate-500">
-            <Clock className="mr-1 inline h-3 w-3" />
-            Next run: {account.nextRunAt ? new Date(account.nextRunAt).toLocaleString() : '—'}
+        <div className="mt-4 flex flex-col gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0 break-words text-xs text-slate-500">
+            <Clock className="mr-1 inline h-3 w-3 shrink-0" />
+            {account.status === 'archived'
+              ? 'Channel archived — restore it to use generation.'
+              : account.status === 'paused'
+                ? 'Channel status is paused — resume the channel above for scheduled runs, or use Generate post manually.'
+                : autoGenerateOnSchedule
+                  ? account.nextRunAt
+                    ? `Next run: ${new Date(account.nextRunAt).toLocaleString()}`
+                    : 'Next run: — (save schedule to set)'
+                  : 'Scheduled generation off — use Generate post above or Resume schedule.'}
           </div>
-          <Button onClick={save} disabled={busy} size="sm">
+          <Button onClick={save} disabled={busy} size="sm" className="w-full shrink-0 sm:w-auto">
             {busy ? <Spinner className="h-4 w-4" /> : <Save className="h-4 w-4" />}
             Save schedule
           </Button>
@@ -745,18 +1101,23 @@ function Toggle({
   label,
   checked,
   onChange,
+  disabled,
 }: {
   label: string;
   checked: boolean;
   onChange: (b: boolean) => void;
+  disabled?: boolean;
 }) {
   return (
-    <label className="flex items-center gap-2 text-sm text-slate-700">
+    <label
+      className={`flex items-center gap-2 text-sm ${disabled ? 'cursor-not-allowed text-slate-400' : 'cursor-pointer text-slate-700'}`}
+    >
       <input
         type="checkbox"
         checked={checked}
+        disabled={disabled}
         onChange={(e) => onChange(e.target.checked)}
-        className="h-4 w-4 rounded border-slate-300"
+        className="h-4 w-4 rounded border-slate-300 disabled:opacity-50"
       />
       {label}
     </label>
@@ -865,8 +1226,73 @@ function TopicsCard({
 /* Posts grid                                                           */
 /* ═══════════════════════════════════════════════════════════════════ */
 
-function PostsGrid({ posts }: { posts: PersonalPost[] }) {
-  if (posts.length === 0) {
+function postPosterAspectClass(ar: PersonalPost['aspectRatio']): string {
+  switch (ar) {
+    case '16:9':
+      return 'aspect-video';
+    case '1:1':
+      return 'aspect-square';
+    case '4:5':
+      return 'aspect-[4/5]';
+    case '9:16':
+    default:
+      return 'aspect-[9/16]';
+  }
+}
+
+function PostsGrid({
+  accountId,
+  posts,
+  isLoading,
+  onPostsChanged,
+}: {
+  accountId: string;
+  posts: PersonalPost[] | undefined;
+  isLoading: boolean;
+  onPostsChanged: () => void;
+}) {
+  const failedInView = (posts ?? []).filter((p) => p.status === 'failed');
+  const [clearingFailed, setClearingFailed] = useState(false);
+
+  async function clearAllFailed() {
+    if (failedInView.length === 0) return;
+    if (
+      !confirm(
+        'Delete every failed video for this channel? This cannot be undone. (Includes failed posts not shown in the recent list.)',
+      )
+    ) {
+      return;
+    }
+    setClearingFailed(true);
+    try {
+      const { deleted } = await api.deleteFailedPersonalPosts(accountId);
+      toast.success(
+        deleted === 0 ? 'Nothing to remove' : 'Failed videos removed',
+        deleted === 0 ? 'No failed posts were in the database.' : `Removed ${deleted} failed post(s).`,
+      );
+      onPostsChanged();
+    } catch (e) {
+      toast.error('Could not remove failed posts', (e as Error).message);
+    } finally {
+      setClearingFailed(false);
+    }
+  }
+
+  if (isLoading) {
+    return (
+      <Card>
+        <CardContent className="p-10 text-center">
+          <Spinner className="mx-auto h-8 w-8 text-slate-400" />
+          <p className="mt-3 text-sm font-medium text-slate-600">Loading posts…</p>
+          <p className="mt-1 text-xs text-slate-500">Past videos stay here; this list can take a moment on first open.</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const list = posts ?? [];
+
+  if (list.length === 0) {
     return (
       <Card>
         <CardContent className="p-10 text-center">
@@ -883,12 +1309,27 @@ function PostsGrid({ posts }: { posts: PersonalPost[] }) {
   return (
     <Card>
       <CardContent className="p-6">
-        <h3 className="mb-4 text-sm font-bold uppercase tracking-wide text-slate-600">
-          Recent posts ({posts.length})
-        </h3>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-sm font-bold uppercase tracking-wide text-slate-600">
+            Recent posts ({list.length})
+          </h3>
+          {failedInView.length > 0 ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-1.5 border-rose-200 text-rose-700 hover:bg-rose-50"
+              disabled={clearingFailed}
+              onClick={() => void clearAllFailed()}
+            >
+              {clearingFailed ? <Spinner className="h-3.5 w-3.5" /> : <Trash2 className="h-3.5 w-3.5" />}
+              Remove all failed
+            </Button>
+          ) : null}
+        </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {posts.map((p) => (
-            <PostCard key={p.id} post={p} />
+          {list.map((p) => (
+            <PostCard key={p.id} accountId={accountId} post={p} onPostsChanged={onPostsChanged} />
           ))}
         </div>
       </CardContent>
@@ -896,9 +1337,74 @@ function PostsGrid({ posts }: { posts: PersonalPost[] }) {
   );
 }
 
-function PostCard({ post }: { post: PersonalPost }) {
-  const [expanded, setExpanded] = useState(false);
+const IN_PROGRESS_POST_STATUSES = new Set(['queued', 'scripting', 'sourcing_media', 'rendering']);
+
+/** One combined progress readout for the whole pipeline (not encode-only). */
+function postGenerationProgressUi(post: PersonalPost): { percent: number; label: string } | null {
+  if (post.videoUrl) return null;
+  if (
+    post.status === 'failed' ||
+    post.status === 'ready' ||
+    post.status === 'scheduled' ||
+    post.status === 'published'
+  ) {
+    return null;
+  }
+  if (!IN_PROGRESS_POST_STATUSES.has(post.status)) return null;
+
+  const encodePct =
+    typeof post.renderProgress === 'number'
+      ? Math.min(100, Math.max(0, post.renderProgress))
+      : null;
+
+  switch (post.status) {
+    case 'queued':
+      return { percent: 5, label: 'In queue…' };
+    case 'scripting':
+      return { percent: 22, label: 'Writing script & storyboard…' };
+    case 'sourcing_media':
+      return { percent: 55, label: 'Creating visuals & audio…' };
+    case 'rendering': {
+      const base = 72;
+      const span = 27;
+      const blend = encodePct != null ? base + (encodePct / 100) * span : base + span * 0.35;
+      return {
+        percent: Math.min(99, blend),
+        label: 'Assembling your video…',
+      };
+    }
+    default:
+      return { percent: 10, label: 'Working…' };
+  }
+}
+
+function PostCard({
+  post,
+  accountId,
+  onPostsChanged,
+}: {
+  post: PersonalPost;
+  accountId: string;
+  onPostsChanged: () => void;
+}) {
   const statusMeta = statusFor(post.status);
+  const genUi = postGenerationProgressUi(post);
+  const [stopping, setStopping] = useState(false);
+
+  async function stopGeneration() {
+    if (!IN_PROGRESS_POST_STATUSES.has(post.status)) return;
+    if (!confirm('Stop this generation? The video will be marked as failed.')) return;
+    setStopping(true);
+    try {
+      await api.cancelPersonalPost(accountId, post.id);
+      toast.success('Generation stopped');
+      onPostsChanged();
+    } catch (e) {
+      toast.error('Could not stop', (e as Error).message);
+    } finally {
+      setStopping(false);
+    }
+  }
 
   return (
     <motion.div
@@ -907,7 +1413,7 @@ function PostCard({ post }: { post: PersonalPost }) {
       className="overflow-hidden rounded-xl border border-slate-200 bg-white"
     >
       <div
-        className="relative aspect-[9/16] overflow-hidden bg-slate-100"
+        className={`relative overflow-hidden bg-slate-100 ${postPosterAspectClass(post.aspectRatio)}`}
         style={{ minHeight: 180 }}
       >
         {post.videoUrl ? (
@@ -917,6 +1423,16 @@ function PostCard({ post }: { post: PersonalPost }) {
             className="h-full w-full object-cover"
             poster={post.mediaAssets[0]?.url}
           />
+        ) : post.status === 'failed' ? (
+          <div className="flex h-full flex-col items-center justify-center gap-2 bg-rose-50 p-3 text-center">
+            <AlertTriangle className="h-8 w-8 shrink-0 text-rose-500" />
+            <p className="text-xs font-semibold text-rose-900">Generation failed</p>
+            {post.errorMessage ? (
+              <p className="max-h-28 min-w-0 overflow-y-auto break-words text-[10px] leading-snug text-rose-800">
+                {post.errorMessage}
+              </p>
+            ) : null}
+          </div>
         ) : post.mediaAssets[0]?.url ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -938,11 +1454,39 @@ function PostCard({ post }: { post: PersonalPost }) {
           </div>
         ) : null}
       </div>
-      <div className="p-3">
-        <div className="text-sm font-semibold text-slate-900 line-clamp-2">
+      {genUi ? (
+        <div className="relative z-10 min-w-0 border-t border-slate-200/90 bg-slate-950 px-3 py-2.5 text-white">
+          <div className="mb-0.5 flex min-w-0 items-baseline justify-between gap-2 text-[10px] font-medium">
+            <span className="min-w-0 truncate">Creating video</span>
+            <span className="shrink-0 tabular-nums">{Math.round(genUi.percent)}%</span>
+          </div>
+          <p className="mb-1.5 min-w-0 break-words text-[10px] leading-snug text-emerald-100/95">{genUi.label}</p>
+          <div className="flex min-w-0 items-center gap-2">
+            <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-white/25">
+              <div
+                className="h-full rounded-full bg-emerald-400 transition-[width] duration-500 ease-out"
+                style={{
+                  width: `${Math.min(100, Math.max(0, genUi.percent))}%`,
+                }}
+              />
+            </div>
+            <button
+              type="button"
+              disabled={stopping}
+              onClick={() => void stopGeneration()}
+              className="inline-flex shrink-0 items-center gap-1 rounded-md bg-rose-600 px-2 py-1 text-[10px] font-semibold text-white hover:bg-rose-500 disabled:opacity-50"
+            >
+              {stopping ? <Spinner className="h-3 w-3" /> : <CircleStop className="h-3 w-3" />}
+              Stop
+            </button>
+          </div>
+        </div>
+      ) : null}
+      <div className="min-w-0 p-3">
+        <div className="break-words text-sm font-semibold leading-snug text-slate-900 line-clamp-2">
           {post.title || post.topic}
         </div>
-        <div className="mt-1 line-clamp-2 text-[12px] text-slate-500">{post.hook}</div>
+        <div className="mt-1 break-words text-[12px] leading-snug text-slate-500 line-clamp-2">{post.hook}</div>
         <div className="mt-2 flex flex-wrap gap-1">
           {post.voiceoverUrl ? (
             <span className="inline-flex items-center gap-1 rounded-md bg-purple-50 px-1.5 py-0.5 text-[10px] text-purple-700">
@@ -965,20 +1509,8 @@ function PostCard({ post }: { post: PersonalPost }) {
             </span>
           ) : null}
         </div>
-        <button
-          className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-slate-600 hover:text-slate-900"
-          onClick={() => setExpanded((v) => !v)}
-        >
-          {expanded ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
-          {expanded ? 'Hide caption' : 'Show caption'}
-        </button>
-        {expanded ? (
-          <div className="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap rounded-md bg-slate-50 p-2 text-[11px] text-slate-700">
-            {post.caption ?? '(no caption)'}
-          </div>
-        ) : null}
         {post.errorMessage ? (
-          <div className="mt-2 rounded-md bg-rose-50 p-2 text-[11px] text-rose-700">
+          <div className="mt-2 break-words rounded-md bg-rose-50 p-2 text-[11px] text-rose-700">
             {post.errorMessage}
           </div>
         ) : null}
@@ -1002,8 +1534,12 @@ function statusFor(status: string): {
     case 'queued':
     case 'scripting':
     case 'sourcing_media':
-    case 'rendering':
       return { label: status.replace('_', ' '), tone: 'warning' };
+    case 'rendering':
+      return {
+        label: 'finishing',
+        tone: 'warning',
+      };
     default:
       return { label: status, tone: 'default' };
   }
@@ -1053,12 +1589,12 @@ function EmptyState({ themes, onStart }: { themes: PersonalThemeSummary[]; onSta
         </div>
 
         <div className="mt-8">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <div>
+          <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+            <div className="min-w-0">
               <div className="text-sm font-bold text-slate-900">
                 All {themes.length} themes
               </div>
-              <div className="text-xs text-slate-500">
+              <div className="break-words text-xs text-slate-500">
                 Sorted by virality score. Click <b>New channel</b> above to pick one.
               </div>
             </div>
@@ -1066,27 +1602,27 @@ function EmptyState({ themes, onStart }: { themes: PersonalThemeSummary[]; onSta
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search themes…"
-              className="max-w-xs"
+              className="w-full sm:max-w-xs sm:shrink-0"
             />
           </div>
-          <div className="grid max-h-[640px] grid-cols-2 gap-2 overflow-y-auto pr-1 sm:grid-cols-3 lg:grid-cols-4">
+          <div className="grid max-h-[640px] grid-cols-1 gap-2 overflow-y-auto pr-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
             {filtered.map((t) => (
               <button
                 key={t.id}
                 onClick={onStart}
                 className="flex flex-col items-start rounded-lg border border-slate-200 bg-white p-3 text-left transition hover:border-slate-400 hover:shadow-sm"
               >
-                <div className="mb-1 flex w-full items-center justify-between">
-                  <span className="text-xl">{t.emoji}</span>
+                <div className="mb-1 flex w-full min-w-0 items-center justify-between gap-1">
+                  <span className="shrink-0 text-xl">{t.emoji}</span>
                   <span
-                    className="rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider"
+                    className="shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider"
                     style={{ background: t.accentColor + '22', color: t.accentColor }}
                   >
                     {t.cpmTier} CPM
                   </span>
                 </div>
-                <div className="text-xs font-semibold text-slate-900">{t.name}</div>
-                <div className="mt-0.5 line-clamp-2 text-[10px] text-slate-500">{t.tagline}</div>
+                <div className="w-full min-w-0 break-words text-xs font-semibold text-slate-900">{t.name}</div>
+                <div className="mt-0.5 line-clamp-2 min-w-0 break-words text-[10px] text-slate-500">{t.tagline}</div>
               </button>
             ))}
             {filtered.length === 0 ? (

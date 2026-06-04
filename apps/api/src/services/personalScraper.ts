@@ -33,6 +33,31 @@ import {
 
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
+/** https://meta.wikimedia.org/wiki/User-Agent_policy — anonymous JSON API must identify the app. */
+const WIKIMEDIA_USER_AGENT =
+  'BoostMyBranding/1.0 (+https://boostmybranding.com; personal-scraper)';
+
+async function fetchMediaWikiJson(url: string): Promise<unknown> {
+  const res = await fetch(url, {
+    headers: {
+      'User-Agent': WIKIMEDIA_USER_AGENT,
+      Accept: 'application/json,text/json;q=0.9,*/*;q=0.1',
+    },
+  });
+  const text = await res.text();
+  const ct = res.headers.get('content-type') ?? '';
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}: ${text.slice(0, 120)}`);
+  }
+  const trimmed = text.trimStart();
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+    throw new Error(
+      `non-JSON (${ct.slice(0, 48)}): ${text.slice(0, 120).replace(/\s+/g, ' ')}`,
+    );
+  }
+  return JSON.parse(trimmed) as unknown;
+}
+
 /**
  * Curated royalty-free gameplay background loops. Hosted on R2 once
  * uploaded; falls back to the public sample URLs for dev. Add new
@@ -344,8 +369,8 @@ export async function searchPixabayPhotos(
 }
 
 /**
- * Pixabay Music — requires a separate "music" API key. Returns
- * previewable mp3 urls suitable for backing a 30-60s video.
+ * Pixabay Music — same `PIXABAY_API_KEY` as image search. Uses
+ * `https://pixabay.com/api/music/` (not in the short image/video doc snippet).
  */
 export async function searchPixabayMusic(
   query: string,
@@ -409,12 +434,11 @@ export async function searchWikipediaImages(
 
   try {
     // Step 1 — resolve the query to a page title.
-    const searchRes = await fetch(
+    const searchBody = (await fetchMediaWikiJson(
       `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(
         query,
       )}&srlimit=3&format=json&origin=*`,
-    );
-    const searchBody = (await searchRes.json()) as {
+    )) as {
       query?: { search?: Array<{ title: string }> };
     };
     const titles =
@@ -425,12 +449,11 @@ export async function searchWikipediaImages(
     for (const title of titles) {
       // Step 2 — get page images via prop=pageimages (lead image) +
       // prop=images (all images on the page).
-      const res = await fetch(
+      const body = (await fetchMediaWikiJson(
         `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(
           title,
         )}&prop=pageimages|images&pithumbsize=1920&imlimit=20&format=json&origin=*`,
-      );
-      const body = (await res.json()) as {
+      )) as {
         query?: {
           pages?: Record<
             string,
@@ -481,12 +504,11 @@ export async function searchWikipediaImages(
 
 async function resolveCommonsFile(name: string): Promise<PersonalScrapedItem | null> {
   try {
-    const res = await fetch(
+    const body = (await fetchMediaWikiJson(
       `https://commons.wikimedia.org/w/api.php?action=query&titles=File:${encodeURIComponent(
         name,
       )}&prop=imageinfo&iiprop=url|size|extmetadata&format=json&origin=*`,
-    );
-    const body = (await res.json()) as {
+    )) as {
       query?: {
         pages?: Record<
           string,

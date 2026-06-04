@@ -7,6 +7,7 @@
  */
 
 import express, { type NextFunction, type Request, type Response } from 'express';
+import multer from 'multer';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -42,6 +43,8 @@ import { localUploadDir } from './services/r2.js';
 
 const app = express();
 app.disable('x-powered-by');
+/** JSON APIs should not participate in conditional GET / 304 — dashboards need fresh rows after mutations. */
+app.set('etag', false);
 app.set('trust proxy', 1); // We are always behind a proxy in prod (Render/Vercel).
 
 // Helmet with a CSP that allows our own assets + Stripe.
@@ -119,6 +122,22 @@ app.get('/health', (_req, res) => {
   });
 });
 
+/** Root — avoids a bare 404 when someone opens the API URL in a browser. */
+app.get('/', (_req, res) => {
+  res.json({
+    data: {
+      service: 'BoostMyBranding API',
+      health: '/health',
+      apiPrefix: '/api/v1',
+      port: env.API_PORT,
+      hint:
+        env.NODE_ENV === 'production'
+          ? 'Use the hosted dashboard URL from your deployment.'
+          : 'Run the Next.js app separately (e.g. repo root `pnpm dev` or `pnpm --filter web dev`) — usually http://localhost:3000',
+    },
+  });
+});
+
 app.use('/api/v1/auth', authRouter);
 app.use('/api/v1/clients', clientsRouter);
 app.use('/api/v1/posts', postsRouter);
@@ -153,6 +172,31 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
       .status(400)
       .json({ error: { message: 'Validation failed', code: 'VALIDATION', details: anyErr.issues } });
   }
+
+  // Multer — size limits, wrong field names, etc.
+  if (err instanceof multer.MulterError) {
+    console.warn('[api] upload:', err.code, err.message);
+    return res.status(400).json({
+      error: {
+        message: err.message || 'Upload rejected',
+        code: err.code,
+      },
+    });
+  }
+
+  // fileFilter rejects with a plain Error (mime type, wrong audio type, …)
+  const msg = String(err.message ?? '');
+  if (
+    msg.startsWith('Unsupported mime:') ||
+    msg.includes('uploads are allowed') ||
+    msg.startsWith('Supported:') ||
+    msg.startsWith('Audio must be')
+  ) {
+    return res.status(400).json({
+      error: { message: msg, code: 'BAD_UPLOAD' },
+    });
+  }
+
   console.error('[api] error:', err);
 
   // Postgres driver errors surface a `.code` — give operators an
@@ -185,7 +229,26 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
 
 const server = app.listen(env.API_PORT, () => {
   console.log(`🚀 BoostMyBranding API → http://localhost:${env.API_PORT}`);
+  if (env.NODE_ENV !== 'production') {
+    console.log(
+      `   Next.js UI → http://localhost:3000 (not started by this process). From repo root run: pnpm dev  or  pnpm dev:stack`,
+    );
+  }
   startScheduler();
+});
+
+server.on('error', (err: NodeJS.ErrnoException) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(
+      `\n❌ Port ${env.API_PORT} is already in use — another API process is still running (often from repo-root \`pnpm dev\` / \`pnpm dev:stack\`).`,
+    );
+    console.error(
+      `   Stop that terminal with Ctrl+C, or set API_PORT in .env to a free port. Your browser can still work if you only need the existing server.\n`,
+    );
+  } else {
+    console.error('[api] listen error:', err);
+  }
+  process.exit(1);
 });
 
 // Dev-safety net: keep the server up when a background task (cron, fire-

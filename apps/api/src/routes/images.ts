@@ -23,13 +23,20 @@ import { uploadLimiter } from '../middleware/rateLimit.js';
 import { requireAuth } from '../services/auth.js';
 import { broadcast } from '../services/realtime.js';
 import { fireAndForget, withRetry } from '../services/retry.js';
+import { normalizeUploadImageIfAvif } from '../lib/normalizeUploadImage.js';
 
 export const imagesRouter = Router();
 
 const MAX_FILE_BYTES = 15 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 100 * 1024 * 1024; // 100MB cap for video uploads
 const MAX_FILES = 10;
-const ALLOWED_IMAGE_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+const ALLOWED_IMAGE_MIME = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/gif',
+  'image/avif',
+]);
 const ALLOWED_VIDEO_MIME = new Set(['video/mp4', 'video/quicktime', 'video/webm']);
 
 // Back-compat: images-only uploader used by the existing /upload route.
@@ -38,7 +45,7 @@ const upload = multer({
   limits: { fileSize: MAX_FILE_BYTES, files: MAX_FILES },
   fileFilter: (_req, file, cb) => {
     if (ALLOWED_IMAGE_MIME.has(file.mimetype)) cb(null, true);
-    else cb(new Error('Only JPG, PNG, WEBP, and GIF uploads are allowed'));
+    else cb(new Error('Only JPG, PNG, WEBP, GIF, and AVIF uploads are allowed (AVIF is converted to PNG)'));
   },
 });
 
@@ -49,7 +56,7 @@ const mediaUpload = multer({
   fileFilter: (_req, file, cb) => {
     if (ALLOWED_IMAGE_MIME.has(file.mimetype) || ALLOWED_VIDEO_MIME.has(file.mimetype))
       cb(null, true);
-    else cb(new Error('Supported: JPG, PNG, WEBP, GIF, MP4, MOV, WEBM'));
+    else cb(new Error('Supported: JPG, PNG, WEBP, GIF, AVIF (→PNG), MP4, MOV, WEBM'));
   },
 });
 
@@ -122,15 +129,36 @@ imagesRouter.post(
       const created: any[] = [];
 
       for (const file of files) {
-        const { url } = await uploadFile(clientId, file.buffer, file.originalname, file.mimetype);
+        let buffer = file.buffer;
+        let fileName = file.originalname;
+        let mimeType = file.mimetype;
+        try {
+          const n = await normalizeUploadImageIfAvif({ buffer, mimeType, fileName });
+          buffer = n.buffer;
+          fileName = n.fileName;
+          mimeType = n.mimeType;
+        } catch {
+          return res.status(400).json({
+            error: {
+              message: 'Could not convert AVIF image to PNG',
+              code: 'AVIF_CONVERT',
+            },
+          });
+        }
+        if (buffer.length > MAX_FILE_BYTES) {
+          return res.status(400).json({
+            error: { message: 'File too large after conversion', code: 'TOO_LARGE' },
+          });
+        }
+        const { url } = await uploadFile(clientId, buffer, fileName, mimeType);
         if (!isDbConfigured()) {
           created.push({
             id: `img_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
             clientId,
             fileUrl: url,
-            fileName: file.originalname,
-            fileSizeBytes: file.size,
-            mimeType: file.mimetype,
+            fileName,
+            fileSizeBytes: buffer.length,
+            mimeType,
             tags: tagArr,
             status: 'pending',
             uploadedAt: new Date().toISOString(),
@@ -143,9 +171,9 @@ imagesRouter.post(
           .values({
             clientId,
             fileUrl: url,
-            fileName: file.originalname,
-            fileSizeBytes: file.size,
-            mimeType: file.mimetype,
+            fileName,
+            fileSizeBytes: buffer.length,
+            mimeType,
             tags: tagArr,
             source: 'upload',
             status: 'pending',
@@ -293,17 +321,39 @@ imagesRouter.post(
       const created: any[] = [];
 
       for (const file of files) {
-        const { url } = await uploadFile(clientId, file.buffer, file.originalname, file.mimetype);
+        let buffer = file.buffer;
+        let fileName = file.originalname;
+        let mimeType = file.mimetype;
         const video = isVideo(file.mimetype);
-
+        if (!video) {
+          try {
+            const n = await normalizeUploadImageIfAvif({ buffer, mimeType, fileName });
+            buffer = n.buffer;
+            fileName = n.fileName;
+            mimeType = n.mimeType;
+          } catch {
+            return res.status(400).json({
+              error: {
+                message: 'Could not convert AVIF image to PNG',
+                code: 'AVIF_CONVERT',
+              },
+            });
+          }
+          if (buffer.length > MAX_FILE_BYTES) {
+            return res.status(400).json({
+              error: { message: 'File too large after conversion', code: 'TOO_LARGE' },
+            });
+          }
+        }
+        const { url } = await uploadFile(clientId, buffer, fileName, mimeType);
         if (!isDbConfigured()) {
           created.push({
             id: `media_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
             clientId,
             fileUrl: url,
-            fileName: file.originalname,
-            fileSizeBytes: file.size,
-            mimeType: file.mimetype,
+            fileName,
+            fileSizeBytes: buffer.length,
+            mimeType,
             tags: tagArr,
             status: video ? 'approved' : 'pending',
             uploadedAt: new Date().toISOString(),
@@ -317,9 +367,9 @@ imagesRouter.post(
           .values({
             clientId,
             fileUrl: url,
-            fileName: file.originalname,
-            fileSizeBytes: file.size,
-            mimeType: file.mimetype,
+            fileName,
+            fileSizeBytes: buffer.length,
+            mimeType,
             tags: tagArr,
             source: 'upload',
             // Videos land as already-approved; the agency vetted them on upload.

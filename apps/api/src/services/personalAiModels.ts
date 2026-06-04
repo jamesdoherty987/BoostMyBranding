@@ -31,9 +31,48 @@
  * surprise downgrades.
  */
 
-import { fal } from '@fal-ai/client';
+import { fal, ApiError, ValidationError } from '@fal-ai/client';
 import { env, features } from '../env.js';
 import { uploadFile } from './r2.js';
+import { withFalConcurrency } from './falConcurrency.js';
+
+/** Fal's subscribe() throws ApiError / ValidationError with a JSON body — surface it in logs. */
+function formatFalClientError(err: unknown): string {
+  if (err instanceof ValidationError) {
+    const parts = err.fieldErrors?.map(
+      (fe) => `${(fe.loc ?? []).join('.')}: ${fe.msg ?? ''}`,
+    );
+    if (parts && parts.length > 0) return parts.join('; ');
+    try {
+      return JSON.stringify(err.body).slice(0, 800);
+    } catch {
+      return err.message;
+    }
+  }
+  if (err instanceof ApiError) {
+    let bodySnippet = '';
+    if (err.body !== undefined) {
+      try {
+        bodySnippet = ` body=${JSON.stringify(err.body).slice(0, 800)}`;
+      } catch {
+        bodySnippet = ' body=<non-serializable>';
+      }
+    }
+    return `${err.message} (HTTP ${err.status})${bodySnippet}`;
+  }
+  return err instanceof Error ? err.message : String(err);
+}
+
+async function falSubscribe(
+  endpoint: string,
+  options: { input?: Record<string, unknown>; logs?: boolean },
+) {
+  try {
+    return await withFalConcurrency(() => fal.subscribe(endpoint, options as never));
+  } catch (e) {
+    throw new Error(`${endpoint}: ${formatFalClientError(e)}`);
+  }
+}
 
 export type AiModelKind = 'image' | 'video';
 export type AiQualityTier = 'max' | 'balanced' | 'budget';
@@ -67,6 +106,23 @@ export interface AiModel {
 const hasFal = () => features.fal;
 const hasOpenAI = () => Boolean(process.env.OPENAI_API_KEY);
 const hasGemini = () => Boolean(process.env.GEMINI_API_KEY);
+
+/**
+ * REST model id for Nano Banana (Gemini image) — `generateContent` on AI Studio.
+ * Preview ids (e.g. …-preview) are removed/rename often; override if Google changes again.
+ */
+function geminiImageModelId(): string {
+  const fromEnv = process.env.GEMINI_IMAGE_MODEL?.trim();
+  if (fromEnv) return fromEnv;
+  return 'gemini-2.5-flash-image';
+}
+
+/** Veo `predictLongRunning` model id — override if Google renames. */
+function geminiVeoModelId(): string {
+  const fromEnv = process.env.GEMINI_VEO_MODEL?.trim();
+  if (fromEnv) return fromEnv;
+  return 'veo-3.1-generate-preview';
+}
 const hasRunway = () => Boolean(process.env.RUNWAY_API_KEY);
 const hasReplicate = () => Boolean(process.env.REPLICATE_API_TOKEN);
 
@@ -400,16 +456,23 @@ async function generateFalImage(
     model.supportsReference &&
     args.referenceImageUrls &&
     args.referenceImageUrls.length > 0;
+  // Some fal image schemas omit 4:5; only remap when this model does not
+  // advertise 4:5 (ideogram, recraft, etc.).
+  const requested: '9:16' | '1:1' | '16:9' | '4:5' = args.aspectRatio ?? '9:16';
+  const falAspect: '9:16' | '1:1' | '16:9' | '4:5' =
+    requested === '4:5' && !model.supportedAspectRatios.includes('4:5')
+      ? '9:16'
+      : requested;
   const input: Record<string, unknown> = {
     prompt: args.prompt,
-    aspect_ratio: args.aspectRatio ?? '9:16',
+    aspect_ratio: falAspect,
   };
   if (useRef) {
     input.image_url = args.referenceImageUrls![0];
   }
   if (args.negativePrompt) input.negative_prompt = args.negativePrompt;
 
-  const result = await fal.subscribe(endpoint, { input, logs: false });
+  const result = await falSubscribe(endpoint, { input, logs: false });
   const url = (result.data as any)?.images?.[0]?.url as string | undefined;
   if (!url) throw new Error(`${model.displayName} returned no image`);
 
@@ -459,7 +522,7 @@ async function generateNanoBananaImage(
   }
 
   const res = await fetch(
-    'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent',
+    `https://generativelanguage.googleapis.com/v1beta/models/${geminiImageModelId()}:generateContent`,
     {
       method: 'POST',
       headers: {
@@ -468,7 +531,7 @@ async function generateNanoBananaImage(
       },
       body: JSON.stringify({
         contents: [{ parts }],
-        generationConfig: { responseModalities: ['IMAGE'] },
+        generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
       }),
     },
   );
@@ -604,6 +667,27 @@ export async function generateAiVideo(
 
 /* ─── fal.ai video (Kling, Luma, Hailuo) ──────────────────── */
 
+/**
+ * fal model-specific duration rules. Kling 2.1 Master only accepts "5" | "10"
+ * (anything else → HTTP 422). Other models get a rounded integer in range.
+ */
+function falVideoRequestDuration(
+  modelId: string,
+  requested: number,
+  maxSeconds: number,
+): { outputSeconds: number; durationParam: string } {
+  const safe =
+    Number.isFinite(requested) && requested > 0 ? requested : 5;
+  const capped = Math.min(Math.max(safe, 0.5), maxSeconds);
+  if (modelId === 'kling-v2') {
+    const outputSeconds = capped <= 5 ? 5 : 10;
+    return { outputSeconds, durationParam: String(outputSeconds) };
+  }
+  const n = Math.round(capped);
+  const outputSeconds = Math.min(Math.max(n, 1), maxSeconds);
+  return { outputSeconds, durationParam: String(outputSeconds) };
+}
+
 async function generateFalVideo(
   model: AiModel,
   args: GenerateVideoArgs,
@@ -653,17 +737,36 @@ async function generateFalVideo(
   const cfg = endpointMap[model.id];
   if (!cfg) throw new Error(`No fal endpoint for video model ${model.id}`);
 
+  const maxSeconds = model.maxDurationSeconds ?? 10;
+  const { outputSeconds, durationParam } = falVideoRequestDuration(
+    model.id,
+    duration,
+    maxSeconds,
+  );
+
+  // MiniMax Hailuo (and some other fal video schemas) cap prompt length — long
+  // director prompts from long-form otherwise return HTTP 422.
+  const falVideoPromptMax: Record<string, number> = {
+    'minimax-hailuo': 2000,
+  };
+  const pMax = falVideoPromptMax[model.id] ?? 10_000;
+  const prompt =
+    args.prompt.length <= pMax ? args.prompt : args.prompt.slice(0, pMax);
+  const neg = args.negativePrompt;
+  const negativePrompt =
+    neg && neg.length > pMax ? neg.slice(0, pMax) : neg;
+
   const input: Record<string, unknown> = {
-    prompt: args.prompt,
-    duration: String(duration),
+    prompt,
+    duration: durationParam,
     aspect_ratio: args.aspectRatio ?? '9:16',
   };
-  if (args.negativePrompt) input.negative_prompt = args.negativePrompt;
+  if (negativePrompt) input.negative_prompt = negativePrompt;
   if (cfg.useImage) {
     input.image_url = args.referenceImageUrls![0];
   }
 
-  const result = await fal.subscribe(cfg.endpoint, { input, logs: false });
+  const result = await falSubscribe(cfg.endpoint, { input, logs: false });
   const url = (result.data as any)?.video?.url as string | undefined;
   if (!url) throw new Error(`${model.displayName} returned no video`);
 
@@ -676,9 +779,9 @@ async function generateFalVideo(
   );
   return {
     url: up.url,
-    durationSeconds: duration,
+    durationSeconds: outputSeconds,
     modelId: model.id,
-    costCents: model.pricePerUnitCents * duration,
+    costCents: model.pricePerUnitCents * outputSeconds,
     fromMock: false,
   };
 }
@@ -773,7 +876,7 @@ async function generateVeoVideo(
   if (!hasGemini()) throw new Error('GEMINI_API_KEY not set');
 
   // Long-running operation: POST :predictLongRunning, poll operations/{id}.
-  const modelPath = 'veo-3.0-generate-preview';
+  const modelPath = geminiVeoModelId();
   const instance: Record<string, unknown> = { prompt: args.prompt };
   if (args.referenceImageUrls?.[0]) {
     try {

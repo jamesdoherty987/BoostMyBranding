@@ -14,8 +14,10 @@ cp .env.example .env           # fill in as you go
 pnpm --filter @boost/database db:generate
 pnpm --filter @boost/database db:migrate
 pnpm --filter @boost/database db:seed
-pnpm dev
+pnpm dev                       # MUST be run from the repo root (not apps/api)
 ```
+
+Use **`pnpm dev`** from the **repository root** so Turbo starts **Next.js on :3000** and the **API on :4000**. If you run `pnpm dev` only inside `apps/api`, the API comes up but **http://localhost:3000 will not load** because the web app never started. Shortcuts: `pnpm dev:stack` (web + API only), `pnpm dev:web` / `pnpm dev:api` (one app each).
 
 Then open:
 

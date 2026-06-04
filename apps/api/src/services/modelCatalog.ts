@@ -343,7 +343,7 @@ export const MODEL_CATALOG: ModelOption[] = [
     id: 'nano-banana-2-pro',
     displayName: 'Nano Banana 2 Pro (Gemini 3.1 Flash Image)',
     provider: 'gemini',
-    endpoint: 'gemini-3.1-flash-image-preview',
+    endpoint: 'gemini-3.1-flash-image',
     mediaType: 'image',
     supportsReference: true,
     maxReferenceCount: 14,

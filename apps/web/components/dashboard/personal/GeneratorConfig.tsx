@@ -11,9 +11,9 @@
  *      auto-pick sensible defaults.
  */
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import useSWR from 'swr';
-import { Save, Sparkles, Info, Zap } from 'lucide-react';
+import { Plus, Save, Sparkles, Info, Trash2, Zap } from 'lucide-react';
 import { Button, Card, CardContent, Input, Textarea, Spinner, toast } from '@boost/ui';
 import type {
   PersonalAccount,
@@ -22,6 +22,7 @@ import type {
   PersonalCharacter,
   PersonalGeneratorConfig,
 } from '@boost/api-client';
+import { ApiError } from '@boost/api-client';
 import { api } from '@/lib/dashboard/api';
 
 export function GeneratorConfigPanel({
@@ -43,6 +44,15 @@ export function GeneratorConfigPanel({
   const [donts, setDonts] = useState<string>((initBible.donts ?? []).join('\n'));
   const [motifs, setMotifs] = useState<string>((initBible.motifs ?? []).join('\n'));
   const [copySamples, setCopySamples] = useState<string>((initBible.copySamples ?? []).join('\n'));
+  const [exampleVideoTitles, setExampleVideoTitles] = useState<string>(
+    (initBible.exampleVideoTitles ?? []).join('\n'),
+  );
+  const [exampleScriptSnippets, setExampleScriptSnippets] = useState<string>(
+    (initBible.exampleScriptSnippets ?? []).join('\n'),
+  );
+  const [referenceScriptSlots, setReferenceScriptSlots] = useState(() =>
+    initReferenceScriptSlots(initBible.referenceFullScripts),
+  );
   const [bannedPhrases, setBannedPhrases] = useState<string>(
     (initBible.bannedPhrases ?? []).join('\n'),
   );
@@ -52,25 +62,54 @@ export function GeneratorConfigPanel({
 
   const [busy, setBusy] = useState(false);
 
+  // Sort keys so Postgres JSON key order does not thrash the fingerprint and reset the form mid-edit.
+  const styleBibleFingerprint = stableRecordFingerprint(account.styleBible);
+  const generatorFingerprint = stableRecordFingerprint(account.generatorConfig);
+
+  useEffect(() => {
+    const bible = account.styleBible ?? {};
+    setVibe(bible.vibe ?? '');
+    setDos((bible.dos ?? []).join('\n'));
+    setDonts((bible.donts ?? []).join('\n'));
+    setMotifs((bible.motifs ?? []).join('\n'));
+    setCopySamples((bible.copySamples ?? []).join('\n'));
+    setExampleVideoTitles((bible.exampleVideoTitles ?? []).join('\n'));
+    setExampleScriptSnippets((bible.exampleScriptSnippets ?? []).join('\n'));
+    setReferenceScriptSlots(initReferenceScriptSlots(bible.referenceFullScripts));
+    setBannedPhrases((bible.bannedPhrases ?? []).join('\n'));
+  }, [account.id, styleBibleFingerprint]);
+
+  useEffect(() => {
+    setGen(account.generatorConfig ?? {});
+  }, [account.id, generatorFingerprint]);
+
+  useEffect(() => {
+    setCharacterId(account.characterId ?? '');
+  }, [account.id, account.characterId]);
+
   async function save() {
     setBusy(true);
     try {
       await api.updatePersonalAccount(account.id, {
         characterId: characterId || null,
         styleBible: {
-          vibe: vibe.trim() || undefined,
+          // Always send (even '') so merge overwrites DB; omitting the key would preserve an old vibe.
+          vibe: vibe.trim(),
           dos: splitLines(dos),
           donts: splitLines(donts),
           motifs: splitLines(motifs),
           copySamples: splitLines(copySamples),
+          exampleVideoTitles: splitLines(exampleVideoTitles),
+          exampleScriptSnippets: splitLines(exampleScriptSnippets),
+          referenceFullScripts: packReferenceFullScripts(referenceScriptSlots),
           bannedPhrases: splitLines(bannedPhrases),
         },
-        generatorConfig: gen,
+        generatorConfig: omitNullShallow(gen as unknown as Record<string, unknown>) as PersonalGeneratorConfig,
       });
       toast.success('Configuration saved');
       onChanged();
     } catch (e) {
-      toast.error('Could not save', (e as Error).message);
+      toast.error('Could not save', formatSaveValidationError(e));
     } finally {
       setBusy(false);
     }
@@ -149,6 +188,109 @@ export function GeneratorConfigPanel({
                 placeholder='e.g. "Bought a bond you cant touch for 10 years. Made peace with that."\n"The index fund is boring. That is the point."'
               />
             </Field>
+            <Field
+              label="Example video titles"
+              hint="One per line. New video titles will match this pattern (length, punctuation, how specific or punchy they are) — not copy these words."
+            >
+              <Textarea
+                rows={3}
+                value={exampleVideoTitles}
+                onChange={(e) => setExampleVideoTitles(e.target.value)}
+                placeholder={'The day everything clicked\nWhy nobody talks about this'}
+              />
+            </Field>
+            <Field
+              label="Example script lines"
+              hint="One short line per row — hook energy and cadence only. For full scripts use the field below."
+            >
+              <Textarea
+                rows={4}
+                value={exampleScriptSnippets}
+                onChange={(e) => setExampleScriptSnippets(e.target.value)}
+                placeholder={'You are not behind. You are on a different clock.\nThree numbers changed how I save.'}
+              />
+            </Field>
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-end justify-between gap-2">
+                <div>
+                  <label className="mb-0.5 block text-xs font-semibold text-slate-700">
+                    Reference full scripts
+                    <span className="ml-1 font-normal text-slate-400">
+                      · Up to five. The model matches beat structure, line length, and tone for new topics — never copy lines, jokes, or stats.
+                    </span>
+                  </label>
+                </div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="h-8 gap-1 px-2 text-xs"
+                  disabled={referenceScriptSlots.length >= 5}
+                  onClick={() =>
+                    setReferenceScriptSlots((rows) =>
+                      rows.length >= 5 ? rows : [...rows, { id: newScriptSlotId(), body: '' }],
+                    )
+                  }
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Add another script
+                </Button>
+              </div>
+              <div className="space-y-3">
+                {referenceScriptSlots.map((slot, index) => (
+                  <div
+                    key={slot.id}
+                    className="rounded-xl border border-slate-200 bg-slate-50/80 p-3 shadow-sm"
+                  >
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <span className="text-xs font-semibold text-slate-600">
+                        Script {index + 1}
+                        {referenceScriptSlots.length > 1 ? (
+                          <span className="ml-1 font-normal text-slate-400">
+                            ({slot.body.trim().length} chars)
+                          </span>
+                        ) : null}
+                      </span>
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-rose-600 hover:bg-rose-50 disabled:pointer-events-none disabled:opacity-40"
+                        disabled={referenceScriptSlots.length <= 1 && !slot.body.trim()}
+                        title={
+                          referenceScriptSlots.length <= 1
+                            ? 'Clear this script or add another, then remove'
+                            : 'Remove this script'
+                        }
+                        onClick={() =>
+                          setReferenceScriptSlots((rows) => {
+                            if (rows.length <= 1) {
+                              return [{ id: slot.id, body: '' }];
+                            }
+                            return rows.filter((r) => r.id !== slot.id);
+                          })
+                        }
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Remove
+                      </button>
+                    </div>
+                    <Textarea
+                      rows={8}
+                      className="font-mono text-xs"
+                      value={slot.body}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setReferenceScriptSlots((rows) =>
+                          rows.map((r) => (r.id === slot.id ? { ...r, body: v } : r)),
+                        );
+                      }}
+                      placeholder="Paste a full script or transcript. Save configuration when done — the AI uses every non-empty script for inspiration."
+                    />
+                  </div>
+                ))}
+              </div>
+              <p className="text-[11px] text-slate-500">
+                Save configuration at the bottom of this tab to persist scripts. Empty boxes are ignored.
+              </p>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -212,7 +354,7 @@ export function GeneratorConfigPanel({
               />
               <Toggle
                 label="Background music"
-                hint="Auto-pick a royalty-free track"
+                hint="Off = no bed track in the final mix (custom URL below is ignored while off). On = your custom audio URL if set, otherwise auto-pick a royalty-free track."
                 value={gen.useMusic ?? true}
                 onChange={(v) => setGen({ ...gen, useMusic: v })}
               />
@@ -247,8 +389,8 @@ export function GeneratorConfigPanel({
                 onChange={(v) => setGen({ ...gen, useCharacter: v })}
               />
               <Toggle
-                label="Web research before scripting"
-                hint="Let Claude browse recent headlines"
+                label="Live web research before scripting"
+                hint="Fetches real Google News headlines + Wikipedia summary for the video topic (internet-backed facts, not the model guessing)"
                 value={gen.allowWebResearch ?? false}
                 onChange={(v) => setGen({ ...gen, allowWebResearch: v })}
               />
@@ -260,15 +402,21 @@ export function GeneratorConfigPanel({
               />
               <Toggle
                 label="Film grain overlay"
-                hint="Adds subtle cinematic grain"
+                hint="Final render; when toggled, overrides the director storyboard grain flag."
                 value={gen.filmGrain ?? false}
                 onChange={(v) => setGen({ ...gen, filmGrain: v })}
               />
               <Toggle
                 label="Letterbox"
-                hint="Black cinema bars top + bottom"
+                hint="Final render; when toggled, overrides the director storyboard letterbox flag."
                 value={gen.letterbox ?? false}
                 onChange={(v) => setGen({ ...gen, letterbox: v })}
+              />
+              <Toggle
+                label="Ken Burns on stills"
+                hint="Subtle zoom on AI/stock photos in the final stitch. Turn off for completely static images."
+                value={gen.kenBurnsOnStills !== false}
+                onChange={(v) => setGen({ ...gen, kenBurnsOnStills: v })}
               />
             </div>
 
@@ -320,6 +468,224 @@ export function GeneratorConfigPanel({
                   <option value="none">None (use on-screen text only)</option>
                 </select>
               </Field>
+              <Field
+                label="Stock voice accent"
+                hint="Used when no custom voice ID is set below. British maps to UK-leaning stock voices per provider."
+              >
+                <select
+                  value={gen.voiceAccent ?? 'american'}
+                  onChange={(e) =>
+                    setGen({ ...gen, voiceAccent: e.target.value as 'american' | 'british' })
+                  }
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                >
+                  <option value="american">American</option>
+                  <option value="british">British (English)</option>
+                </select>
+              </Field>
+              <Field label="Stock voice gender" hint="Used when no custom voice ID is set.">
+                <select
+                  value={gen.voiceGender ?? 'female'}
+                  onChange={(e) =>
+                    setGen({ ...gen, voiceGender: e.target.value as 'female' | 'male' })
+                  }
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                >
+                  <option value="female">Female</option>
+                  <option value="male">Male</option>
+                </select>
+              </Field>
+              <Field
+                label="Custom voice ID (optional)"
+                hint="ElevenLabs voice UUID or OpenAI voice name (alloy, echo, fable, onyx, nova, shimmer). Leave blank for stock accent/gender."
+              >
+                <Input
+                  value={gen.ttsVoiceId ?? ''}
+                  onChange={(e) => setGen({ ...gen, ttsVoiceId: e.target.value.trim() || undefined })}
+                  placeholder="default"
+                  className="w-full"
+                />
+              </Field>
+              <Field
+                label="Speech speed"
+                hint="Narration speed where the provider supports it (0.7–1.2). Leave blank for 1.0."
+              >
+                <Input
+                  type="number"
+                  step={0.05}
+                  value={gen.ttsSpeed ?? ''}
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    setGen({
+                      ...gen,
+                      ttsSpeed: raw === '' ? undefined : Number(raw) || undefined,
+                    });
+                  }}
+                  min={0.7}
+                  max={1.2}
+                  placeholder="1"
+                  className="w-full"
+                />
+              </Field>
+              <Toggle
+                label="True stories only"
+                hint="Scripts must stick to verifiable facts — no invented anecdotes."
+                value={gen.trueStoriesOnly ?? false}
+                onChange={(v) => setGen({ ...gen, trueStoriesOnly: v })}
+              />
+              <Field label="Extra content rules" hint="Freeform instructions appended to every script and director run.">
+                <Textarea
+                  rows={3}
+                  value={gen.extraContentRules ?? ''}
+                  onChange={(e) => setGen({ ...gen, extraContentRules: e.target.value || undefined })}
+                  placeholder="Never name competitors. Always cite the decade for historical clips."
+                />
+              </Field>
+              <Field label="Visual sourcing" hint="Director + legacy pipeline try to honor this.">
+                <select
+                  value={gen.mediaPreference ?? 'mixed'}
+                  onChange={(e) =>
+                    setGen({
+                      ...gen,
+                      mediaPreference: e.target.value as
+                        | 'mixed'
+                        | 'stills_only'
+                        | 'motion_preferred'
+                        | 'video_only',
+                    })
+                  }
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                >
+                  <option value="mixed">Mixed — stills + video as fits</option>
+                  <option value="stills_only">Images only — no AI/stock video clips</option>
+                  <option value="motion_preferred">Motion preferred — lean on video when it helps</option>
+                  <option value="video_only">Video only — prefer motion clips over stills</option>
+                </select>
+              </Field>
+              <Field
+                label="Cut pace"
+                hint="Director: relaxed = longer holds; rapid = more frequent scene changes."
+              >
+                <select
+                  value={gen.cutPace ?? 'normal'}
+                  onChange={(e) =>
+                    setGen({
+                      ...gen,
+                      cutPace: e.target.value as 'relaxed' | 'normal' | 'rapid',
+                    })
+                  }
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                >
+                  <option value="relaxed">Relaxed — fewer, longer shots</option>
+                  <option value="normal">Normal</option>
+                  <option value="rapid">Rapid — quicker cuts</option>
+                </select>
+              </Field>
+              <Field
+                label="Keyword pop-ups"
+                hint="Short on-screen cards for names, places, stats — not full captions."
+              >
+                <select
+                  value={gen.keywordPopStyle ?? 'off'}
+                  onChange={(e) =>
+                    setGen({
+                      ...gen,
+                      keywordPopStyle: e.target.value as 'off' | 'subtle' | 'bold',
+                    })
+                  }
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                >
+                  <option value="off">Off</option>
+                  <option value="subtle">Subtle — refined documentary look</option>
+                  <option value="bold">Bold — high-contrast emphasis</option>
+                </select>
+              </Field>
+              <Toggle
+                label="Fact labels on AI stills"
+                hint="When on, the director adds short on-image text for important spoken facts — dates, years, names, places, money, percentages — up to four words per label."
+                value={gen.allowSparseImageText ?? false}
+                onChange={(v) => setGen({ ...gen, allowSparseImageText: v })}
+              />
+              <Field
+                label="Avg seconds per clip / beat"
+                hint="Rough target for each on-screen segment (1.5–12). Director uses it for shot pacing; legacy path for beat length."
+              >
+                <Input
+                  type="number"
+                  step={0.5}
+                  value={gen.averageClipSeconds ?? ''}
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    setGen({
+                      ...gen,
+                      averageClipSeconds: raw === '' ? undefined : Number(raw) || undefined,
+                    });
+                  }}
+                  min={1.5}
+                  max={12}
+                  placeholder="e.g. 3.5"
+                  className="w-full"
+                />
+              </Field>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                <Field
+                  label="Music under voice (FFmpeg)"
+                  hint="0.05–0.55 when VO + music mix. Default 0.22."
+                >
+                  <Input
+                    type="number"
+                    step={0.02}
+                    value={gen.musicDuckUnderVoice ?? ''}
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      setGen({
+                        ...gen,
+                        musicDuckUnderVoice: raw === '' ? undefined : Number(raw) || undefined,
+                      });
+                    }}
+                    min={0.05}
+                    max={0.55}
+                    className="w-full"
+                  />
+                </Field>
+                <Field label="Music solo (FFmpeg)" hint="0.1–0.85 when there is no VO. Default 0.55.">
+                  <Input
+                    type="number"
+                    step={0.02}
+                    value={gen.musicSoloVolume ?? ''}
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      setGen({
+                        ...gen,
+                        musicSoloVolume: raw === '' ? undefined : Number(raw) || undefined,
+                      });
+                    }}
+                    min={0.1}
+                    max={0.85}
+                    className="w-full"
+                  />
+                </Field>
+                <Field
+                  label="Music in Remotion render"
+                  hint="0.05–0.5 linear gain for slideshow / viral-short path. Leave blank for template default."
+                >
+                  <Input
+                    type="number"
+                    step={0.02}
+                    value={gen.musicBedVolume ?? ''}
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      setGen({
+                        ...gen,
+                        musicBedVolume: raw === '' ? undefined : Number(raw) || undefined,
+                      });
+                    }}
+                    min={0.05}
+                    max={0.5}
+                    className="w-full"
+                  />
+                </Field>
+              </div>
               <Field label="Aspect ratio">
                 <select
                   value={gen.aspectRatio ?? '9:16'}
@@ -392,7 +758,7 @@ export function GeneratorConfigPanel({
                   max={100}
                 />
               </Field>
-              <Field label="Colour grade" hint="Cinematic tint applied after stitching.">
+              <Field label="Colour grade" hint="Final FFmpeg look — overrides the director storyboard colour hint when set.">
                 <select
                   value={gen.colourGrade ?? 'natural'}
                   onChange={(e) =>
@@ -412,6 +778,119 @@ export function GeneratorConfigPanel({
                   <option value="high_contrast">High contrast punch</option>
                 </select>
               </Field>
+              <Field label="Script AI model" hint="Director + script path. Opus is slower and costlier.">
+                <select
+                  value={gen.scriptModel ?? ''}
+                  onChange={(e) =>
+                    setGen({
+                      ...gen,
+                      scriptModel:
+                        e.target.value === ''
+                          ? undefined
+                          : (e.target.value as 'sonnet' | 'opus'),
+                    })
+                  }
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                >
+                  <option value="">Default (Sonnet)</option>
+                  <option value="sonnet">Sonnet</option>
+                  <option value="opus">Opus</option>
+                </select>
+              </Field>
+              <Field
+                label="Final encode quality (FFmpeg)"
+                hint="Used when the server has not set PERSONAL_STITCH_PRESET. High = cleaner, more CPU time."
+              >
+                <select
+                  value={gen.stitchEncodePreset ?? 'balanced'}
+                  onChange={(e) =>
+                    setGen({
+                      ...gen,
+                      stitchEncodePreset: e.target.value as 'fast' | 'balanced' | 'high',
+                    })
+                  }
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                >
+                  <option value="fast">Fast — quickest encodes</option>
+                  <option value="balanced">Balanced — recommended</option>
+                  <option value="high">High — best quality</option>
+                </select>
+              </Field>
+              <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
+                <div className="text-xs font-bold uppercase tracking-wider text-slate-600">
+                  Long-form (1–8 min)
+                </div>
+                <Toggle
+                  label="Long-form mode"
+                  hint="Chapter-style director; combine with a long-form-friendly theme or target length."
+                  value={gen.longformEnabled ?? false}
+                  onChange={(v) => setGen({ ...gen, longformEnabled: v })}
+                />
+                <Field label="Target length (seconds)" hint="60–480. Used when long-form is on.">
+                  <Input
+                    type="number"
+                    step={30}
+                    value={gen.longformTargetSeconds ?? ''}
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      setGen({
+                        ...gen,
+                        longformTargetSeconds: raw === '' ? undefined : Number(raw) || undefined,
+                      });
+                    }}
+                    min={60}
+                    max={480}
+                    placeholder="e.g. 240"
+                    className="w-full"
+                  />
+                </Field>
+                <Field label="Long-form visual style" hint="Preset layered into AI prompts in long-form.">
+                  <select
+                    value={gen.longformAnimationStyle ?? ''}
+                    onChange={(e) =>
+                      setGen({
+                        ...gen,
+                        longformAnimationStyle:
+                          e.target.value === ''
+                            ? undefined
+                            : (e.target.value as PersonalGeneratorConfig['longformAnimationStyle']),
+                      })
+                    }
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                  >
+                    <option value="">Theme default</option>
+                    <option value="storybook">Storybook</option>
+                    <option value="cartoon">Cartoon / explainer</option>
+                    <option value="stick_figure">Stick figure</option>
+                    <option value="claymation">Claymation</option>
+                    <option value="pixel_art">Pixel art</option>
+                    <option value="watercolour">Watercolour</option>
+                    <option value="custom">Custom</option>
+                  </select>
+                </Field>
+                <Field
+                  label="Max AI video clips (long-form)"
+                  hint="0–30. Leave blank for automatic caps from quality tier."
+                >
+                  <Input
+                    type="number"
+                    value={gen.longformMaxAiVideoShots ?? ''}
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      if (raw === '') {
+                        setGen({ ...gen, longformMaxAiVideoShots: undefined });
+                        return;
+                      }
+                      const n = Math.round(Number(raw));
+                      if (!Number.isFinite(n)) return;
+                      setGen({ ...gen, longformMaxAiVideoShots: Math.min(30, Math.max(0, n)) });
+                    }}
+                    min={0}
+                    max={30}
+                    className="w-full"
+                  />
+                </Field>
+              </div>
             </div>
           </div>
 
@@ -438,6 +917,70 @@ function splitLines(s: string): string[] {
     .split('\n')
     .map((l) => l.trim())
     .filter(Boolean);
+}
+
+/** Deterministic fingerprint for JSON-like plain objects (styleBible / generatorConfig). */
+function stableRecordFingerprint(
+  value: PersonalAccountStyleBible | PersonalGeneratorConfig | null | undefined,
+): string {
+  if (value == null) return 'null';
+  const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) =>
+    a.localeCompare(b),
+  );
+  return JSON.stringify(Object.fromEntries(entries));
+}
+
+/** JSON.stringify omits undefined but keeps null — API Zod rejects null on optional numbers. */
+function omitNullShallow<T extends Record<string, unknown>>(obj: T): T {
+  const out = {} as T;
+  for (const [k, v] of Object.entries(obj)) {
+    if (v !== null && v !== undefined) (out as Record<string, unknown>)[k] = v;
+  }
+  return out;
+}
+
+function formatSaveValidationError(e: unknown): string {
+  if (e instanceof ApiError && Array.isArray(e.details) && e.details.length > 0) {
+    const parts = (e.details as { path?: unknown[]; message?: string }[])
+      .slice(0, 3)
+      .map((issue) => {
+        const path =
+          Array.isArray(issue.path) && issue.path.length > 0
+            ? issue.path
+                .map((p) => (typeof p === 'string' || typeof p === 'number' ? String(p) : '?'))
+                .join('.')
+            : 'value';
+        return `${path}: ${issue.message ?? 'invalid'}`;
+      });
+    return parts.join(' · ');
+  }
+  return (e as Error).message;
+}
+
+const MAX_REFERENCE_SCRIPTS = 5;
+
+type ReferenceScriptSlot = { id: string; body: string };
+
+function newScriptSlotId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `script-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function initReferenceScriptSlots(saved?: string[]): ReferenceScriptSlot[] {
+  const trimmed = (saved ?? []).map((s) => s.trim()).filter(Boolean).slice(0, MAX_REFERENCE_SCRIPTS);
+  if (trimmed.length === 0) {
+    return [{ id: newScriptSlotId(), body: '' }];
+  }
+  return trimmed.map((body) => ({ id: newScriptSlotId(), body }));
+}
+
+function packReferenceFullScripts(slots: ReferenceScriptSlot[]): string[] {
+  return slots
+    .map((s) => s.body.trim())
+    .filter(Boolean)
+    .slice(0, MAX_REFERENCE_SCRIPTS);
 }
 
 function Field({

@@ -35,6 +35,7 @@ import { generateJSON } from './claude.js';
 import { withRetry } from './retry.js';
 import type { PersonalTheme } from './personalThemes.js';
 import type { PersonalAccountStyleBible } from '@boost/database';
+import { buildStyleExamplesPrompt } from './personalContentHints.js';
 
 /* ═══════════════════════════════════════════════════════════════════ */
 /* Data shapes                                                          */
@@ -132,6 +133,16 @@ export interface DirectorShot {
   /** Optional focal point 0..1 for Ken Burns on still shots. */
   focalX?: number;
   focalY?: number;
+  /**
+   * Optional lower-third style keyword pops (1–3 words each). Rendered in
+   * the FFmpeg stitch when `keywordPopStyle` is not `off`.
+   */
+  keywordCards?: Array<{ text: string; tStart?: number; tEnd?: number }>;
+  /**
+   * Rare: a very short line composited on the frame for ai_image shots when
+   * `allowSparseImageText` is enabled in generator config.
+   */
+  imageCaption?: string;
 }
 
 /** A storyboard beat — a cluster of shots that sit together narratively. */
@@ -235,6 +246,21 @@ export interface DirectArgs {
   /** Max number of AI-video shots per storyboard — keeps cost in check. */
   maxAiVideoShots?: number;
   /**
+   * Post-process: when `stills_only`, all video shot kinds are demoted to
+   * stills after Claude returns (belt-and-suspenders with the prompt).
+   */
+  mediaPreference?: 'mixed' | 'stills_only' | 'motion_preferred' | 'video_only';
+  /** Appended after style bible / direction — content rules, examples, pacing, media bias. */
+  promptAppendix?: string;
+  /** Default / center per-shot duration when the model omits `durationSeconds`. */
+  averageShotSeconds?: number;
+  /** Shorter vs longer average shots + more cuts when `rapid`. */
+  cutPace?: 'relaxed' | 'normal' | 'rapid';
+  /** Keyword pop cards in the stitch; `off` strips them at normalise time. */
+  keywordPopStyle?: 'off' | 'subtle' | 'bold';
+  /** When false, `imageCaption` is stripped at normalise time. */
+  allowSparseImageText?: boolean;
+  /**
    * Long-form mode. When set, the director plans a CHAPTER-structured
    * storyboard suitable for minutes of content instead of seconds:
    *
@@ -260,6 +286,8 @@ export interface DirectArgs {
       | 'watercolour'
       | 'custom';
   };
+  /** Claude model for storyboard JSON. */
+  scriptModel?: 'sonnet' | 'opus';
 }
 
 export async function planStoryboard(args: DirectArgs): Promise<Storyboard> {
@@ -269,21 +297,35 @@ export async function planStoryboard(args: DirectArgs): Promise<Storyboard> {
   // the default 4k budget. Bump to 12k when longform is on.
   const maxTokens = args.longform?.enabled ? 12_000 : 4_096;
   const raw = await withRetry(
-    () => generateJSON<Storyboard>(prompt, { model: 'sonnet', maxTokens }),
+    () =>
+      generateJSON<Storyboard>(prompt, {
+        model: args.scriptModel ?? 'sonnet',
+        maxTokens,
+      }),
     { label: `director:${args.theme.id}:${args.topic.slice(0, 40)}`, attempts: 2 },
   );
 
   // Normalise + sanity defaults.
-  const longformOpt = args.longform?.enabled
-    ? { longform: true as const }
-    : undefined;
+  const normOpts: {
+    longform?: boolean;
+    averageShotSeconds?: number;
+    cutPace?: DirectArgs['cutPace'];
+    keywordPopStyle?: DirectArgs['keywordPopStyle'];
+    allowSparseImageText?: boolean;
+  } = {
+    averageShotSeconds: args.averageShotSeconds,
+    cutPace: args.cutPace,
+    keywordPopStyle: args.keywordPopStyle,
+    allowSparseImageText: args.allowSparseImageText,
+  };
+  if (args.longform?.enabled) normOpts.longform = true;
   const out: Storyboard = {
     title: raw.title ?? args.topic,
     hook: raw.hook ?? '',
     outro: raw.outro ?? '',
     caption: raw.caption ?? '',
     hashtags: raw.hashtags ?? args.theme.defaultHashtags ?? [],
-    acts: normaliseActs(raw.acts, args.theme, longformOpt),
+    acts: normaliseActs(raw.acts, args.theme, normOpts),
     editPlan: {
       pacing: raw.editPlan?.pacing ?? defaultPacing(args.theme),
       colourGrade: raw.editPlan?.colourGrade ?? 'Natural, slight warmth',
@@ -318,13 +360,47 @@ export async function planStoryboard(args: DirectArgs): Promise<Storyboard> {
     }
   }
 
+  // Account wants zero motion clips — demote any video kinds Claude used anyway.
+  if (args.mediaPreference === 'stills_only') {
+    for (const s of allShots) {
+      if (s.kind === 'ai_video') s.kind = 'ai_image';
+      else if (s.kind === 'scraped_video') s.kind = 'scraped_image';
+      else if (s.kind === 'b_roll') {
+        s.kind = 'scraped_image';
+        if (!s.imageQuery?.trim()) {
+          s.imageQuery = (s.description || s.subjectAction || args.topic).slice(0, 120);
+        }
+      }
+    }
+  }
+
+  // Motion-only accounts: prefer video clip kinds over stills.
+  if (args.mediaPreference === 'video_only') {
+    for (const s of allShots) {
+      if (s.kind === 'ai_image' || s.kind === 'scraped_image') {
+        s.kind = 'scraped_video';
+        if (!s.imageQuery?.trim()) {
+          s.imageQuery = (s.description || s.subjectAction || args.topic).slice(0, 120);
+        }
+      }
+    }
+  }
+
   // Enforce transition for the final shot.
   if (allShots.length > 0) allShots[allShots.length - 1]!.transitionOut = 'none';
 
-  // Per-shot duration clamp. Short-form caps each shot at 8s to keep
-  // pacing tight; long-form allows up to 14s so chapter "establishing"
-  // and "reveal" shots can breathe.
-  const perShotMax = args.longform?.enabled ? 14 : 8;
+  // Per-shot duration clamp — cutPace tightens or relaxes windows.
+  const pace = args.cutPace ?? 'normal';
+  const perShotMax =
+    args.longform?.enabled
+      ? pace === 'rapid'
+        ? 8
+        : 14
+      : pace === 'rapid'
+        ? 4
+        : pace === 'relaxed'
+          ? 9
+          : 8;
   for (const s of allShots) {
     s.durationSeconds = Math.max(1, Math.min(perShotMax, s.durationSeconds));
   }
@@ -370,10 +446,34 @@ function defaultPacing(theme: PersonalTheme): 'slow' | 'medium' | 'fast' {
   return 'medium';
 }
 
+function parseKeywordCards(raw: unknown): DirectorShot['keywordCards'] {
+  if (!Array.isArray(raw) || raw.length < 1) return undefined;
+  const out: NonNullable<DirectorShot['keywordCards']> = [];
+  for (const x of raw.slice(0, 4)) {
+    if (!x || typeof x !== 'object') continue;
+    const text = String((x as { text?: unknown }).text ?? '').trim();
+    if (!text || text.length > 48) continue;
+    const tStart = (x as { tStart?: unknown }).tStart;
+    const tEnd = (x as { tEnd?: unknown }).tEnd;
+    out.push({
+      text,
+      tStart: typeof tStart === 'number' && Number.isFinite(tStart) ? tStart : undefined,
+      tEnd: typeof tEnd === 'number' && Number.isFinite(tEnd) ? tEnd : undefined,
+    });
+  }
+  return out.length ? out : undefined;
+}
+
 function normaliseActs(
   acts: DirectorAct[] | undefined,
   theme: PersonalTheme,
-  opts?: { longform?: boolean },
+  opts?: {
+    longform?: boolean;
+    averageShotSeconds?: number;
+    cutPace?: DirectArgs['cutPace'];
+    keywordPopStyle?: DirectArgs['keywordPopStyle'];
+    allowSparseImageText?: boolean;
+  },
 ): DirectorAct[] {
   if (!acts || acts.length === 0) return [];
   return acts.map((a, ai) => ({
@@ -396,14 +496,63 @@ function normaliseShot(
   s: Partial<DirectorShot>,
   id: string,
   theme: PersonalTheme,
-  opts?: { longform?: boolean },
+  opts?: {
+    longform?: boolean;
+    averageShotSeconds?: number;
+    cutPace?: DirectArgs['cutPace'];
+    keywordPopStyle?: DirectArgs['keywordPopStyle'];
+    allowSparseImageText?: boolean;
+  },
 ): DirectorShot {
-  // Short-form shots stay tight (1.5–7s); long-form allows breathing room
-  // up to 14s so establishing + reveal shots can sit on screen long
-  // enough to read. Without this, an 8-minute video gets silently
-  // capped at ~4 minutes because every shot is clamped to 7s.
-  const [minDur, maxDur] = opts?.longform ? [3, 14] : [1.5, 7];
-  const duration = clamp(s.durationSeconds ?? (opts?.longform ? 5 : 3), minDur, maxDur);
+  const pace = opts?.cutPace ?? 'normal';
+  let minDur = opts?.longform ? 3 : 1.5;
+  let maxDur = opts?.longform ? 14 : 7;
+  if (pace === 'rapid') {
+    minDur = opts?.longform ? 2 : 1.2;
+    maxDur = opts?.longform ? 8 : 4;
+  } else if (pace === 'relaxed') {
+    minDur = opts?.longform ? 4 : 2;
+    maxDur = opts?.longform ? 14 : 9;
+  }
+
+  const baseDefault = opts?.longform ? 5 : 3;
+  const avg = opts?.averageShotSeconds;
+  const defaultMid =
+    avg != null && Number.isFinite(avg)
+      ? opts?.longform
+        ? Math.min(12, Math.max(minDur, Math.min(10, Math.max(2, avg))))
+        : Math.min(maxDur, Math.max(minDur, Math.min(8, Math.max(1.5, avg))))
+      : pace === 'rapid'
+        ? opts?.longform
+          ? 4.5
+          : 2.5
+        : pace === 'relaxed'
+          ? opts?.longform
+            ? 7
+            : 4.5
+          : baseDefault;
+  const duration = clamp(s.durationSeconds ?? defaultMid, minDur, maxDur);
+
+  let keywordCards = parseKeywordCards((s as { keywordCards?: unknown }).keywordCards);
+  if (opts?.keywordPopStyle === 'off') keywordCards = undefined;
+  else if (keywordCards) {
+    keywordCards = keywordCards
+      .map((k) => ({
+        text: k.text.slice(0, 48),
+        tStart: k.tStart,
+        tEnd: k.tEnd,
+      }))
+      .filter((k) => k.text.length > 0);
+    if (keywordCards.length === 0) keywordCards = undefined;
+  }
+
+  let imageCaption: string | undefined =
+    typeof (s as { imageCaption?: unknown }).imageCaption === 'string'
+      ? (s as { imageCaption: string }).imageCaption.trim()
+      : undefined;
+  if (!opts?.allowSparseImageText) imageCaption = undefined;
+  else if (imageCaption && imageCaption.length > 48) imageCaption = imageCaption.slice(0, 48);
+
   return {
     id: s.id ?? `shot_${id}`,
     role: s.role ?? '',
@@ -425,6 +574,8 @@ function normaliseShot(
     imageQuery: s.imageQuery?.trim(),
     focalX: clampOpt(s.focalX, 0, 1),
     focalY: clampOpt(s.focalY, 0, 1),
+    keywordCards,
+    imageCaption,
   };
 }
 
@@ -452,21 +603,32 @@ function clampOpt(n: number | undefined, lo: number, hi: number): number | undef
 
 function buildDirectorPrompt(args: DirectArgs): string {
   const sb = args.styleBible;
-  const styleBibleBlock = sb
+  const styleExamples = buildStyleExamplesPrompt(sb);
+  const coreStyleBible = sb
     ? [
         '',
-        'ACCOUNT STYLE BIBLE (match exactly):',
+        'ACCOUNT STYLE BIBLE (match exactly — video title, hook VO, shot voiceovers, and caption must reflect this voice):',
         sb.vibe ? `- Vibe: ${sb.vibe}` : '',
         sb.dos && sb.dos.length > 0 ? `- Always do: ${sb.dos.join(' · ')}` : '',
         sb.donts && sb.donts.length > 0 ? `- Never do: ${sb.donts.join(' · ')}` : '',
         sb.motifs && sb.motifs.length > 0 ? `- Recurring motifs: ${sb.motifs.join(' · ')}` : '',
+        sb.palette && sb.palette.length > 0
+          ? `- Brand palette (every shot should lean on these colours): ${sb.palette.join(', ')}`
+          : '',
+        sb.typography?.trim()
+          ? `- Typography / on-screen text feel: ${sb.typography.trim()}`
+          : '',
         sb.bannedPhrases && sb.bannedPhrases.length > 0
           ? `- BANNED phrases (never write): ${sb.bannedPhrases.join(' · ')}`
+          : '',
+        sb.copySamples && sb.copySamples.length > 0
+          ? `- Copy samples (mimic rhythm and word choice — never copy verbatim):\n${sb.copySamples.map((s) => `  • "${s}"`).join('\n')}`
           : '',
       ]
         .filter(Boolean)
         .join('\n')
     : '';
+  const styleBibleBlock = [coreStyleBible.trim(), styleExamples.trim()].filter(Boolean).join('\n\n');
 
   const charBlock = args.characterGuide
     ? `\n\nON-CAMERA CHARACTER (this person appears in every AI-generated shot — describe them identically every time so the model keeps them consistent):\n- Name: ${args.characterGuide.name}\n${args.characterGuide.promptFragment ? `- Canonical look: ${args.characterGuide.promptFragment}\n` : ''}${args.characterGuide.voiceTone ? `- Voice tone: ${args.characterGuide.voiceTone}\n` : ''}${args.characterGuide.voicePace ? `- Pace: ${args.characterGuide.voicePace}\n` : ''}${args.characterGuide.catchphrases && args.characterGuide.catchphrases.length > 0 ? `- Catchphrases (sparingly): ${args.characterGuide.catchphrases.join(' · ')}` : ''}`
@@ -477,7 +639,7 @@ function buildDirectorPrompt(args: DirectArgs): string {
     : '';
 
   const inspirationBlock = args.inspirationStyleBlock
-    ? `\n\nINSPIRATION VISUAL LANGUAGE (the account has picked these as the target look — every AI-generated shot must feel like it was shot by the same person who made these references):\n${args.inspirationStyleBlock}`
+    ? `\n\nINSPIRATION VISUAL LANGUAGE (the account chose these references — stills and/or short clips; representative frames from clips are passed into ai_image and ai_video as pixel anchors — every generated shot must feel coherently on-brand with them, not generic theme stock):\n${args.inspirationStyleBlock}\n\nTreat palette, contrast, grain, lens character, motion rhythm, and editorial cut feel as hard requirements wherever they appear in the references.`
     : '';
 
   const viralFormatPromptBlock = args.viralFormatBlock
@@ -537,9 +699,39 @@ function buildDirectorPrompt(args: DirectArgs): string {
       ].join('\n')
     : '';
 
+  const pace = args.cutPace ?? 'normal';
   const shotCountRule = longform
-    ? `- Plan approximately ${totalShotTarget} SHOTS total across ${longformChapterCount} chapters. Keep every shot 5-10 seconds. The sum of shot durations must be close to the ${longformTarget}s target.`
-    : `- Plan 5-10 SHOTS total. Most shots are 2-4 seconds. Shots carry the viewer — one long clip is a dead video.${multiActHint}`;
+    ? pace === 'rapid'
+      ? `- Plan approximately ${Math.round(totalShotTarget * 1.12)} SHOTS total across ${longformChapterCount} chapters — RAPID PACING: favour 3-7s shots, frequent cuts, still land near the ${longformTarget}s runtime target (±15%).`
+      : `- Plan approximately ${totalShotTarget} SHOTS total across ${longformChapterCount} chapters. Keep every shot 5-10 seconds. The sum of shot durations must be close to the ${longformTarget}s target.`
+    : pace === 'rapid'
+      ? `- Plan 8-18 SHOTS total. MOST shots 1.5-3.5 seconds — rapid editorial cuts; keep the viewer oriented with strong subjectAction each time.${multiActHint}`
+      : pace === 'relaxed'
+        ? `- Plan 4-8 SHOTS total. Most shots 3.5-6 seconds — let moments breathe; fewer, richer frames.${multiActHint}`
+        : `- Plan 5-10 SHOTS total. Most shots are 2-4 seconds. Shots carry the viewer — one long clip is a dead video.${multiActHint}`;
+
+  const keywordBlock =
+    args.keywordPopStyle && args.keywordPopStyle !== 'off'
+      ? `\n\nKEYWORD POP-UPS (premium lower-thirds — NOT full captions):\n- On roughly 30-45% of shots, add optional \`keywordCards\`: max 3 entries; each \`text\` is 1-3 words OR a compact stat (e.g. "Kyoto" or "$4.2T"). Never sentences.\n- Optional \`tStart\` / \`tEnd\` in seconds within that shot (must stay inside the shot duration). Omit for auto-timing.\n- Do not repeat words already in \`onScreen\` or the VO line.\n- Visual tier: ${args.keywordPopStyle === 'bold' ? 'BOLD — high contrast, occasional single-word punch.' : 'SUBTLE — refined documentary / broadcast look.'}`
+      : '';
+
+  const sparseTextBlock = args.allowSparseImageText
+    ? `\n\nON-IMAGE INFORMATION LABELS (\`imageCaption\` — **enabled** for this account):\n- Whenever the **voiceover** states something viewers should remember — **calendar dates**, **years**, **people's names**, **cities / countries / landmarks**, **amounts of money**, **percentages**, **ages**, or other **proper-noun facts** — set \`imageCaption\` on that **\`ai_image\`** shot (or the very next \`ai_image\` shot if the current shot is video). **Max 4 words** (symbols and digits count). Examples: "June 6, 1944", "Marie Curie", "Lagos", "$4.2T", "76%".\n- Aim for **imageCaption on a substantial share of \`ai_image\` shots** whenever the narration is fact-heavy — not one-off decoration. If the script names many dates or names, **most** of those beats should carry a matching label.\n- Never paste a full sentence, the hook, or duplicate \`onScreen\` verbatim — only the crisp fact. **Omit** \`imageCaption\` only when the frame is already a photo of a sign/document that clearly shows the same text, or the shot is not \`ai_image\`.`
+    : '';
+
+  const sparseDirectingRule = args.allowSparseImageText
+    ? `- **imageCaption:** follow ON-IMAGE INFORMATION LABELS above — dates, names, places, and stats spoken in VO must get a ≤4-word \`imageCaption\` on \`ai_image\` shots unless redundant with the frame.\n`
+    : '';
+
+  const imageCaptionJsonLine = args.allowSparseImageText
+    ? '              "imageCaption": "<on ai_image: set ≤4 words when VO gives a date, year, name, place, money, %, or stat; use often when facts are spoken; omit only if frame already shows same text>"'
+    : '              "imageCaption": "<optional ≤4 words on rare ai_image shots>"';
+
+  const exampleTitleCount = (args.styleBible?.exampleVideoTitles ?? []).filter(Boolean).length;
+  const titleJsonContract =
+    exampleTitleCount > 0
+      ? '<5-12 words — MUST mirror STYLE of ACCOUNT example titles (length, punctuation, question vs claim, numbers, specificity); must look like the next video in the same series>'
+      : '<5-9 words>';
 
   const targetForPrompt = longform ? longformTarget : args.targetDurationSeconds;
 
@@ -548,11 +740,11 @@ function buildDirectorPrompt(args: DirectArgs): string {
 THEME: ${args.theme.name} — ${args.theme.tagline}
 DEFAULT VISUAL STYLE: ${args.theme.visualStyle}
 DEFAULT VOICE: ${args.theme.voiceGuide}
-PREFERRED PLATFORMS: ${args.theme.preferredPlatforms.join(', ')}${styleBibleBlock}${charBlock}${refBlock}${inspirationBlock}${viralFormatPromptBlock}${hookFormulaBlock}${newsBlock}${blacklist}${animStyleBlock}${longformRules}${args.customDirection ? `\n\nACCOUNT-LEVEL DIRECTION: ${args.customDirection}` : ''}
+PREFERRED PLATFORMS: ${args.theme.preferredPlatforms.join(', ')}${styleBibleBlock}${charBlock}${refBlock}${inspirationBlock}${viralFormatPromptBlock}${hookFormulaBlock}${newsBlock}${blacklist}${animStyleBlock}${longformRules}${args.customDirection ? `\n\nACCOUNT-LEVEL DIRECTION: ${args.customDirection}` : ''}${args.promptAppendix ? `\n\n${args.promptAppendix}` : ''}${keywordBlock}${sparseTextBlock}
 
 DIRECTING RULES (non-negotiable):
 ${shotCountRule}
-- Give every shot a CONCRETE subject action (verb + object), a camera move, a framing, a lighting description, and a palette. Abstract = slop.
+${sparseDirectingRule}- Give every shot a CONCRETE subject action (verb + object), a camera move, a framing, a lighting description, and a palette. Abstract = slop.
 - Use intentional CUTS. Default transition is 'hard_cut'. Save 'whip_pan' / 'match_cut' / 'flash_cut' for moments that earn them.
 - Reuse the SAME character / setting descriptors across shots so AI models keep consistency. Don't say "a woman" once and "she" the next shot — re-describe every time.
 - Mark each shot as ONE of: ai_video (expensive — use sparingly for money-shots and motion-critical moments), ai_image (cheap, animated at render with Ken Burns), scraped_video, scraped_image, user_media, b_roll.
@@ -572,7 +764,7 @@ hard_cut (default), match_cut, whip_pan, dip_to_black, cross_dissolve, flash_cut
 
 OUTPUT contract — return ONLY JSON:
 {
-  "title": "<5-9 words>",
+  "title": "${titleJsonContract}",
   "hook": "<opening spoken line, ≤3 seconds>",
   "outro": "<closing CTA, one sentence>",
   "caption": "<post caption, 1-3 sentences, ≤3 emoji>",
@@ -619,7 +811,9 @@ OUTPUT contract — return ONLY JSON:
               "kind": "ai_video|ai_image|scraped_video|scraped_image|user_media|b_roll",
               "imageQuery": "<only when kind is scraped_*>",
               "focalX": 0.5,
-              "focalY": 0.55
+              "focalY": 0.55,
+              "keywordCards": [{"text": "Paris", "tStart": 0.4, "tEnd": 1.2}],
+              ${imageCaptionJsonLine}
             }
           ]
         }
@@ -662,6 +856,8 @@ export function shotToPrompt(args: {
    * chapters matches the same animated look.
    */
   animationStyleHint?: string;
+  /** Title/copy/motif hints from the style bible for image+video models. */
+  shotBrandHints?: string;
 }): string {
   const {
     shot,
@@ -671,6 +867,7 @@ export function shotToPrompt(args: {
     globalColourGrade,
     inspirationStyleHint,
     animationStyleHint,
+    shotBrandHints,
   } = args;
 
   // 1. IDENTITY — character / subject description (identity anchor).
@@ -687,7 +884,7 @@ export function shotToPrompt(args: {
   const motion = `Camera: ${cameraToEnglish(shot.camera)}. ${shot.subjectAction ? `Subject action: ${shot.subjectAction}.` : ''}${shot.speedRamp && shot.speedRamp !== 'none' ? ` Speed ramp: ${shot.speedRamp.replace('_', ' ')}.` : ''}`;
 
   // 4. STYLE — theme + account vibe + colour grade + inspiration + animation.
-  const style = [
+  let styleStr = [
     // Animation preset comes first so the model locks on a medium (2D
     // cartoon vs. stick-figure vs. storybook) before fine-tuning palette.
     animationStyleHint ? `Medium: ${animationStyleHint}.` : '',
@@ -695,13 +892,18 @@ export function shotToPrompt(args: {
     styleBibleVibe,
     globalColourGrade ? `Colour grade: ${globalColourGrade}.` : '',
     inspirationStyleHint ? `Visual language: ${inspirationStyleHint}.` : '',
+    shotBrandHints ? `Brand voice (visuals must match): ${shotBrandHints}` : '',
   ]
     .filter(Boolean)
     .join(' ');
 
+  if (shot.kind === 'ai_image' && shot.imageCaption?.trim()) {
+    styleStr += ` Include a small tasteful typographic label reading "${shot.imageCaption.trim()}" — clean high-end sans-serif, subtle shadow, must stay secondary to the photograph.`;
+  }
+
   // 5. NEGATIVE — implied by missing banned terms; handled per-model.
 
-  return [identity, image, motion, style]
+  return [identity, image, motion, styleStr]
     .filter((s) => s && s.trim().length > 0)
     .join(' ');
 }

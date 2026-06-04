@@ -1,0 +1,15 @@
+# Keep build context small and avoid leaking secrets into the image.
+.git
+.github
+**/.turbo
+**/node_modules
+**/dist
+**/.next
+**/.env
+**/.env.*
+!.env.example
+*.md
+apps/web/.next
+.cursor
+**/*.test.ts
+**/*.spec.ts

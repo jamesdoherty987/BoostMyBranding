@@ -7,7 +7,8 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "upload:public-music-manifest": "node scripts/upload-public-music-from-manifest.mjs scripts/r2-public-music-manifest.json"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
@@ -17,6 +18,7 @@
     "@boost/database": "workspace:*",
     "@boost/video": "workspace:*",
     "@fal-ai/client": "^1.2.2",
+    "bcryptjs": "^2.4.3",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
@@ -28,11 +30,11 @@
     "node-cron": "^3.0.3",
     "postgres": "^3.4.5",
     "resend": "^4.0.1",
+    "sharp": "^0.34.5",
     "stripe": "^17.4.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "@types/bcryptjs": "^3.0.0",
     "@types/cookie-parser": "^1.4.7",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",

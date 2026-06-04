@@ -169,7 +169,7 @@ function UploadDropzone({
     if (pending.length === 0) return;
     setBusy(true);
     try {
-      await api.uploadPersonalMedia(
+      const { uploaded, skipped } = await api.uploadPersonalMedia(
         account.id,
         pending,
         {
@@ -182,14 +182,34 @@ function UploadDropzone({
         },
         (pct) => setProgress(pct),
       );
-      toast.success('Uploaded', `${pending.length} file(s) added to library`);
-      setPending([]);
-      setDescription('');
-      setTags('');
-      setCharacterId('');
-      setPinned(false);
+      if (uploaded.length > 0) {
+        const extra =
+          skipped.length > 0 ? ` (${skipped.length} skipped — see toast)` : '';
+        toast.success('Uploaded', `${uploaded.length} file(s) added to library${extra}`);
+      }
+      if (skipped.length > 0) {
+        const preview = skipped
+          .slice(0, 3)
+          .map((s) => `${s.fileName}: ${s.message}`)
+          .join(' · ');
+        const more = skipped.length > 3 ? ` (+${skipped.length - 3} more)` : '';
+        toast.info('Some files were skipped', `${preview}${more}`);
+      }
+      if (uploaded.length === 0 && skipped.length > 0) {
+        toast.error(
+          'Nothing uploaded',
+          skipped[0]?.message ?? 'Every file in this batch was skipped.',
+        );
+      }
+      if (uploaded.length > 0) {
+        setPending([]);
+        setDescription('');
+        setTags('');
+        setCharacterId('');
+        setPinned(false);
+        onUploaded();
+      }
       setProgress(0);
-      onUploaded();
     } catch (e) {
       toast.error('Upload failed', (e as Error).message);
     } finally {
@@ -273,8 +293,8 @@ function UploadDropzone({
         </div>
 
         {/* Dropzone + picker */}
-        <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2">
-          <div className="text-xs text-slate-500">
+        <div className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+          <div className="min-w-0 flex-1 break-words text-xs text-slate-500">
             Drop files here or
             <button
               type="button"
@@ -283,11 +303,11 @@ function UploadDropzone({
             >
               browse
             </button>
-            <span className="ml-2 text-slate-400">
+            <span className="ml-2 block text-slate-400 sm:mt-0 sm:inline">
               (jpg, png, webp, mp4, mov, webm, mp3, wav — max 50MB each)
             </span>
           </div>
-          <label className="flex items-center gap-1 text-xs text-slate-600">
+          <label className="flex shrink-0 items-center gap-1 text-xs text-slate-600">
             <input
               type="checkbox"
               checked={pinned}
@@ -331,11 +351,11 @@ function UploadDropzone({
 
         {busy ? (
           <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
-            <div className="mb-1 flex items-center justify-between text-xs">
-              <span className="text-slate-600">Uploading…</span>
-              <span className="font-semibold text-slate-900">{progress}%</span>
+            <div className="mb-1 flex min-w-0 items-center justify-between gap-2 text-xs">
+              <span className="min-w-0 truncate text-slate-600">Uploading…</span>
+              <span className="shrink-0 font-semibold text-slate-900">{progress}%</span>
             </div>
-            <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
+            <div className="h-1.5 min-w-0 overflow-hidden rounded-full bg-slate-100">
               <div
                 className="h-full bg-gradient-cta transition-all"
                 style={{ width: `${progress}%` }}
@@ -523,7 +543,7 @@ function MediaCard({
           </div>
         ) : (
           <>
-            <div className="line-clamp-3 text-xs text-slate-700">
+            <div className="line-clamp-3 min-w-0 break-words text-xs text-slate-700">
               {item.description ?? (
                 <span className="italic text-slate-400">
                   {item.aiDescription ?? 'no description'}

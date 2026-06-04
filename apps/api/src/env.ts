@@ -20,6 +20,12 @@ if (!process.env.API_PORT && process.env.PORT) {
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   API_PORT: z.coerce.number().default(4000),
+  /**
+   * Public origin of this API (e.g. https://api.example.com). Used for `/uploads/…`
+   * when R2 is off so URLs hit the server that serves `express.static('/uploads')`.
+   * In production, prefer this over APP_URL when the web app is on a different host.
+   */
+  API_PUBLIC_URL: z.string().url().optional().or(z.literal('')),
 
   APP_URL: z.string().url().default('http://localhost:3000'),
   PORTAL_URL: z.string().url().default('http://localhost:3000/portal'),
@@ -31,6 +37,11 @@ const schema = z.object({
 
   ANTHROPIC_API_KEY: z.string().optional(),
   FAL_KEY: z.string().optional(),
+  /**
+   * Max concurrent fal.ai `subscribe` jobs for this process (1–10). Default 8.
+   * fal often caps ~10; personal director + cron + inspiration can overlap.
+   */
+  FAL_MAX_CONCURRENT: z.coerce.number().int().min(1).max(10).optional(),
 
   R2_ACCOUNT_ID: z.string().optional(),
   R2_ACCESS_KEY_ID: z.string().optional(),
@@ -38,11 +49,16 @@ const schema = z.object({
   R2_BUCKET_NAME: z.string().optional(),
   R2_PUBLIC_URL: z.string().url().optional().or(z.literal('')),
   /**
-   * Force-disable R2 even when credentials are set. Useful on dev
-   * machines whose network blocks *.r2.dev (e.g. work laptops with
-   * managed DNS). Falls back to local disk uploads served at /uploads.
+   * Force-disable R2. Accepts `true`/`false`, `1`/`0`, `yes`/`no`, `on`/`off` (case-insensitive).
+   * Blank or unset uses R2 when all R2_* credentials + R2_PUBLIC_URL are set.
    */
-  R2_DISABLED: z.enum(['true', 'false']).optional(),
+  R2_DISABLED: z.preprocess((val) => {
+    if (val === '' || val === undefined || val === null) return undefined;
+    const s = String(val).trim().toLowerCase();
+    if (['true', '1', 'yes', 'on'].includes(s)) return 'true';
+    if (['false', '0', 'no', 'off'].includes(s)) return 'false';
+    return undefined;
+  }, z.enum(['true', 'false']).optional()),
 
   STRIPE_SECRET_KEY: z.string().optional(),
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
@@ -88,6 +104,16 @@ if (!parsed.success) {
 
 export const env = parsed.data;
 
+function r2EnvLooksComplete(): boolean {
+  return Boolean(
+    env.R2_ACCOUNT_ID?.trim() &&
+      env.R2_ACCESS_KEY_ID?.trim() &&
+      env.R2_SECRET_ACCESS_KEY?.trim() &&
+      env.R2_BUCKET_NAME?.trim() &&
+      env.R2_PUBLIC_URL?.trim(),
+  );
+}
+
 // Extra prod-safety checks: refuse to start if we'd silently run with insecure defaults.
 if (env.NODE_ENV === 'production') {
   const errors: string[] = [];
@@ -97,6 +123,18 @@ if (env.NODE_ENV === 'production') {
   if (!env.STRIPE_SECRET_KEY) errors.push('STRIPE_SECRET_KEY is required in production.');
   if (!env.STRIPE_WEBHOOK_SECRET)
     errors.push('STRIPE_WEBHOOK_SECRET is required in production (signing secret).');
+  const r2CredIntent = Boolean(
+    env.R2_ACCOUNT_ID?.trim() ||
+      env.R2_ACCESS_KEY_ID?.trim() ||
+      env.R2_SECRET_ACCESS_KEY?.trim() ||
+      env.R2_BUCKET_NAME?.trim() ||
+      env.R2_PUBLIC_URL?.trim(),
+  );
+  if (r2CredIntent && env.R2_DISABLED !== 'true' && !r2EnvLooksComplete()) {
+    errors.push(
+      'R2 is partially configured: set R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME, and R2_PUBLIC_URL (public https base for object URLs).',
+    );
+  }
   if (errors.length > 0) {
     console.error('❌ Production environment is misconfigured:');
     for (const e of errors) console.error(`   - ${e}`);
@@ -104,14 +142,42 @@ if (env.NODE_ENV === 'production') {
   }
 }
 
+// Misleading partial R2 config: uploads would fall back to local /uploads URLs and
+// long stitch jobs would fail when the API tries to fetch VO/music by HTTP.
+const r2Partial =
+  env.R2_DISABLED !== 'true' &&
+  Boolean(
+    env.R2_ACCOUNT_ID?.trim() ||
+      env.R2_ACCESS_KEY_ID?.trim() ||
+      env.R2_SECRET_ACCESS_KEY?.trim() ||
+      env.R2_BUCKET_NAME?.trim() ||
+      env.R2_PUBLIC_URL?.trim(),
+  ) &&
+  !r2EnvLooksComplete();
+if (r2Partial) {
+  const missing: string[] = [];
+  if (!env.R2_ACCOUNT_ID?.trim()) missing.push('R2_ACCOUNT_ID');
+  if (!env.R2_ACCESS_KEY_ID?.trim()) missing.push('R2_ACCESS_KEY_ID');
+  if (!env.R2_SECRET_ACCESS_KEY?.trim()) missing.push('R2_SECRET_ACCESS_KEY');
+  if (!env.R2_BUCKET_NAME?.trim()) missing.push('R2_BUCKET_NAME');
+  if (!env.R2_PUBLIC_URL?.trim()) missing.push('R2_PUBLIC_URL');
+  console.warn(
+    `[env] R2 is disabled (using local disk uploads) — incomplete config. Missing or empty: ${missing.join(', ')}. ` +
+      `The personal video stitcher downloads voice/music via HTTP; set all R2_* vars including a public https base for R2_PUBLIC_URL.`,
+  );
+}
+
 export const features = {
   db: Boolean(env.DATABASE_URL),
   claude: Boolean(env.ANTHROPIC_API_KEY),
   fal: Boolean(env.FAL_KEY),
-  r2: Boolean(env.R2_ACCESS_KEY_ID && env.R2_BUCKET_NAME) && env.R2_DISABLED !== 'true',
+  /** R2 only when every required field is set and not force-disabled (VO/music/stitcher fetch URLs). */
+  r2: r2EnvLooksComplete() && env.R2_DISABLED !== 'true',
   stripe: Boolean(env.STRIPE_SECRET_KEY),
   resend: Boolean(env.RESEND_API_KEY),
   contentStudio: Boolean(env.CONTENTSTUDIO_API_KEY),
+  /** True when server .env has a default workspace (id never exposed via API). */
+  contentStudioDefaultWorkspace: Boolean(env.CONTENTSTUDIO_WORKSPACE_ID?.trim()),
   vercel: Boolean(env.VERCEL_API_TOKEN && env.VERCEL_PROJECT_ID),
   /** Canva Connect API is only useful when all three OAuth bits are set. */
   canva: Boolean(env.CANVA_CLIENT_ID && env.CANVA_CLIENT_SECRET && env.CANVA_REDIRECT_URI),

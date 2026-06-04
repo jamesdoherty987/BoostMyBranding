@@ -12,7 +12,9 @@
  *   PATCH  /api/v1/personal/accounts/:id
  *   DELETE /api/v1/personal/accounts/:id
  *   POST   /api/v1/personal/accounts/:id/generate
+ *   POST   /api/v1/personal/accounts/:id/posts/:postId/cancel
  *   GET    /api/v1/personal/accounts/:id/posts
+ *   DELETE /api/v1/personal/accounts/:id/posts/failed
  *   GET    /api/v1/personal/features
  */
 
@@ -37,9 +39,12 @@ import {
   getAccount,
   updateAccount,
   deleteAccount,
+  deleteFailedPosts,
   listPosts,
+  cancelPersonalPostGeneration,
 } from '../services/personalAccounts.js';
 import { generateForAccount } from '../services/personalPipeline.js';
+import { enqueuePersonalGenerateForAccount } from '../services/personalGenerateQueue.js';
 import { scraperFeatures } from '../services/personalScraper.js';
 import { voiceFeatures } from '../services/personalVoice.js';
 import {
@@ -63,6 +68,7 @@ import {
 } from '../services/personalAccountMedia.js';
 import { uploadLimiter } from '../middleware/rateLimit.js';
 import { features } from '../env.js';
+import { normalizeUploadImageIfAvif } from '../lib/normalizeUploadImage.js';
 
 export const personalRouter = Router();
 
@@ -74,6 +80,8 @@ const PLATFORMS = [
   'x',
   'pinterest',
   'bluesky',
+  'youtube',
+  'google_business',
 ] as const;
 
 /* ─── Themes ─────────────────────────────────────────────────────── */
@@ -227,6 +235,7 @@ personalRouter.get('/features', requireAuth, (_req, res) => {
       db: features.db,
       claude: features.claude,
       contentStudio: features.contentStudio,
+      contentStudioDefaultWorkspace: features.contentStudioDefaultWorkspace,
       fal: features.fal,
       scrapers: {
         pexels: scraperFeatures.pexels,
@@ -243,14 +252,44 @@ personalRouter.get('/features', requireAuth, (_req, res) => {
   });
 });
 
+/**
+ * JSONB often stores explicit `null` for unset generator keys. Zod's
+ * `z.number().optional()` rejects null — strip nulls / null array entries
+ * before validating PATCH bodies so the dashboard save button works.
+ */
+function sanitizePersonalAccountPatchBody(body: Record<string, unknown>): void {
+  const gen = body.generatorConfig;
+  if (gen && typeof gen === 'object' && !Array.isArray(gen)) {
+    body.generatorConfig = Object.fromEntries(
+      Object.entries(gen as Record<string, unknown>).filter(([, v]) => v != null),
+    );
+  }
+  const sb = body.styleBible;
+  if (sb && typeof sb === 'object' && !Array.isArray(sb)) {
+    const next: Record<string, unknown> = { ...(sb as Record<string, unknown>) };
+    for (const key of Object.keys(next)) {
+      const v = next[key];
+      if (v === null || v === undefined) {
+        delete next[key];
+        continue;
+      }
+      if (Array.isArray(v)) {
+        next[key] = v.filter((item) => item != null && item !== '');
+      }
+    }
+    body.styleBible = next;
+  }
+}
+
 /* ─── Accounts CRUD ─────────────────────────────────────────────── */
 
-const createSchema = z.object({
+const createAccountBodySchema = z.object({
   accountName: z.string().min(1).max(200),
   platform: z.enum(PLATFORMS),
   themeId: z.string().min(1).max(100),
   handle: z.string().max(100).optional(),
-  contentStudioWorkspaceId: z.string().max(200).optional(),
+  contentStudioWorkspaceId: z.string().max(200).nullable().optional(),
+  contentStudioAccountId: z.string().max(200).nullable().optional(),
   customDirection: z.string().max(2000).optional(),
   topicSeeds: z.array(z.string().max(200)).max(50).optional(),
   topicBlacklist: z.array(z.string().max(200)).max(50).optional(),
@@ -263,6 +302,7 @@ const createSchema = z.object({
   postSpacingMinutes: z.number().int().min(30).max(720).optional(),
   autoApprove: z.boolean().optional(),
   autoSchedule: z.boolean().optional(),
+  autoGenerateOnSchedule: z.boolean().optional(),
   accentColor: z.string().max(20).optional(),
   logoUrl: z.string().url().max(1000).optional(),
   watermarkHandle: z.string().max(100).optional(),
@@ -279,6 +319,9 @@ const createSchema = z.object({
       typography: z.string().max(500).optional(),
       motifs: z.array(z.string().max(200)).max(20).optional(),
       copySamples: z.array(z.string().max(1000)).max(20).optional(),
+      exampleVideoTitles: z.array(z.string().max(200)).max(25).optional(),
+      exampleScriptSnippets: z.array(z.string().max(2000)).max(40).optional(),
+      referenceFullScripts: z.array(z.string().max(25000)).max(5).optional(),
       bannedPhrases: z.array(z.string().max(200)).max(60).optional(),
     })
     .optional(),
@@ -288,6 +331,8 @@ const createSchema = z.object({
       videoModelId: z.string().max(100).optional(),
       ttsProvider: z.enum(['elevenlabs', 'openai', 'cartesia', 'none']).optional(),
       ttsVoiceId: z.string().max(100).optional(),
+      voiceAccent: z.enum(['american', 'british']).optional(),
+      voiceGender: z.enum(['female', 'male']).optional(),
       useVoiceover: z.boolean().optional(),
       useMusic: z.boolean().optional(),
       useSubtitles: z.boolean().optional(),
@@ -299,18 +344,95 @@ const createSchema = z.object({
       aspectRatio: z.enum(['9:16', '1:1', '16:9', '4:5']).optional(),
       clipMinSeconds: z.number().min(1).max(20).optional(),
       clipMaxSeconds: z.number().min(1).max(30).optional(),
+      averageClipSeconds: z.number().min(1.5).max(12).optional(),
+      mediaPreference: z
+        .enum(['mixed', 'stills_only', 'motion_preferred', 'video_only'])
+        .optional(),
+      cutPace: z.enum(['relaxed', 'normal', 'rapid']).optional(),
+      keywordPopStyle: z.enum(['off', 'subtle', 'bold']).optional(),
+      allowSparseImageText: z.boolean().optional(),
+      ttsSpeed: z.number().min(0.7).max(1.2).optional(),
+      musicDuckUnderVoice: z.number().min(0.05).max(0.55).optional(),
+      musicSoloVolume: z.number().min(0.1).max(0.85).optional(),
+      musicBedVolume: z.number().min(0.05).max(0.5).optional(),
+      trueStoriesOnly: z.boolean().optional(),
+      extraContentRules: z.string().max(4000).optional(),
       minQualityScore: z.number().min(0).max(100).optional(),
       allowWebResearch: z.boolean().optional(),
       scriptModel: z.enum(['sonnet', 'opus']).optional(),
       useDirector: z.boolean().optional(),
+      viralFormatId: z.string().max(80).optional(),
+      hookFormulaId: z.string().max(80).optional(),
       colourGrade: z
         .enum(['natural', 'warm', 'cool', 'teal_orange', 'film', 'bw', 'high_contrast'])
         .optional(),
       letterbox: z.boolean().optional(),
       filmGrain: z.boolean().optional(),
+      longformEnabled: z.boolean().optional(),
+      longformTargetSeconds: z.number().positive().max(480).optional(),
+      longformAnimationStyle: z
+        .enum([
+          'storybook',
+          'cartoon',
+          'stick_figure',
+          'claymation',
+          'pixel_art',
+          'watercolour',
+          'custom',
+        ])
+        .optional(),
+      longformMaxAiVideoShots: z.number().int().min(0).max(30).optional(),
+      stitchEncodePreset: z.enum(['fast', 'balanced', 'high']).optional(),
     })
     .optional(),
 });
+
+const createSchema = createAccountBodySchema.superRefine((data, ctx) => {
+  const g = data.generatorConfig;
+  if (
+    g &&
+    typeof g.clipMinSeconds === 'number' &&
+    typeof g.clipMaxSeconds === 'number' &&
+    g.clipMinSeconds > g.clipMaxSeconds
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'clipMinSeconds must be ≤ clipMaxSeconds',
+      path: ['generatorConfig', 'clipMaxSeconds'],
+    });
+  }
+  if (
+    g &&
+    g.longformEnabled === true &&
+    typeof g.longformTargetSeconds === 'number' &&
+    (g.longformTargetSeconds < 60 || g.longformTargetSeconds > 480)
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'longformTargetSeconds must be between 60 and 480',
+      path: ['generatorConfig', 'longformTargetSeconds'],
+    });
+  }
+});
+
+const patchSchema = createAccountBodySchema.partial().extend({
+  status: z.enum(['active', 'paused', 'archived']).optional(),
+});
+
+/** Fix inverted clip bounds and clamp long-form target after Zod parse (PATCH only). */
+function normalizeGeneratorConfigPatch(gen: Record<string, unknown> | undefined): void {
+  if (!gen || typeof gen !== 'object') return;
+  const min = gen.clipMinSeconds;
+  const max = gen.clipMaxSeconds;
+  if (typeof min === 'number' && typeof max === 'number' && min > max) {
+    gen.clipMinSeconds = max;
+    gen.clipMaxSeconds = min;
+  }
+  if (gen.longformEnabled === true && typeof gen.longformTargetSeconds === 'number') {
+    const t = gen.longformTargetSeconds;
+    gen.longformTargetSeconds = Math.min(480, Math.max(60, t));
+  }
+}
 
 personalRouter.post('/accounts', requireAuth, async (req, res, next) => {
   try {
@@ -355,14 +477,15 @@ personalRouter.get('/accounts/:id', requireAuth, async (req, res, next) => {
   }
 });
 
-const patchSchema = createSchema.partial().extend({
-  status: z.enum(['active', 'paused', 'archived']).optional(),
-});
-
 personalRouter.patch('/accounts/:id', requireAuth, async (req, res, next) => {
   try {
     const user = (req as any).user as { id: string };
-    const body = patchSchema.parse(req.body);
+    const raw = req.body as Record<string, unknown>;
+    sanitizePersonalAccountPatchBody(raw);
+    const body = patchSchema.parse(raw);
+    if (body.generatorConfig && typeof body.generatorConfig === 'object') {
+      normalizeGeneratorConfigPatch(body.generatorConfig as Record<string, unknown>);
+    }
     const row = await updateAccount(user.id, String(req.params.id), body);
     if (!row) {
       return res
@@ -395,6 +518,8 @@ personalRouter.delete('/accounts/:id', requireAuth, async (req, res, next) => {
 const generateSchema = z.object({
   topic: z.string().max(500).optional(),
   autoSchedule: z.boolean().optional(),
+  /** When true, schedule to ContentStudio after render if API + workspace are configured (ignores autoApprove). */
+  scheduleToContentStudio: z.boolean().optional(),
   scheduledAt: z.string().datetime().optional(),
   dryRun: z.boolean().optional(),
 });
@@ -408,16 +533,28 @@ personalRouter.post('/accounts/:id/generate', requireAuth, async (req, res, next
         .status(404)
         .json({ error: { message: 'Not found', code: 'NOT_FOUND' } });
     }
+    if (account.status === 'archived') {
+      return res.status(400).json({
+        error: {
+          message: 'Cannot generate for an archived channel.',
+          code: 'ACCOUNT_ARCHIVED',
+        },
+      });
+    }
     const body = generateSchema.parse(req.body ?? {});
-    // Do not await the full pipeline — it can take 60s+. Kick it off
-    // and return immediately with the post id so the UI can poll.
-    const promise = generateForAccount({
-      accountId: account.id,
-      topic: body.topic,
-      autoSchedule: body.autoSchedule,
-      scheduledAt: body.scheduledAt,
-      dryRun: body.dryRun,
-    });
+    // Do not await the full pipeline — it can take minutes. Kick it off
+    // and return immediately so the UI can poll. Per-account queue keeps
+    // overlapping encodes from thrashing CPU (sequential for this account).
+    const promise = enqueuePersonalGenerateForAccount(account.id, () =>
+      generateForAccount({
+        accountId: account.id,
+        topic: body.topic,
+        autoSchedule: body.autoSchedule,
+        scheduleToContentStudio: body.scheduleToContentStudio,
+        scheduledAt: body.scheduledAt,
+        dryRun: body.dryRun,
+      }),
+    );
     // Pre-wait a short bit so we can catch synchronous failures (like
     // "no theme") before returning — but don't block on the render.
     const race = await Promise.race([
@@ -441,6 +578,29 @@ personalRouter.post('/accounts/:id/generate', requireAuth, async (req, res, next
   }
 });
 
+personalRouter.post('/accounts/:id/posts/:postId/cancel', requireAuth, async (req, res, next) => {
+  try {
+    const user = (req as any).user as { id: string };
+    const accountId = String(req.params.id);
+    const postId = String(req.params.postId);
+    const out = await cancelPersonalPostGeneration(user.id, accountId, postId);
+    if (!out.ok) {
+      if (out.error === 'not_found') {
+        return res.status(404).json({ error: { message: 'Not found', code: 'NOT_FOUND' } });
+      }
+      return res.status(409).json({
+        error: {
+          message: 'That post is not generating (already finished, failed, or never started).',
+          code: 'NOT_IN_PROGRESS',
+        },
+      });
+    }
+    res.json({ data: { ok: true } });
+  } catch (e) {
+    next(e);
+  }
+});
+
 /* ─── Posts ─────────────────────────────────────────────────────── */
 
 personalRouter.get('/accounts/:id/posts', requireAuth, async (req, res, next) => {
@@ -452,8 +612,33 @@ personalRouter.get('/accounts/:id/posts', requireAuth, async (req, res, next) =>
         .status(404)
         .json({ error: { message: 'Not found', code: 'NOT_FOUND' } });
     }
-    const posts = await listPosts(account.id);
+    const raw = req.query.limit;
+    const limitStr =
+      typeof raw === 'string'
+        ? raw
+        : Array.isArray(raw) && typeof raw[0] === 'string'
+          ? raw[0]
+          : undefined;
+    const parsed = limitStr ? Number.parseInt(limitStr, 10) : NaN;
+    const limit = Number.isFinite(parsed) ? parsed : 250;
+    const posts = await listPosts(account.id, limit);
     res.json({ data: posts });
+  } catch (e) {
+    next(e);
+  }
+});
+
+personalRouter.delete('/accounts/:id/posts/failed', requireAuth, async (req, res, next) => {
+  try {
+    const user = (req as any).user as { id: string };
+    const accountId = String(req.params.id);
+    const n = await deleteFailedPosts(user.id, accountId);
+    if (n === null) {
+      return res
+        .status(404)
+        .json({ error: { message: 'Not found', code: 'NOT_FOUND' } });
+    }
+    res.json({ data: { deleted: n } });
   } catch (e) {
     next(e);
   }
@@ -469,6 +654,7 @@ const MEDIA_MIMES = new Set([
   'image/png',
   'image/webp',
   'image/gif',
+  'image/avif',
   'video/mp4',
   'video/quicktime',
   'video/webm',
@@ -524,23 +710,60 @@ personalRouter.post(
       const characterId = req.body.characterId ? String(req.body.characterId) : undefined;
       const pinned = req.body.pinned === 'true';
 
-      const results = [];
+      const uploaded: Awaited<ReturnType<typeof uploadAccountMedia>>[] = [];
+      const skipped: Array<{ fileName: string; message: string; code?: string }> = [];
+
       for (const file of files) {
-        const payload = await uploadAccountMedia({
-          userId: user.id,
-          accountId: String(req.params.id),
-          buffer: file.buffer,
-          fileName: file.originalname,
-          mimeType: file.mimetype,
-          role,
-          description,
-          tags,
-          characterId,
-          pinned,
-        });
-        results.push(payload);
+        const displayName = file.originalname || 'unnamed';
+        let buffer = file.buffer;
+        let fileName = file.originalname;
+        let mimeType = file.mimetype;
+        try {
+          try {
+            const n = await normalizeUploadImageIfAvif({ buffer, mimeType, fileName });
+            buffer = n.buffer;
+            fileName = n.fileName;
+            mimeType = n.mimeType;
+          } catch {
+            skipped.push({
+              fileName: displayName,
+              message: 'Could not convert AVIF image to PNG',
+              code: 'AVIF_CONVERT',
+            });
+            continue;
+          }
+          if (buffer.length > MAX_MEDIA_BYTES) {
+            skipped.push({
+              fileName: displayName,
+              message: 'File too large after conversion',
+              code: 'TOO_LARGE',
+            });
+            continue;
+          }
+          const payload = await uploadAccountMedia({
+            userId: user.id,
+            accountId: String(req.params.id),
+            buffer,
+            fileName,
+            mimeType,
+            role,
+            description,
+            tags,
+            characterId,
+            pinned,
+          });
+          uploaded.push(payload);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          skipped.push({
+            fileName: displayName,
+            message: msg || 'Upload failed',
+            code: 'UPLOAD_FAILED',
+          });
+        }
       }
-      res.status(201).json({ data: results });
+
+      res.status(201).json({ data: { uploaded, skipped } });
     } catch (e) {
       next(e);
     }

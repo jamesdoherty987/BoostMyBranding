@@ -5,7 +5,8 @@
  * gaming, and AI themes — so scripts reference actual recent events, not
  * LLM hallucinations. Pulls from Google News RSS + Wikipedia summaries.
  *
- * Cheap, fast, no paid APIs. Results are cached by the scraper service.
+ * Cheap, fast, no paid APIs: live HTTP to Google News RSS + Wikipedia REST.
+ * Results may be cached by the scraper layer where applicable.
  */
 
 import { searchGoogleNews, searchWikipediaImages } from './personalScraper.js';

@@ -198,18 +198,23 @@ export function VideosPanel({ clientId, client }: Props) {
       {progress ? (
         <Card>
           <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-sm font-medium text-slate-900">
-                <Loader2 className={rendering ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />
-                {rendering
-                  ? `Rendering ${progress.completed + 1} of ${progress.total}…`
-                  : `${progress.completed} rendered · ${progress.failed} failed`}
+            <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0 flex items-center gap-2 text-sm font-medium text-slate-900">
+                <Loader2
+                  className={rendering ? 'h-4 w-4 shrink-0 animate-spin' : 'h-4 w-4 shrink-0'}
+                  aria-hidden
+                />
+                <span className="min-w-0 break-words">
+                  {rendering
+                    ? `Rendering ${progress.completed + 1} of ${progress.total}…`
+                    : `${progress.completed} rendered · ${progress.failed} failed`}
+                </span>
               </div>
-              <span className="text-xs text-slate-500">
+              <span className="shrink-0 text-xs text-slate-500">
                 ~{Math.max(0, (progress.total - progress.completed) * 20)}s left
               </span>
             </div>
-            <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-200">
+            <div className="mt-2 h-1.5 w-full min-w-0 overflow-hidden rounded-full bg-slate-200">
               <div
                 className="h-full rounded-full bg-gradient-cta transition-all"
                 style={{ width: `${(progress.completed / progress.total) * 100}%` }}
@@ -223,15 +228,17 @@ export function VideosPanel({ clientId, client }: Props) {
       {createOpen ? (
         <Card>
           <CardContent className="p-5 space-y-4">
-            <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-              <Sparkles className="h-4 w-4 text-[#1D9CA1]" />
-              Render videos for {client.businessName}
+            <div className="flex flex-col gap-2 text-sm font-semibold text-slate-900 sm:flex-row sm:items-center sm:gap-2">
+              <Sparkles className="h-4 w-4 shrink-0 text-[#1D9CA1]" />
+              <span className="min-w-0 break-words">
+                Render videos for <span className="text-slate-700">{client.businessName}</span>
+              </span>
             </div>
 
             {/* Template picker — compact */}
             <div>
               <label className="text-xs font-medium text-slate-600">Template</label>
-              <div className="mt-1.5 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+              <div className="mt-1.5 grid grid-cols-1 gap-2 sm:grid-cols-3 lg:grid-cols-5">
                 {templates.map((t) => (
                   <button
                     key={t.id}
@@ -249,15 +256,15 @@ export function VideosPanel({ clientId, client }: Props) {
                       <div className="absolute inset-0 flex items-center justify-center">
                         <Film className="h-6 w-6 text-white/80" />
                       </div>
-                      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-1.5">
-                        <div className="text-[10px] font-bold text-white">{t.name}</div>
+                      <div className="absolute bottom-0 left-0 right-0 min-w-0 bg-gradient-to-t from-black/70 to-transparent p-1.5">
+                        <div className="break-words text-[10px] font-bold text-white">{t.name}</div>
                       </div>
                     </div>
                   </button>
                 ))}
               </div>
               {selected ? (
-                <p className="mt-1.5 text-[10px] text-slate-500">{selected.description}</p>
+                <p className="mt-1.5 break-words text-[10px] text-slate-500">{selected.description}</p>
               ) : null}
             </div>
 

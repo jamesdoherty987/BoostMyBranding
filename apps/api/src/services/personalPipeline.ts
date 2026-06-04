@@ -31,13 +31,21 @@ import { getTheme, type PersonalTheme } from './personalThemes.js';
 import { findThemeForUser } from './personalCustomThemes.js';
 import { generateScript, chooseTopic, type PersonalScript } from './personalScript.js';
 import {
+  buildPersonalContentRulesPrompt,
+  buildLegacyMediaPreferenceLine,
+} from './personalContentHints.js';
+import {
   searchAssets,
   pickGameplayLoop,
 } from './personalScraper.js';
-import { synthesizeVoice, estimateDurationSeconds } from './personalVoice.js';
+import { synthesizeVoice, estimateDurationSeconds, joinNarrationParts } from './personalVoice.js';
 import { pickMusic } from './personalMusic.js';
 import { renderPersonalVideo } from './personalRender.js';
 import { schedulePost } from './contentStudio.js';
+import {
+  contentStudioAccountIdsOverride,
+  shouldSchedulePersonalToContentStudio,
+} from './personalContentPosting.js';
 import { generateImage } from './fal.js';
 import { broadcast } from './realtime.js';
 import { recentTopics } from './personalAccounts.js';
@@ -59,10 +67,21 @@ export interface GenerateForAccountArgs {
   topic?: string;
   /** When false, just render and stop — don't schedule. */
   autoSchedule?: boolean;
+  /**
+   * When true, schedule to ContentStudio after render if the API is configured
+   * and a workspace id exists (env or per-account), even when autoApprove is off.
+   * Use for "Generate & schedule post" from the dashboard.
+   */
+  scheduleToContentStudio?: boolean;
   /** When set, schedule at this ISO time instead of the account default. */
   scheduledAt?: string;
   /** Dry-run — log what would happen without actually generating. */
   dryRun?: boolean;
+  /**
+   * Internal: continue an interrupted director-mode post (same row). Used by
+   * boot recovery — not exposed on the public generate HTTP route.
+   */
+  resumeFromPostId?: string;
 }
 
 export interface GenerateForAccountResult {
@@ -95,7 +114,15 @@ export async function generateForAccount(
   const useDirector = genConfig.useDirector ?? true;
   if (useDirector) {
     const { generateForAccountDirector } = await import('./personalDirectorPipeline.js');
-    return generateForAccountDirector(args);
+    return generateForAccountDirector({
+      accountId: args.accountId,
+      topic: args.topic,
+      autoSchedule: args.autoSchedule,
+      scheduleToContentStudio: args.scheduleToContentStudio,
+      scheduledAt: args.scheduledAt,
+      dryRun: args.dryRun,
+      resumeFromPostId: args.resumeFromPostId,
+    });
   }
   return generateForAccountScript(args);
 }
@@ -112,7 +139,7 @@ async function generateForAccountScript(
     .from(personalAccounts)
     .where(eq(personalAccounts.id, args.accountId));
   if (!account) throw new Error('Personal account not found');
-  if (account.status !== 'active') {
+  if (account.status === 'archived') {
     return {
       postId: '',
       videoUrl: null,
@@ -179,6 +206,14 @@ async function generateForAccountScript(
       (account.styleBible as PersonalAccountStyleBible) ?? {};
     const genConfig: PersonalGeneratorConfig =
       (account.generatorConfig as PersonalGeneratorConfig) ?? {};
+    const longformScript =
+      genConfig.longformEnabled === true || theme.template === 'animated-explainer';
+    const outputAspectRatio: '9:16' | '1:1' | '16:9' | '4:5' =
+      genConfig.aspectRatio ?? (longformScript ? '16:9' : '9:16');
+    const effectiveGen: PersonalGeneratorConfig = {
+      ...genConfig,
+      aspectRatio: outputAspectRatio,
+    };
     const character = account.characterId
       ? await getCharacterUnsafe(account.characterId)
       : null;
@@ -209,6 +244,14 @@ async function generateForAccountScript(
     }
 
     broadcastEvent(account.id, postId, 'scripting', {});
+    const scriptPromptAppendix = [
+      buildPersonalContentRulesPrompt(genConfig, styleBible),
+      buildLegacyMediaPreferenceLine(genConfig.mediaPreference),
+    ]
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .join('\n\n');
+
     const script = await generateScript({
       theme,
       topic,
@@ -230,6 +273,9 @@ async function generateForAccountScript(
           }
         : undefined,
       referenceMediaDigest: refMediaDigest,
+      promptAppendix: scriptPromptAppendix || undefined,
+      averageClipSeconds: genConfig.averageClipSeconds,
+      scriptModel: genConfig.scriptModel,
     });
     if (script.blocked) {
       await markFailed(postId, `Blocked by safety filter: ${script.blockReason ?? 'unspecified'}`);
@@ -267,7 +313,10 @@ async function generateForAccountScript(
     await db
       .update(personalPosts)
       .set({
-        script,
+        script: {
+          ...(script as unknown as Record<string, unknown>),
+          outputAspectRatio,
+        } as any,
         qualityScore: rules.score,
         status: 'sourcing_media',
         updatedAt: new Date(),
@@ -281,7 +330,7 @@ async function generateForAccountScript(
       script,
       accountId: account.id,
       styleBible,
-      genConfig,
+      genConfig: effectiveGen,
       characterRefs: character
         ? accountMedia.filter(
             (m) => m.role === 'avatar_reference' && m.characterId === character.id,
@@ -334,9 +383,11 @@ async function generateForAccountScript(
     const useVoiceover = genConfig.useVoiceover ?? theme.useVoiceover;
     if (useVoiceover) {
       broadcastEvent(account.id, postId, 'voicing', {});
-      const narration = [script.hook, ...script.beats.map((b) => b.voiceover), script.outro]
-        .filter(Boolean)
-        .join(' ');
+      const narration = joinNarrationParts([
+        script.hook,
+        ...script.beats.map((b) => b.voiceover),
+        script.outro,
+      ]);
       const voice = await synthesizeVoice({
         text: narration,
         voiceId:
@@ -344,8 +395,12 @@ async function generateForAccountScript(
           character?.voiceId ??
           account.voiceId ??
           'default',
+        voiceAccent: genConfig.voiceAccent,
+        voiceGender: genConfig.voiceGender,
         language: account.language,
         accountId: account.id,
+        speed: Math.min(1.2, Math.max(0.7, genConfig.ttsSpeed ?? 1)),
+        providerPreference: genConfig.ttsProvider,
       });
       voiceoverUrl = voice.audioUrl;
       estimatedDuration = Math.max(estimatedDuration, voice.durationSeconds);
@@ -362,22 +417,22 @@ async function generateForAccountScript(
     /* ── 4. Music ────────────────────────────────────────────── */
     let musicUrl: string | null = null;
     let musicAttribution: string | null = null;
-    // Priority: user-uploaded custom audio → theme-mood music picker → none.
-    if (account.customAudioUrl) {
+    const wantMusicBed =
+      genConfig.useMusic === false ? false : (genConfig.useMusic ?? theme.useMusic);
+    // Priority when music is on: custom bed URL → theme-mood picker → none.
+    if (wantMusicBed && account.customAudioUrl) {
       musicUrl = account.customAudioUrl;
       musicAttribution = account.customAudioAttribution ?? null;
-    } else {
-      const useMusic = genConfig.useMusic ?? theme.useMusic;
-      if (useMusic) {
-        const music = await pickMusic({
-          mood: script.musicMoodOverride ?? theme.musicMood,
-          seed: postId,
-          minDurationSeconds: Math.ceil(estimatedDuration),
-        }).catch(() => null);
-        if (music) {
-          musicUrl = music.url;
-          musicAttribution = music.attribution;
-        }
+    } else if (wantMusicBed) {
+      const music = await pickMusic({
+        mood: script.musicMoodOverride ?? theme.musicMood,
+        seed: postId,
+        minDurationSeconds: Math.ceil(estimatedDuration),
+        accountId: account.id,
+      }).catch(() => null);
+      if (music) {
+        musicUrl = music.url;
+        musicAttribution = music.attribution;
       }
     }
 
@@ -389,6 +444,9 @@ async function generateForAccountScript(
         musicUrl,
         musicAttribution,
         status: 'rendering',
+        renderProgress: 12,
+        renderProgressLabel: 'Rendering with Remotion…',
+        renderActivityLog: [],
         updatedAt: new Date(),
       })
       .where(eq(personalPosts.id, postId));
@@ -402,10 +460,13 @@ async function generateForAccountScript(
       mediaAssets,
       voiceoverUrl,
       musicUrl,
+      musicBedVolume: genConfig.musicBedVolume,
+      useSubtitles: genConfig.useSubtitles !== false,
       accentColor: account.accentColor ?? theme.accentColor,
       watermarkHandle: account.watermarkHandle ?? undefined,
       logoUrl: account.logoUrl ?? undefined,
       durationSeconds: estimatedDuration,
+      aspectRatio: outputAspectRatio,
       formatKind:
         (account.formatKind as 'video' | 'slideshow' | 'static_image') ??
         theme.defaultFormat ??
@@ -416,8 +477,7 @@ async function generateForAccountScript(
     /* ── 6. Schedule ─────────────────────────────────────────── */
     let contentStudioPostId: string | null = null;
     let scheduledAt: Date | null = null;
-    const shouldSchedule =
-      (args.autoSchedule ?? account.autoSchedule) && account.autoApprove;
+    const shouldSchedule = shouldSchedulePersonalToContentStudio(args, account);
 
     if (shouldSchedule) {
       const when = args.scheduledAt
@@ -434,6 +494,7 @@ async function generateForAccountScript(
           videoUrl: rendered.videoUrl,
           scheduledAt: when,
           workspaceId: account.contentStudioWorkspaceId ?? undefined,
+          contentStudioAccountIds: contentStudioAccountIdsOverride(account),
         });
         contentStudioPostId = res.id;
         scheduledAt = when;
@@ -455,6 +516,9 @@ async function generateForAccountScript(
         status: scheduledAt ? 'scheduled' : 'ready',
         costCents: totalCostCents,
         postKind: rendered.formatKind,
+        renderProgress: null,
+        renderProgressLabel: null,
+        renderActivityLog: [],
         updatedAt: new Date(),
       })
       .where(eq(personalPosts.id, postId));
@@ -479,8 +543,17 @@ async function generateForAccountScript(
       costCents: totalCostCents,
     };
   } catch (e) {
-    await markFailed(postId, (e as Error).message);
-    broadcastEvent(account.id, postId, 'failed', { error: (e as Error).message });
+    const msg = e instanceof Error ? e.message : String(e);
+    try {
+      await markFailed(postId, msg);
+    } catch (dbErr) {
+      console.error('[personal] markFailed could not persist:', (dbErr as Error).message);
+    }
+    try {
+      broadcastEvent(account.id, postId, 'failed', { error: msg });
+    } catch {
+      /* ignore */
+    }
     throw e;
   }
 }
@@ -506,8 +579,8 @@ async function sourceMediaForBeats(
   const { theme, script, accountId, styleBible, genConfig, characterRefs, character, styleRefs } = args;
 
   // For "brainrot" / gameplay themes, one single gameplay loop backs
-  // the whole video — no per-beat scraping.
-  if (theme.mediaSources.includes('gameplay')) {
+  // the whole video — no per-beat scraping (unless the account wants stills only).
+  if (theme.mediaSources.includes('gameplay') && genConfig.mediaPreference !== 'stills_only') {
     const loop = pickGameplayLoop(script.title);
     return [
       {
@@ -521,7 +594,8 @@ async function sourceMediaForBeats(
     ];
   }
 
-  const useAiVideo = genConfig.useAiVideo ?? false;
+  const useAiVideo =
+    (genConfig.useAiVideo ?? false) && genConfig.mediaPreference !== 'stills_only';
   const useAiImages = genConfig.useAiImages ?? true;
   const useScraped = genConfig.useScrapedMedia ?? true;
   const useCharacter =
@@ -562,21 +636,71 @@ async function sourceMediaForBeats(
       s !== 'ai' && s !== 'gameplay',
   );
 
+  const preferVideo = genConfig.mediaPreference === 'motion_preferred';
+
   const out: PersonalPostMediaAsset[] = [];
   let cursor = 0;
   for (const beat of script.beats) {
     let asset: PersonalPostMediaAsset | null = null;
 
-    // 1. Try scraping first (unless the user turned it off).
+    const tryBeatAiVideo = async () => {
+      if (!useAiVideo || !videoModelId || theme.requiresGroundedImages) return;
+      try {
+        const prompt = buildAiPrompt(beat.imageQuery, stylePrefix, charPromptFragment);
+        const videoAspect =
+          genConfig.aspectRatio === '4:5' ? '9:16' : (genConfig.aspectRatio ?? '9:16');
+        const cMin = genConfig.clipMinSeconds ?? 2;
+        const cMax = genConfig.clipMaxSeconds ?? 5;
+        const clipLo = Math.min(cMin, cMax);
+        const clipHi = Math.max(cMin, cMax);
+        const video = await withRetry(
+          () =>
+            generateAiVideo({
+              modelId: videoModelId,
+              prompt,
+              negativePrompt: negativePrompt || undefined,
+              aspectRatio: videoAspect,
+              durationSeconds: Math.min(clipHi, Math.max(clipLo, beat.durationSeconds)),
+              referenceImageUrls: collectReferenceImages(
+                useCharacter ? characterRefs : [],
+                styleRefs,
+              ),
+              scopePath: `personal/${accountId}/ai-video`,
+            }),
+          { label: `ai_video:${accountId}:${beat.order}`, attempts: 1 },
+        );
+        asset = {
+          url: video.url,
+          kind: 'video',
+          source: 'ai',
+          startAtSeconds: cursor,
+          durationSeconds: video.durationSeconds,
+        };
+      } catch (e) {
+        console.warn(`[pipeline] AI video failed beat ${beat.order}:`, (e as Error).message);
+      }
+    };
+
+    // Motion-preferred: try AI video before stock so beats get native motion.
+    if (preferVideo && !asset) {
+      await tryBeatAiVideo();
+    }
+
+    // 1. Try scraping (unless the user turned it off).
     if (useScraped && !asset) {
       try {
         const { source, items } = await searchAssets({
           query: beat.imageQuery,
           sources: scrapeSources,
           count: 3,
+          preferVideo: preferVideo && genConfig.mediaPreference !== 'stills_only',
         });
         if (items.length > 0) {
-          const pick = items[0]!;
+          let pick = items[0]!;
+          if (genConfig.mediaPreference === 'stills_only' && pick.kind === 'video') {
+            const still = items.find((i) => i.kind !== 'video');
+            if (still) pick = still;
+          }
           const knownSource =
             source === 'pexels' ||
             source === 'unsplash' ||
@@ -602,46 +726,9 @@ async function sourceMediaForBeats(
       }
     }
 
-    // 2. AI video generation for this beat (highest quality option).
-    if (
-      !asset &&
-      useAiVideo &&
-      videoModelId &&
-      !theme.requiresGroundedImages
-    ) {
-      try {
-        const prompt = buildAiPrompt(beat.imageQuery, stylePrefix, charPromptFragment);
-        const videoAspect =
-          genConfig.aspectRatio === '4:5' ? '9:16' : (genConfig.aspectRatio ?? '9:16');
-        const video = await withRetry(
-          () =>
-            generateAiVideo({
-              modelId: videoModelId,
-              prompt,
-              negativePrompt: negativePrompt || undefined,
-              aspectRatio: videoAspect,
-              durationSeconds: Math.min(
-                genConfig.clipMaxSeconds ?? 5,
-                Math.max(genConfig.clipMinSeconds ?? 2, beat.durationSeconds),
-              ),
-              referenceImageUrls: collectReferenceImages(
-                useCharacter ? characterRefs : [],
-                styleRefs,
-              ),
-              scopePath: `personal/${accountId}/ai-video`,
-            }),
-          { label: `ai_video:${accountId}:${beat.order}`, attempts: 1 },
-        );
-        asset = {
-          url: video.url,
-          kind: 'video',
-          source: 'ai',
-          startAtSeconds: cursor,
-          durationSeconds: video.durationSeconds,
-        };
-      } catch (e) {
-        console.warn(`[pipeline] AI video failed beat ${beat.order}:`, (e as Error).message);
-      }
+    // 2. AI video after scrape (default order), or retry if motion-first failed.
+    if (!asset) {
+      await tryBeatAiVideo();
     }
 
     // 3. AI still image (fallback / image-only themes).
@@ -761,7 +848,7 @@ async function markFailed(postId: string, message: string) {
   const db = getDb();
   await db
     .update(personalPosts)
-    .set({ status: 'failed', errorMessage: message.slice(0, 500), updatedAt: new Date() })
+    .set({ status: 'failed', errorMessage: message.slice(0, 500), renderProgress: null, renderProgressLabel: null, renderActivityLog: [], updatedAt: new Date() })
     .where(eq(personalPosts.id, postId));
 }
 

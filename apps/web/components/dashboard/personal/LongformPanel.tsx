@@ -102,11 +102,14 @@ export function LongformPanel({
   account,
   theme,
   onChanged,
+  /** Called after kicking off generation so the Overview posts list refetches (SWR does not auto-invalidate). */
+  onPostsChanged,
   onSwitchTab,
 }: {
   account: PersonalAccount;
   theme: PersonalThemeSummary | undefined;
   onChanged: () => void;
+  onPostsChanged?: () => void;
   onSwitchTab?: (tab: 'media' | 'characters' | 'config') => void;
 }) {
   const { data: characters } = useSWR('personal:characters', () =>
@@ -174,18 +177,24 @@ export function LongformPanel({
     account.characterId,
   );
 
+  /** Only long-form keys — server merges into existing `generator_config`. Spreading the whole account snapshot here can overwrite newer Style & config values (e.g. letterbox, Ken Burns) when this tab's `account` props are stale. */
+  function longformGeneratorPatch(): Pick<
+    PersonalGeneratorConfig,
+    'longformEnabled' | 'longformTargetSeconds' | 'longformAnimationStyle' | 'longformMaxAiVideoShots'
+  > {
+    return {
+      longformEnabled: enabled,
+      longformTargetSeconds: targetSeconds,
+      longformAnimationStyle: style,
+      longformMaxAiVideoShots: maxAiVideo,
+    };
+  }
+
   async function save() {
     setBusy(true);
     try {
-      const next: PersonalGeneratorConfig = {
-        ...(account.generatorConfig ?? {}),
-        longformEnabled: enabled,
-        longformTargetSeconds: targetSeconds,
-        longformAnimationStyle: style,
-        longformMaxAiVideoShots: maxAiVideo,
-      };
       await api.updatePersonalAccount(account.id, {
-        generatorConfig: next,
+        generatorConfig: longformGeneratorPatch(),
       });
       toast.success('Long-form settings saved');
       onChanged();
@@ -203,19 +212,16 @@ export function LongformPanel({
     setBusy(true);
     try {
       await api.updatePersonalAccount(account.id, {
-        generatorConfig: {
-          ...(account.generatorConfig ?? {}),
-          longformEnabled: enabled,
-          longformTargetSeconds: targetSeconds,
-          longformAnimationStyle: style,
-          longformMaxAiVideoShots: maxAiVideo,
-        },
+        generatorConfig: longformGeneratorPatch(),
       });
       onChanged();
       await api.generatePersonalPost(account.id, {});
+      onPostsChanged?.();
+      setTimeout(() => onPostsChanged?.(), 2000);
+      setTimeout(() => onPostsChanged?.(), 8000);
       toast.success(
         'Long-form generation started',
-        `This takes ~${estimate.renderMinutes} min. Watch the Posts tab — your ${formatMinutes(targetSeconds)} video will appear there.`,
+        `This takes ~${estimate.renderMinutes} min. Open Overview to watch progress — your ${formatMinutes(targetSeconds)} video will appear in Recent posts.`,
       );
     } catch (e) {
       toast.error('Could not start generation', (e as Error).message);
@@ -480,7 +486,12 @@ export function LongformPanel({
           Save
         </Button>
         {enabled ? (
-          <Button variant="secondary" onClick={generate} disabled={busy}>
+          <Button
+            variant="secondary"
+            onClick={generate}
+            disabled={busy || account.status === 'archived'}
+            title={account.status === 'archived' ? 'Archived channels cannot generate new videos.' : undefined}
+          >
             <Sparkles className="h-4 w-4" />
             Generate {formatMinutes(targetSeconds)} video now
           </Button>

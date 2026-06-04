@@ -17,9 +17,10 @@
  * can dispatch based on genConfig.useDirector.
  */
 
-import { eq } from 'drizzle-orm';
+import { and, eq, like, lt, or } from 'drizzle-orm';
 import {
   getDb,
+  isDbConfigured,
   personalAccounts,
   personalPosts,
   type PersonalAccountStyleBible,
@@ -29,41 +30,219 @@ import { getTheme, type PersonalTheme } from './personalThemes.js';
 import { findThemeForUser } from './personalCustomThemes.js';
 import {
   planStoryboard,
-  shotToPrompt,
-  flattenStoryboard,
-  animationStyleHintFor,
   type Storyboard,
-  type DirectorShot,
 } from './personalDirector.js';
-import {
-  searchAssets,
-  pickGameplayLoop,
-} from './personalScraper.js';
-import { synthesizeVoice, estimateDurationSeconds } from './personalVoice.js';
-import { pickMusic } from './personalMusic.js';
-import { schedulePost } from './contentStudio.js';
 import { broadcast } from './realtime.js';
-import { recentTopics } from './personalAccounts.js';
+import { recentTopics, getPersonalProcessBootAt, personalPostIsFailed } from './personalAccounts.js';
 import { chooseTopic } from './personalScript.js';
-import { features } from '../env.js';
-import { withRetry } from './retry.js';
-import { getCharacterUnsafe, getCharacterAnchorImages } from './personalCharacters.js';
+import { getCharacterUnsafe } from './personalCharacters.js';
 import { internalListForPipeline } from './personalAccountMedia.js';
 import { researchTopic, researchToPromptBlock } from './personalResearch.js';
-import {
-  generateAiImage,
-  generateAiVideo,
-  pickDefaultModel,
-  listAiModels,
-} from './personalAiModels.js';
-import { stitchShots, type StitchShotInput } from './personalStitcher.js';
+import { pickDefaultModel, listAiModels } from './personalAiModels.js';
+import { StitcherError } from './personalStitcher.js';
 import type { GenerateForAccountArgs, GenerateForAccountResult } from './personalPipeline.js';
+import { generateForAccount } from './personalPipeline.js';
+import {
+  buildPersonalContentRulesPrompt,
+  buildMediaPreferencePrompt,
+  buildAverageShotPrompt,
+} from './personalContentHints.js';
 import {
   getViralFormat,
   defaultFormatFor,
   formatToPromptBlock,
 } from './viralFormats.js';
 import { getHookFormula, hookFormulaToDirective } from './viralHooks.js';
+import {
+  directorPipelineFromResolvedStoryboard,
+  finishDirectorFromPreStitchCheckpoint,
+  parsePreStitchCheckpoint,
+  parseSourcingCheckpointByShotId,
+  hasDirectorStoryboard,
+  stripDirectorResumeKeys,
+} from './personalDirectorPipelineMid.js';
+import { enqueuePersonalGenerateForAccount } from './personalGenerateQueue.js';
+
+async function resumeDirectorInto(
+  args: GenerateForAccountArgs,
+  account: typeof personalAccounts.$inferSelect,
+  theme: PersonalTheme,
+  genConfig: PersonalGeneratorConfig,
+  styleBible: PersonalAccountStyleBible,
+  character: Awaited<ReturnType<typeof getCharacterUnsafe>>,
+): Promise<GenerateForAccountResult> {
+  const db = getDb();
+  const [post] = await db
+    .select()
+    .from(personalPosts)
+    .where(eq(personalPosts.id, args.resumeFromPostId!));
+  if (!post || post.accountId !== account.id) {
+    throw new Error('Resume post not found for this account');
+  }
+  if (!post.templateId.startsWith('director:')) {
+    await markFailed(post.id, 'Cannot resume — this post was not generated in director mode.');
+    return {
+      postId: post.id,
+      videoUrl: null,
+      status: 'failed',
+      durationSeconds: 0,
+      costCents: 0,
+      skipped: true,
+      reason: 'not director',
+    };
+  }
+
+  const pre = parsePreStitchCheckpoint(post.script);
+  if (pre && post.status === 'rendering') {
+    try {
+      return await finishDirectorFromPreStitchCheckpoint(post, account, theme, args, pre);
+    } catch (e) {
+      const msg =
+        e instanceof StitcherError
+          ? e.message
+          : e instanceof Error
+            ? e.message
+            : String(e);
+      await markFailed(post.id, msg);
+      throw e;
+    }
+  }
+
+  if (post.status === 'sourcing_media' && hasDirectorStoryboard(post.script)) {
+    const storyboard = stripDirectorResumeKeys(post.script as Record<string, unknown>) as unknown as Storyboard;
+    const topic = post.topic;
+    const ar = (post.script as Record<string, unknown>)?.outputAspectRatio;
+    const aspectRatio: '9:16' | '1:1' | '16:9' | '4:5' =
+      ar === '16:9' || ar === '1:1' || ar === '4:5' || ar === '9:16' ? ar : '9:16';
+
+    const isAnimatedTheme = theme.template === 'animated-explainer';
+    const longformEnabled = genConfig.longformEnabled === true || isAnimatedTheme;
+    const longformTargetSeconds = longformEnabled
+      ? clampLongformSeconds(genConfig.longformTargetSeconds ?? theme.targetDurationSeconds)
+      : undefined;
+    const longformAnimationStyle =
+      genConfig.longformAnimationStyle ??
+      (theme.id === 'ancient-origins' || theme.id === 'storybook-myth'
+        ? 'storybook'
+        : theme.id === 'science-cartoon'
+          ? 'cartoon'
+          : theme.id === 'stick-figure-explainer'
+            ? 'stick_figure'
+            : undefined);
+
+    const accountMedia = await internalListForPipeline(account.id);
+    const resumedShotById = parseSourcingCheckpointByShotId(post.script);
+
+    broadcast({
+      type: 'personal:progress',
+      payload: { accountId: account.id, postId: post.id, phase: 'resumed:director' },
+    });
+
+    try {
+      return await directorPipelineFromResolvedStoryboard({
+        account,
+        theme,
+        genConfig,
+        styleBible,
+        character,
+        postId: post.id,
+        topic,
+        storyboard,
+        aspectRatio,
+        longformEnabled,
+        longformTargetSeconds,
+        longformAnimationStyle,
+        accountMedia,
+        initialCostCents: (post.costCents ?? 0) === 0 ? 3 : (post.costCents ?? 0),
+        args,
+        resumedShotById,
+        markFailed,
+        pickImageModelForLongform,
+      });
+    } catch (e) {
+      const msg =
+        e instanceof StitcherError
+          ? e.message
+          : e instanceof Error
+            ? e.message
+            : String(e);
+      await markFailed(post.id, msg);
+      throw e;
+    }
+  }
+
+  await markFailed(
+    post.id,
+    'This generation cannot be resumed automatically. Start a new generate.',
+  );
+  return {
+    postId: post.id,
+    videoUrl: null,
+    status: 'failed',
+    durationSeconds: 0,
+    costCents: 0,
+    skipped: true,
+    reason: 'not resumable',
+  };
+}
+
+/**
+ * Enqueues director-mode posts that were interrupted by a process restart so
+ * they can continue from DB checkpoints (see personalDirectorPipelineMid).
+ *
+ * Gated by {@link personalDirectorResumeOnBootEnabled} from `personalAccounts.ts`
+ * so local API restarts do not surprise-restart long jobs (see scheduler startup).
+ */
+export async function resumeInterruptedDirectorPersonalPostsOnBoot(): Promise<number> {
+  if (!isDbConfigured()) return 0;
+  const db = getDb();
+  const bootAt = getPersonalProcessBootAt();
+  const rows = await db
+    .select()
+    .from(personalPosts)
+    .where(
+      and(
+        lt(personalPosts.updatedAt, bootAt),
+        or(
+          and(eq(personalPosts.status, 'rendering'), like(personalPosts.templateId, 'director:%')),
+          and(eq(personalPosts.status, 'sourcing_media'), like(personalPosts.templateId, 'director:%')),
+        ),
+      ),
+    )
+    .limit(128);
+
+  let n = 0;
+  for (const post of rows) {
+    const pre = parsePreStitchCheckpoint(post.script);
+    const canStitch = Boolean(pre && post.status === 'rendering');
+    const canSource = post.status === 'sourcing_media' && hasDirectorStoryboard(post.script);
+    if (!canStitch && !canSource) continue;
+
+    await db
+      .update(personalPosts)
+      .set({
+        updatedAt: new Date(),
+        renderProgressLabel: canStitch
+          ? 'Resuming video encode after restart…'
+          : 'Resuming shot generation after restart…',
+        errorMessage: null,
+      })
+      .where(eq(personalPosts.id, post.id));
+
+    void enqueuePersonalGenerateForAccount(post.accountId, () =>
+      generateForAccount({
+        accountId: post.accountId,
+        resumeFromPostId: post.id,
+        dryRun: false,
+      }),
+    );
+    n++;
+  }
+  if (n > 0) {
+    console.warn(`[personal] enqueued ${n} interrupted director job(s) to resume`);
+  }
+  return n;
+}
 
 /* ═══════════════════════════════════════════════════════════════════ */
 /* Entry point                                                          */
@@ -78,7 +257,7 @@ export async function generateForAccountDirector(
     .from(personalAccounts)
     .where(eq(personalAccounts.id, args.accountId));
   if (!account) throw new Error('Personal account not found');
-  if (account.status !== 'active') {
+  if (account.status === 'archived') {
     return {
       postId: '',
       videoUrl: null,
@@ -102,6 +281,10 @@ export async function generateForAccountDirector(
   const character = account.characterId
     ? await getCharacterUnsafe(account.characterId)
     : null;
+
+  if (args.resumeFromPostId) {
+    return resumeDirectorInto(args, account, theme, genConfig, styleBible, character);
+  }
 
   const recent = await recentTopics(account.id, 15);
   const topic =
@@ -178,8 +361,16 @@ export async function generateForAccountDirector(
             const desc =
               m.description ??
               m.aiDescription ??
-              (m.tags && m.tags.length > 0 ? m.tags.join(', ') : 'reference image');
-            return `[${i + 1}] ${desc}`;
+              (m.tags && m.tags.length > 0 ? m.tags.join(', ') : 'reference still or clip');
+            const mime = (m.mimeType ?? '').toLowerCase();
+            const kind =
+              mime.startsWith('video/') || /\.(mp4|webm|mov|mkv|m4v)(\?|#|$)/i.test(m.fileUrl ?? '')
+                ? 'video'
+                : mime.startsWith('image/') ||
+                    /\.(jpg|jpeg|png|webp|gif)(\?|#|$)/i.test(m.fileUrl ?? '')
+                  ? 'image'
+                  : 'media';
+            return `[${i + 1}] (${kind}) ${desc}`;
           })
           .join('\n')
       : undefined;
@@ -280,6 +471,20 @@ export async function generateForAccountDirector(
       hookFormulaDirective,
       allowMultiAct: true,
       maxAiVideoShots: maxAiShotsFor(genConfig, longformEnabled),
+      mediaPreference: genConfig.mediaPreference ?? 'mixed',
+      cutPace: genConfig.cutPace ?? 'normal',
+      keywordPopStyle: genConfig.keywordPopStyle ?? 'off',
+      allowSparseImageText: genConfig.allowSparseImageText === true,
+      averageShotSeconds: genConfig.averageClipSeconds,
+      promptAppendix:
+        [
+          buildPersonalContentRulesPrompt(genConfig, styleBible),
+          buildMediaPreferencePrompt(genConfig.mediaPreference),
+          buildAverageShotPrompt(genConfig.averageClipSeconds),
+        ]
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .join('\n\n') || undefined,
       longform: longformEnabled
         ? {
             enabled: true,
@@ -287,8 +492,21 @@ export async function generateForAccountDirector(
             animationStyle: longformAnimationStyle,
           }
         : undefined,
+      scriptModel: genConfig.scriptModel,
     });
     totalCostCents += 3;
+
+    if (await personalPostIsFailed(postId)) {
+      return {
+        postId,
+        videoUrl: null,
+        status: 'failed',
+        durationSeconds: 0,
+        costCents: totalCostCents,
+        skipped: true,
+        reason: 'stopped',
+      };
+    }
 
     if (storyboard.blocked) {
       await markFailed(postId, `Blocked: ${storyboard.blockReason ?? 'unspecified'}`);
@@ -303,455 +521,63 @@ export async function generateForAccountDirector(
       };
     }
 
+    // Aspect ratio: long-form defaults to 16:9; short-form to 9:16 unless
+    // the operator pinned one in generator config. Stored on `script` so
+    // the dashboard can frame previews correctly.
+    const aspectRatio: '9:16' | '1:1' | '16:9' | '4:5' =
+      genConfig.aspectRatio ?? (longformEnabled ? '16:9' : '9:16');
+
     await db
       .update(personalPosts)
       .set({
-        script: storyboard as any,
+        script: {
+          ...(storyboard as unknown as Record<string, unknown>),
+          outputAspectRatio: aspectRatio,
+        } as any,
         status: 'sourcing_media',
         updatedAt: new Date(),
       })
       .where(eq(personalPosts.id, postId));
 
-    /* ── 4. Resolve each shot to a concrete asset ─────────── */
-    broadcast({ type: 'personal:progress', payload: { accountId: account.id, postId, phase: 'sourcing_media' } });
-
-    const characterAnchors = character
-      ? await getCharacterAnchorImages(character.id, 3)
-      : [];
-
-    // Both 'style_reference' and 'inspiration' are visual anchors — the
-    // distinction in the media library is bookkeeping, not intent. Pass
-    // both into AI image/video models as reference URLs so the output
-    // inherits the look.
-    const styleRefUrls = accountMedia
-      .filter((m) => m.role === 'style_reference' || m.role === 'inspiration')
-      .filter((m) => (m.mimeType ?? '').startsWith('image/'))
-      .slice(0, 4)
-      .map((m) => m.fileUrl);
-
-    const defaultImageModel =
-      genConfig.imageModelId ??
-      pickImageModelForLongform(
-        longformEnabled ? longformAnimationStyle : undefined,
-        genConfig.qualityTier ?? 'balanced',
-      );
-    const defaultVideoModel =
-      genConfig.videoModelId ??
-      pickDefaultModel('video', genConfig.qualityTier ?? 'balanced')?.id;
-
-    const flat = flattenStoryboard(storyboard);
-    const shotAssets: Array<{
-      fs: ReturnType<typeof flattenStoryboard>[number];
-      asset: { url: string; kind: 'image' | 'video' } | null;
-      costCents: number;
-      error?: string;
-    }> = [];
-
-    // Long-form animation style hint — one line per shot so every
-    // AI image/video in a long-form video keeps the same medium.
-    const animationStyleHint = longformEnabled
-      ? animationStyleHintFor(longformAnimationStyle ?? 'custom')
-      : undefined;
-
-    // Aspect ratio: long-form documentaries work best at 16:9 on
-    // YouTube / web. Short-form stays at 9:16 for Reels / TikTok. The
-    // user's explicit setting always wins.
-    const aspectRatio: '9:16' | '1:1' | '16:9' | '4:5' =
-      genConfig.aspectRatio ?? (longformEnabled ? '16:9' : '9:16');
-
-    // Per-shot generation as a separate function so we can pool it.
-    // Returns the resolved asset + cost + (on failure) the error message
-    // so the outer loop can surface a meaningful diagnostic if too many
-    // shots fail.
-    const generateShotAsset = async (
-      fs: (typeof flat)[number],
-    ): Promise<{
-      fs: (typeof flat)[number];
-      asset: { url: string; kind: 'image' | 'video' } | null;
-      costCents: number;
-      error?: string;
-    }> => {
-      const prompt = shotToPrompt({
-        shot: fs.shot,
-        themeVisualStyle: theme.visualStyle,
-        styleBibleVibe: styleBible.vibe ?? undefined,
-        characterFragment: character?.promptFragment ?? undefined,
-        globalColourGrade: storyboard.editPlan.colourGrade,
-        inspirationStyleHint,
-        animationStyleHint,
-      });
-      const negativePrompt = [
-        ...(styleBible.donts ?? []),
-        ...(character?.negativePrompt ? [character.negativePrompt] : []),
-      ]
-        .filter(Boolean)
-        .join(', ');
-
-      // In long-form mode we send up to 4 refs (nano-banana's cap) so
-      // character + style consistency holds across 40+ shots. Short-form
-      // keeps the tight 2+2 split for speed.
-      const refs = longformEnabled
-        ? [...characterAnchors.slice(0, 3), ...styleRefUrls.slice(0, 3)].slice(0, 6)
-        : [...characterAnchors.slice(0, 2), ...styleRefUrls.slice(0, 2)];
-
-      let asset: { url: string; kind: 'image' | 'video' } | null = null;
-      let shotCost = 0;
-      let error: string | undefined;
-
-      try {
-        if (fs.shot.kind === 'ai_video' && defaultVideoModel && features.fal) {
-          const video = await withRetry(
-            () =>
-              generateAiVideo({
-                modelId: defaultVideoModel,
-                prompt,
-                negativePrompt: negativePrompt || undefined,
-                aspectRatio: videoAspectFrom(aspectRatio),
-                durationSeconds: Math.min(
-                  // Long-form allows up to 10s per AI video clip so
-                  // establishing and reveal shots have room; short-form
-                  // keeps the tight 5s default for snappy pacing.
-                  genConfig.clipMaxSeconds ?? (longformEnabled ? 10 : 5),
-                  Math.max(
-                    genConfig.clipMinSeconds ?? (longformEnabled ? 4 : 2),
-                    fs.shot.durationSeconds,
-                  ),
-                ),
-                referenceImageUrls: refs,
-                scopePath: `personal/${account.id}/ai-video`,
-              }),
-            { label: `director_video:${account.id}:${fs.shot.id}`, attempts: 1 },
-          );
-          asset = { url: video.url, kind: 'video' };
-          shotCost = video.costCents;
-        } else if (
-          fs.shot.kind === 'scraped_video' ||
-          fs.shot.kind === 'scraped_image' ||
-          fs.shot.kind === 'b_roll'
-        ) {
-          const { items } = await searchAssets({
-            query: fs.shot.imageQuery ?? fs.shot.description ?? topic,
-            sources: theme.mediaSources.filter(
-              (s): s is 'pexels' | 'unsplash' | 'pixabay' | 'wikipedia' | 'news' =>
-                s !== 'ai' && s !== 'gameplay',
-            ),
-            count: 3,
-            preferVideo: fs.shot.kind === 'scraped_video' || fs.shot.kind === 'b_roll',
-          });
-          if (items.length > 0) {
-            const pick = items[0]!;
-            asset = {
-              url: pick.downloadUrl ?? pick.url,
-              kind: pick.kind === 'video' ? 'video' : 'image',
-            };
-          } else if (fs.shot.kind === 'b_roll' && theme.mediaSources.includes('gameplay')) {
-            const loop = pickGameplayLoop(fs.shot.id);
-            asset = { url: loop.url, kind: 'video' };
-          }
-        }
-
-        // Either the shot asked for ai_image OR an ai_video/scraped fell
-        // through — fill with an ai_image so the beat still renders.
-        if (!asset && defaultImageModel && !theme.requiresGroundedImages) {
-          const image = await withRetry(
-            () =>
-              generateAiImage({
-                modelId: defaultImageModel,
-                prompt,
-                negativePrompt: negativePrompt || undefined,
-                aspectRatio: aspectRatio,
-                referenceImageUrls: refs,
-                scopePath: `personal/${account.id}/ai-image`,
-              }),
-            { label: `director_image:${account.id}:${fs.shot.id}`, attempts: 1 },
-          );
-          asset = { url: image.url, kind: 'image' };
-          shotCost = image.costCents;
-        }
-      } catch (e) {
-        error = (e as Error).message;
-        console.warn(`[director] shot ${fs.shot.id} failed:`, error);
-      }
-
-      return { fs, asset, costCents: shotCost, error };
-    };
-
-    // Bounded parallelism — generate shots 4 at a time. With 40 shots
-    // × 20s each sequential that's 13 minutes; at 4-way concurrency
-    // it's ~3 minutes. We also emit progress after every completion so
-    // the UI can show "Shot 17/40".
-    const concurrency = longformEnabled ? 4 : 2;
-    const shotResultsOrdered: Array<Awaited<ReturnType<typeof generateShotAsset>>> =
-      new Array(flat.length);
-    let completed = 0;
-    let nextIdx = 0;
-    const workers: Promise<void>[] = [];
-    const worker = async () => {
-      while (true) {
-        const idx = nextIdx++;
-        if (idx >= flat.length) return;
-        const result = await generateShotAsset(flat[idx]!);
-        shotResultsOrdered[idx] = result;
-        completed++;
-        totalCostCents += result.costCents;
-        broadcast({
-          type: 'personal:progress',
-          payload: {
-            accountId: account.id,
-            postId,
-            phase: 'sourcing_media',
-            progress: { done: completed, total: flat.length },
-          },
-        });
-      }
-    };
-    for (let w = 0; w < concurrency; w++) workers.push(worker());
-    await Promise.all(workers);
-    shotAssets.push(...shotResultsOrdered);
-
-    // Drop shots with no asset.
-    const resolved = shotAssets.filter((s) => s.asset !== null) as Array<{
-      fs: ReturnType<typeof flattenStoryboard>[number];
-      asset: { url: string; kind: 'image' | 'video' };
-      costCents: number;
-    }>;
-    const failedSamples = shotAssets
-      .filter((s) => s.asset === null && (s as any).error)
-      .slice(0, 3)
-      .map((s) => (s as any).error as string);
-    const minShotsRequired = longformEnabled ? 8 : 3;
-    if (resolved.length < minShotsRequired) {
-      const label = longformEnabled ? 'long-form video' : 'short';
-      const hint = failedSamples.length
-        ? ` First failures: ${failedSamples.join(' | ')}`
-        : '';
-      await markFailed(
-        postId,
-        `Only ${resolved.length}/${flat.length} shots resolved — need at least ${minShotsRequired} for a watchable ${label}.${hint}`,
-      );
-      return {
-        postId,
-        videoUrl: null,
-        status: 'failed',
-        durationSeconds: 0,
-        costCents: totalCostCents,
-        skipped: true,
-        reason: 'insufficient resolved shots',
-      };
-    }
-
-    /* ── 5. Voiceover (stitched narration) ───────────────── */
-    const useVoiceover = genConfig.useVoiceover ?? theme.useVoiceover;
-    let voiceoverUrl: string | null = null;
-    let estimatedDuration = resolved.reduce(
-      (acc, r) => acc + r.fs.shot.durationSeconds,
-      0,
-    );
-    if (useVoiceover) {
-      broadcast({ type: 'personal:progress', payload: { accountId: account.id, postId, phase: 'voicing' } });
-      const narration = [
-        storyboard.hook,
-        ...resolved.map((r) => r.fs.shot.voiceover).filter(Boolean),
-        storyboard.outro,
-      ]
-        .filter(Boolean)
-        .join(' ');
-      if (narration.length > 0) {
-        const voice = await synthesizeVoice({
-          text: narration,
-          voiceId:
-            genConfig.ttsVoiceId ??
-            character?.voiceId ??
-            account.voiceId ??
-            'default',
-          language: account.language,
-          accountId: account.id,
-        });
-        voiceoverUrl = voice.audioUrl;
-        estimatedDuration = Math.max(estimatedDuration, voice.durationSeconds);
-        totalCostCents += voice.costCents;
-      }
-    } else {
-      const onScreenText = [
-        storyboard.hook,
-        ...resolved.map((r) => r.fs.shot.onScreen).filter(Boolean),
-        storyboard.outro,
-      ].join(' ');
-      if (onScreenText.length > 0) {
-        estimatedDuration = Math.max(
-          estimatedDuration,
-          estimateDurationSeconds(onScreenText),
-        );
-      }
-    }
-
-    /* ── 6. Music ────────────────────────────────────────── */
-    let musicUrl: string | null = null;
-    let musicAttribution: string | null = null;
-    if (account.customAudioUrl) {
-      musicUrl = account.customAudioUrl;
-      musicAttribution = account.customAudioAttribution ?? null;
-    } else {
-      const useMusic = genConfig.useMusic ?? theme.useMusic;
-      if (useMusic) {
-        // For long-form we cap the "min length" request at 60s because the
-        // stitcher loops music anyway — asking for 480s tracks will
-        // frequently miss the available pool and return nothing.
-        const minMusicSeconds = longformEnabled
-          ? Math.min(60, Math.ceil(estimatedDuration))
-          : Math.ceil(estimatedDuration);
-        const music = await pickMusic({
-          mood: theme.musicMood,
-          seed: postId,
-          minDurationSeconds: minMusicSeconds,
-        }).catch(() => null);
-        if (music) {
-          musicUrl = music.url;
-          musicAttribution = music.attribution;
-        }
-      }
-    }
-
-    /* ── 7. Stitch ───────────────────────────────────────── */
-    broadcast({ type: 'personal:progress', payload: { accountId: account.id, postId, phase: 'stitching' } });
-    await db
-      .update(personalPosts)
-      .set({
-        voiceoverUrl,
-        musicUrl,
-        musicAttribution,
-        status: 'rendering',
-        mediaAssets: resolved.map((r) => ({
-          url: r.asset.url,
-          kind: r.asset.kind,
-          source: (r.fs.shot.kind === 'ai_video' || r.fs.shot.kind === 'ai_image'
-            ? 'ai'
-            : r.fs.shot.kind === 'b_roll'
-              ? 'gameplay'
-              : r.fs.shot.kind === 'scraped_video' || r.fs.shot.kind === 'scraped_image'
-                ? 'pexels'
-                : 'upload') as any,
-          startAtSeconds: 0,
-          durationSeconds: r.fs.shot.durationSeconds,
-        })),
-        updatedAt: new Date(),
-      })
-      .where(eq(personalPosts.id, postId));
-
-    const stitchInputs: StitchShotInput[] = resolved.map((r) => ({
-      url: r.asset.url,
-      kind: r.asset.kind,
-      durationSeconds: r.fs.shot.durationSeconds,
-      transitionOut: r.fs.shot.transitionOut,
-      speedRamp: r.fs.shot.speedRamp,
-      focalX: r.fs.shot.focalX,
-      focalY: r.fs.shot.focalY,
-    }));
-
-    // Pick the stitcher's target duration. Priority:
-    //   1. Real voiceover duration (ffmpeg-probed) if we have one.
-    //   2. Long-form user target.
-    //   3. Sum of shot durations (falls through to no scaling).
-    // The goal is to never cut narration mid-sentence: whichever of
-    // (narration, visuals, target) is longest wins.
-    const shotSum = stitchInputs.reduce((a, s) => a + s.durationSeconds, 0);
-    let stitchTarget: number | undefined;
-    if (longformEnabled) {
-      stitchTarget = Math.max(
-        longformTargetSeconds ?? 0,
-        estimatedDuration,
-        shotSum,
-      );
-    } else if (useVoiceover && estimatedDuration > shotSum + 1) {
-      // For short-form, only extend visuals when narration is obviously
-      // longer than the planned visuals so we don't chop off words.
-      stitchTarget = estimatedDuration;
-    }
-
-    const stitched = await stitchShots({
-      accountId: account.id,
+    return await directorPipelineFromResolvedStoryboard({
+      account,
+      theme,
+      genConfig,
+      styleBible,
+      character,
       postId,
-      shots: stitchInputs,
-      audio: {
-        voiceoverUrl: voiceoverUrl ?? undefined,
-        musicUrl: musicUrl ?? undefined,
-      },
-      aspectRatio: aspectRatio,
-      colourGrade: mapGrade(storyboard.editPlan.colourGrade),
-      useGrain: storyboard.editPlan.useGrain,
-      letterbox: storyboard.editPlan.letterbox,
-      targetDurationSeconds: stitchTarget,
+      topic,
+      storyboard,
+      aspectRatio,
+      longformEnabled,
+      longformTargetSeconds,
+      longformAnimationStyle,
+      accountMedia,
+      initialCostCents: totalCostCents,
+      args,
+      markFailed,
+      pickImageModelForLongform,
     });
-    totalCostCents += 3;
-
-    /* ── 8. Schedule ──────────────────────────────────────── */
-    let contentStudioPostId: string | null = null;
-    let scheduledAt: Date | null = null;
-    const shouldSchedule =
-      (args.autoSchedule ?? account.autoSchedule) && account.autoApprove;
-    if (shouldSchedule) {
-      const when = args.scheduledAt
-        ? new Date(args.scheduledAt)
-        : new Date(Date.now() + 60 * 60 * 1000);
-      try {
-        const res = await schedulePost({
-          platform: account.platform,
-          caption: composeCaption(storyboard),
-          videoUrl: stitched.videoUrl,
-          scheduledAt: when,
-          workspaceId: account.contentStudioWorkspaceId ?? undefined,
-        });
-        contentStudioPostId = res.id;
-        scheduledAt = when;
-      } catch (e) {
-        console.warn('[director] schedule failed:', (e as Error).message);
-      }
-    }
-
-    /* ── 9. Persist ───────────────────────────────────────── */
-    await db
-      .update(personalPosts)
-      .set({
-        videoUrl: stitched.videoUrl,
-        durationSeconds: Math.round(stitched.durationSeconds),
-        caption: composeCaption(storyboard),
-        hashtags: storyboard.hashtags ?? theme.defaultHashtags,
-        contentStudioPostId,
-        scheduledAt,
-        status: scheduledAt ? 'scheduled' : 'ready',
-        costCents: totalCostCents,
-        postKind: 'video',
-        updatedAt: new Date(),
-      })
-      .where(eq(personalPosts.id, postId));
-
-    await db
-      .update(personalAccounts)
-      .set({
-        lastGeneratedAt: new Date(),
-        totalPosts: (account.totalPosts ?? 0) + 1,
-        updatedAt: new Date(),
-      })
-      .where(eq(personalAccounts.id, account.id));
-
-    broadcast({
-      type: 'personal:progress',
-      payload: { accountId: account.id, postId, phase: 'done:director', videoUrl: stitched.videoUrl },
-    });
-
-    return {
-      postId,
-      videoUrl: stitched.videoUrl,
-      status: scheduledAt ? 'scheduled' : 'ready',
-      durationSeconds: stitched.durationSeconds,
-      costCents: totalCostCents,
-    };
   } catch (e) {
-    await markFailed(postId, (e as Error).message);
-    broadcast({
-      type: 'personal:progress',
-      payload: { accountId: account.id, postId, phase: 'failed:director', error: (e as Error).message },
-    });
+    const msg =
+      e instanceof StitcherError
+        ? e.message
+        : e instanceof Error
+          ? e.message
+          : String(e);
+    try {
+      await markFailed(postId, msg);
+    } catch (dbErr) {
+      console.error('[director] markFailed could not persist:', (dbErr as Error).message);
+    }
+    try {
+      broadcast({
+        type: 'personal:progress',
+        payload: { accountId: account.id, postId, phase: 'failed:director', error: msg },
+      });
+    } catch {
+      /* ignore broadcast errors */
+    }
     throw e;
   }
 }
@@ -764,21 +590,24 @@ function maxAiShotsFor(
   cfg: PersonalGeneratorConfig,
   longform = false,
 ): number {
+  if (cfg.mediaPreference === 'stills_only') return 0;
   const tier = cfg.qualityTier ?? 'balanced';
   if (cfg.useAiVideo === false) return 0;
+  const motionBoost =
+    cfg.mediaPreference === 'motion_preferred' || cfg.mediaPreference === 'video_only';
   if (longform) {
     // Long-form can afford more AI-video money shots without the cost
     // dominating, but still keeps ai_image as the bulk of the video.
     if (cfg.longformMaxAiVideoShots && cfg.longformMaxAiVideoShots > 0) {
       return Math.min(20, Math.max(0, cfg.longformMaxAiVideoShots));
     }
-    if (tier === 'max') return 10;
-    if (tier === 'balanced') return 5;
-    return 2;
+    if (tier === 'max') return motionBoost ? 12 : 10;
+    if (tier === 'balanced') return motionBoost ? 7 : 5;
+    return motionBoost ? 3 : 2;
   }
-  if (tier === 'max') return 5;
-  if (tier === 'balanced') return 3;
-  return 1;
+  if (tier === 'max') return motionBoost ? 7 : 5;
+  if (tier === 'balanced') return motionBoost ? 5 : 3;
+  return motionBoost ? 2 : 1;
 }
 
 /** Clamp long-form duration to 60–480 seconds (1–8 minutes). */
@@ -835,32 +664,6 @@ function pickImageModelForLongform(
   return pickDefaultModel('image', tier)?.id;
 }
 
-function videoAspectFrom(a: '9:16' | '1:1' | '16:9' | '4:5'): '9:16' | '1:1' | '16:9' {
-  return a === '4:5' ? '9:16' : a;
-}
-
-function mapGrade(
-  grade: string | undefined,
-): 'natural' | 'warm' | 'cool' | 'teal_orange' | 'film' | 'bw' | 'high_contrast' {
-  if (!grade) return 'natural';
-  const g = grade.toLowerCase();
-  if (/warm|golden|sun/.test(g)) return 'warm';
-  if (/cool|blue|cold/.test(g)) return 'cool';
-  if (/teal|orange|cinematic/.test(g)) return 'teal_orange';
-  if (/film|grain|vintage/.test(g)) return 'film';
-  if (/black.?(and|&).?white|mono/.test(g)) return 'bw';
-  if (/contrast|punchy/.test(g)) return 'high_contrast';
-  return 'natural';
-}
-
-function composeCaption(sb: Storyboard): string {
-  const tags = (sb.hashtags ?? [])
-    .slice(0, 8)
-    .map((t) => (t.startsWith('#') ? t : `#${t}`))
-    .join(' ');
-  return [sb.caption?.trim(), tags].filter(Boolean).join('\n\n');
-}
-
 async function markStatus(postId: string, status: string) {
   const db = getDb();
   await db
@@ -873,6 +676,12 @@ async function markFailed(postId: string, message: string) {
   const db = getDb();
   await db
     .update(personalPosts)
-    .set({ status: 'failed', errorMessage: message.slice(0, 500), updatedAt: new Date() })
+    .set({
+      status: 'failed',
+      errorMessage: message.slice(0, 500),
+      renderProgress: null,
+      renderProgressLabel: null,
+      updatedAt: new Date(),
+    })
     .where(eq(personalPosts.id, postId));
 }

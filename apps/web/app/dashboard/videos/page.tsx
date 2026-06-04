@@ -172,18 +172,16 @@ export default function VideosPage() {
                     <div className="absolute inset-0 flex items-center justify-center">
                       <Film className="h-12 w-12 text-white/80" />
                     </div>
-                    <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-4">
-                      <div className="text-sm font-bold text-white">{t.name}</div>
-                      <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-white/80">
+                    <div className="absolute bottom-0 left-0 right-0 min-w-0 bg-gradient-to-t from-black/70 to-transparent p-3 sm:p-4">
+                      <div className="break-words text-sm font-bold text-white">{t.name}</div>
+                      <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-1.5 text-[10px] text-white/80">
                         <span>{(t.durationFrames / 30).toFixed(0)}s</span>
                         <span>·</span>
                         <span>{t.usesImage ? 'with image' : 'text only'}</span>
                       </div>
                     </div>
                   </div>
-                  <div className="bg-white p-3">
-                    <div className="text-xs text-slate-500">{t.description}</div>
-                  </div>
+                  <div className="bg-white p-3 text-xs break-words text-slate-500">{t.description}</div>
                 </motion.button>
               ))}
             </div>
@@ -199,7 +197,7 @@ export default function VideosPage() {
                 — same {selected.name}, different palette
               </span>
             </h2>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 lg:grid-cols-5">
               {selected.availablePresets.map((p) => {
                 const p1 = p.palette?.primary ?? '#1D9CA1';
                 const p2 = p.palette?.accent ?? '#48D886';

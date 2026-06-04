@@ -1,0 +1,18 @@
+[
+  {
+    "local": "%USERPROFILE%/Downloads/Relaxing (Copyright Free Music) - Missing You by Neutrin05.mp3",
+    "key": "public/music/neutrin05-missing-you.mp3"
+  },
+  {
+    "local": "%USERPROFILE%/Downloads/Mystery Music (No Copyright) - Signal To Noise by @ScottBuckley.mp3",
+    "key": "public/music/scott-buckley-signal-to-noise.mp3"
+  },
+  {
+    "local": "%USERPROFILE%/Downloads/'Filaments' by @Scott Buckley    Sad Ambiental Music (No Copyright).mp3",
+    "key": "public/music/scott-buckley-filaments.mp3"
+  },
+  {
+    "local": "%USERPROFILE%/Downloads/'Dystopia' by Neutrin05    Calm Dark Electronic Music (No Copyright).mp3",
+    "key": "public/music/neutrin05-dystopia.mp3"
+  }
+]

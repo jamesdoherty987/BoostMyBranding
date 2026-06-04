@@ -18,22 +18,39 @@
  */
 
 import { spawn } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, unlinkSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { uploadFile } from './r2.js';
+import { resolveFfmpegBin } from '../lib/ffmpegBin.js';
+
+/** When `voiceId` is unset or `default`, combined with provider to pick a stock voice. */
+export type VoiceAccentPreset = 'american' | 'british';
+export type VoiceGenderPreset = 'female' | 'male';
+
+/** Matches {@link PersonalGeneratorConfig.ttsProvider} — controls try order / skip TTS. */
+export type TtsProviderPreference = 'elevenlabs' | 'openai' | 'cartesia' | 'none';
 
 export interface SynthesizeArgs {
   text: string;
   /** Provider voice id. Provider-agnostic by passing 'default'. */
   voiceId?: string;
+  /** Stock accent when `voiceId` is default or ambiguous (OpenAI preset names). */
+  voiceAccent?: VoiceAccentPreset;
+  /** Stock gender when `voiceId` is default or ambiguous. */
+  voiceGender?: VoiceGenderPreset;
   /** ISO 639-1 hint for non-English providers that need it. */
   language?: string;
   /** Speed, 0.8–1.2. */
   speed?: number;
   /** Storage scope — goes into R2 path as `personal/{accountId}/voiceovers`. */
   accountId: string;
+  /**
+   * When set, picks which engine to try first (with fallbacks if keys missing).
+   * `cartesia` is not wired yet — behaves like OpenAI-first then ElevenLabs.
+   */
+  providerPreference?: TtsProviderPreference;
 }
 
 export interface SynthesizeResult {
@@ -47,42 +64,116 @@ export async function synthesizeVoice(args: SynthesizeArgs): Promise<SynthesizeR
   const text = args.text.trim();
   if (text.length < 1) throw new Error('Voiceover text is empty');
 
-  // 1. ElevenLabs ---------------------------------------------------------
-  if (process.env.ELEVENLABS_API_KEY) {
-    try {
-      return await synthesizeElevenLabs(args, text);
-    } catch (e) {
-      console.warn('[voice] ElevenLabs failed, falling back:', (e as Error).message);
-    }
+  const pref = args.providerPreference ?? 'elevenlabs';
+  if (pref === 'none') {
+    return mockVoice(args, text);
   }
 
-  // 2. OpenAI TTS ---------------------------------------------------------
-  if (process.env.OPENAI_API_KEY) {
-    try {
-      return await synthesizeOpenAI(args, text);
-    } catch (e) {
-      console.warn('[voice] OpenAI TTS failed, falling back:', (e as Error).message);
-    }
-  }
+  const hasEl = Boolean(process.env.ELEVENLABS_API_KEY);
+  const hasOa = Boolean(process.env.OPENAI_API_KEY);
 
-  // 3. Mock ---------------------------------------------------------------
-  return mockVoice(args, text);
+  const tryEleven = async () => {
+    if (!hasEl) throw new Error('no ElevenLabs key');
+    return synthesizeElevenLabs(args, text);
+  };
+  const tryOpenAi = async () => {
+    if (!hasOa) throw new Error('no OpenAI key');
+    return synthesizeOpenAI(args, text);
+  };
+
+  /** Default: ElevenLabs → OpenAI → mock (legacy behaviour). */
+  const chainElevenFirst = async () => {
+    if (hasEl) {
+      try {
+        return await tryEleven();
+      } catch (e) {
+        console.warn('[voice] ElevenLabs failed, falling back:', (e as Error).message);
+      }
+    }
+    if (hasOa) {
+      try {
+        return await tryOpenAi();
+      } catch (e) {
+        console.warn('[voice] OpenAI TTS failed, falling back:', (e as Error).message);
+      }
+    }
+    return mockVoice(args, text);
+  };
+
+  const chainOpenAiFirst = async () => {
+    if (hasOa) {
+      try {
+        return await tryOpenAi();
+      } catch (e) {
+        console.warn('[voice] OpenAI TTS failed, falling back:', (e as Error).message);
+      }
+    }
+    if (hasEl) {
+      try {
+        return await tryEleven();
+      } catch (e) {
+        console.warn('[voice] ElevenLabs failed, falling back:', (e as Error).message);
+      }
+    }
+    return mockVoice(args, text);
+  };
+
+  if (pref === 'openai') {
+    return chainOpenAiFirst();
+  }
+  if (pref === 'cartesia') {
+    // Cartesia SDK not wired — prefer neural OpenAI, then ElevenLabs.
+    return chainOpenAiFirst();
+  }
+  return chainElevenFirst();
 }
 
 /* ─── ElevenLabs ────────────────────────────────────────────────── */
 
 const ELEVENLABS_CHUNK_CHARS = 3500;
 
+/** OpenAI TTS preset names — if `voiceId` matches one, ElevenLabs uses accent/gender stock instead. */
+const OPENAI_TTS_VOICE_NAMES = new Set(['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer']);
+
+function elevenLabsStockVoiceId(accent?: VoiceAccentPreset, gender?: VoiceGenderPreset): string {
+  const a = accent ?? 'american';
+  const g = gender ?? 'female';
+  if (a === 'american' && g === 'female') return '21m00Tcm4TlvDq8ikWAM'; // Rachel
+  if (a === 'american' && g === 'male') return 'pNInz6obpgDQGcFmaJgB'; // Adam
+  if (a === 'british' && g === 'female') return 'XB0fDUnXU5powFXDhCwa'; // Charlotte
+  return 'VR6AewLTigWG4xSOukaG'; // Arnold — UK male
+}
+
+function openAiStockVoice(accent?: VoiceAccentPreset, gender?: VoiceGenderPreset): string {
+  const a = accent ?? 'american';
+  const g = gender ?? 'female';
+  if (a === 'american' && g === 'female') return 'nova';
+  if (a === 'american' && g === 'male') return 'onyx';
+  if (a === 'british' && g === 'female') return 'shimmer';
+  return 'fable';
+}
+
+function resolveElevenLabsVoiceId(args: SynthesizeArgs): string {
+  const raw = args.voiceId?.trim();
+  if (raw && raw !== 'default' && !OPENAI_TTS_VOICE_NAMES.has(raw.toLowerCase())) {
+    return raw;
+  }
+  return elevenLabsStockVoiceId(args.voiceAccent, args.voiceGender);
+}
+
+function resolveOpenAiVoiceName(args: SynthesizeArgs): string {
+  const raw = args.voiceId?.trim().toLowerCase();
+  if (raw && raw !== 'default' && OPENAI_TTS_VOICE_NAMES.has(raw)) {
+    return raw;
+  }
+  return openAiStockVoice(args.voiceAccent, args.voiceGender);
+}
+
 async function synthesizeElevenLabs(
   args: SynthesizeArgs,
   text: string,
 ): Promise<SynthesizeResult> {
-  // The voiceId param should be an ElevenLabs voice id. 'default'
-  // falls back to Rachel (a widely licensed public voice).
-  const voiceId =
-    args.voiceId && args.voiceId !== 'default'
-      ? args.voiceId
-      : '21m00Tcm4TlvDq8ikWAM'; // Rachel
+  const voiceId = resolveElevenLabsVoiceId(args);
 
   // Chunk on sentence boundaries when we're over the per-request cap.
   const chunks = text.length > ELEVENLABS_CHUNK_CHARS
@@ -112,6 +203,7 @@ async function synthesizeElevenLabs(
             similarity_boost: 0.75,
             style: 0.3,
             use_speaker_boost: true,
+            speed: Math.min(1.2, Math.max(0.7, args.speed ?? 1)),
           },
         }),
       },
@@ -154,10 +246,7 @@ async function synthesizeOpenAI(
   args: SynthesizeArgs,
   text: string,
 ): Promise<SynthesizeResult> {
-  // 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer'.
-  // 'default' → nova (warm female narrator — good default for VO).
-  const voice =
-    args.voiceId && args.voiceId !== 'default' ? args.voiceId : 'nova';
+  const voice = resolveOpenAiVoiceName(args);
 
   // OpenAI's /v1/audio/speech endpoint caps input at 4096 chars. Chunk
   // on sentence boundaries when the narration is longer.
@@ -237,12 +326,30 @@ export function estimateDurationSeconds(text: string, speed = 1): number {
 }
 
 /**
+ * Join hook, per-shot voiceovers, and outro for a single TTS pass.
+ * Skips consecutive segments that are the same after trim (case-insensitive),
+ * so the opening line is not spoken twice when the script repeats the hook
+ * as the first beat's `voiceover`.
+ */
+export function joinNarrationParts(parts: Array<string | undefined | null>): string {
+  const kept: string[] = [];
+  for (const raw of parts) {
+    const t = (raw ?? '').trim();
+    if (!t) continue;
+    const last = kept[kept.length - 1];
+    if (last !== undefined && last.toLowerCase() === t.toLowerCase()) continue;
+    kept.push(t);
+  }
+  return kept.join(' ');
+}
+
+/**
  * Measures the actual duration of an MP3 buffer using ffmpeg. Falls
  * through when ffmpeg isn't on PATH. Accurate to the frame — beats
  * the WPM estimate for any non-trivial narration.
  */
 async function probeAudioDuration(buffer: Buffer): Promise<number | null> {
-  const ffmpegBin = await detectFfmpegForProbe();
+  const ffmpegBin = await resolveFfmpegBin();
   if (!ffmpegBin) return null;
   const workDir = path.join(tmpdir(), `vo-probe-${randomUUID()}`);
   try {
@@ -270,22 +377,6 @@ async function probeAudioDuration(buffer: Buffer): Promise<number | null> {
   } catch {
     return null;
   }
-}
-
-async function detectFfmpegForProbe(): Promise<string | null> {
-  if (process.env.FFMPEG_PATH && existsSync(process.env.FFMPEG_PATH)) {
-    return process.env.FFMPEG_PATH;
-  }
-  return new Promise<string | null>((resolve) => {
-    const p = spawn('which', ['ffmpeg']);
-    let out = '';
-    p.stdout.on('data', (b) => (out += b.toString()));
-    p.on('close', () => {
-      const trimmed = out.trim();
-      resolve(trimmed && existsSync(trimmed) ? trimmed : null);
-    });
-    p.on('error', () => resolve(null));
-  });
 }
 
 /**
@@ -345,7 +436,7 @@ export const voiceFeatures = {
 async function concatMp3Buffers(buffers: Buffer[]): Promise<Buffer> {
   if (buffers.length === 0) throw new Error('concatMp3Buffers: empty input');
   if (buffers.length === 1) return buffers[0]!;
-  const ffmpegBin = await detectFfmpegForProbe();
+  const ffmpegBin = await resolveFfmpegBin();
   if (!ffmpegBin) return Buffer.concat(buffers);
 
   const workDir = path.join(tmpdir(), `vo-concat-${randomUUID()}`);

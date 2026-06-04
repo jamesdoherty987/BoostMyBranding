@@ -14,10 +14,14 @@ import type { NextConfig } from 'next';
  * long-running Node process (cron, websockets, 30s+ generation jobs).
  *
  * Required env vars for production:
- *   API_UPSTREAM — e.g. https://boost-api.onrender.com
+ *   API_UPSTREAM — e.g. https://boost-api.onrender.com (omit in local dev:
+ *   defaults to http://127.0.0.1:4000 so `/api/*` rewrites work without .env)
  */
 
-const API = process.env.API_UPSTREAM;
+/** Upstream Express API for Next rewrites (`/api/*` → API). In local dev, default to the API port so you do not need API_UPSTREAM in `.env`. */
+const API =
+  process.env.API_UPSTREAM?.trim() ||
+  (process.env.NODE_ENV === 'development' ? 'http://127.0.0.1:4000' : '');
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
@@ -35,7 +39,8 @@ const nextConfig: NextConfig = {
     // Only API requests get proxied. Dashboard/portal are now built into
     // this same app as route segments, so no rewrite is needed for them.
     if (!API) return [];
-    return [{ source: '/api/:path*', destination: `${API}/api/:path*` }];
+    const base = API.replace(/\/+$/, '');
+    return [{ source: '/api/:path*', destination: `${base}/api/:path*` }];
   },
   async headers() {
     return [

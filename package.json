@@ -6,6 +6,9 @@
   "scripts": {
     "build": "turbo build",
     "dev": "turbo dev",
+    "dev:stack": "turbo dev --filter=web --filter=api",
+    "dev:web": "pnpm --filter web dev",
+    "dev:api": "pnpm --filter api dev",
     "lint": "turbo lint",
     "audit": "pnpm audit --prod",
     "format": "prettier --write \"**/*.{ts,tsx,md}\"",

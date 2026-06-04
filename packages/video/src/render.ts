@@ -41,6 +41,10 @@ export interface RenderArgs {
   outputPath: string;
   /** Override the default duration. Use with care — most templates are built for their natural duration. */
   durationFrames?: number;
+  /** Override composition width (e.g. 1920 for 16:9 landscape). */
+  compositionWidth?: number;
+  /** Override composition height (must be set with compositionWidth). */
+  compositionHeight?: number;
 }
 
 export interface RenderResult {
@@ -86,6 +90,9 @@ export async function renderVideo(args: RenderArgs): Promise<RenderResult> {
     composition: {
       ...composition,
       durationInFrames: durationFrames,
+      ...(args.compositionWidth != null && args.compositionHeight != null
+        ? { width: args.compositionWidth, height: args.compositionHeight }
+        : {}),
     },
     serveUrl,
     codec: 'h264',

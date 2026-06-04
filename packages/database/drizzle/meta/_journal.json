@@ -99,6 +99,41 @@
       "when": 1777640094388,
       "tag": "0013_portal_config",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1777640094389,
+      "tag": "0014_personal_posts_render_progress",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1777640094390,
+      "tag": "0015_personal_posts_render_activity",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1777640094391,
+      "tag": "0016_personal_posts_thumbnail_url",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1777640094392,
+      "tag": "0017_personal_accounts_auto_generate_on_schedule",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1777640094393,
+      "tag": "0018_personal_accounts_contentstudio_account_id",
+      "breakpoints": true
     }
   ]
 }

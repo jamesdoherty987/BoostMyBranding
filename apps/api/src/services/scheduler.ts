@@ -11,7 +11,7 @@
  */
 
 import cron from 'node-cron';
-import { and, eq, isNull, lt, lte } from 'drizzle-orm';
+import { and, eq, isNull, isNotNull, lt, lte } from 'drizzle-orm';
 import {
   getDb,
   isDbConfigured,
@@ -29,8 +29,16 @@ import { imageAnalysisPrompt } from './prompts.js';
 import { runMonthlyGeneration } from './automation.js';
 import { notifyAgencyBatchReady } from './notifications.js';
 import { withRetry } from './retry.js';
+import { enqueuePersonalGenerateForAccount } from './personalGenerateQueue.js';
 import { generateForAccount } from './personalPipeline.js';
-import { computeNextRunAt } from './personalAccounts.js';
+import { resumeInterruptedDirectorPersonalPostsOnBoot } from './personalDirectorPipeline.js';
+import {
+  computeNextRunAt,
+  failInterruptedRenderingPersonalPostsOnBoot,
+  failStaleEarlyPhasePersonalPosts,
+  failStaleRenderingPersonalPosts,
+  personalDirectorResumeOnBootEnabled,
+} from './personalAccounts.js';
 
 export function startScheduler() {
   if (!isDbConfigured()) {
@@ -42,8 +50,43 @@ export function startScheduler() {
   cron.schedule('*/2 * * * *', () => { analyzePendingImages(10).catch((e) => console.error('[cron analyze]', e)); }, { timezone: 'UTC' });
   cron.schedule('0 9 1 * *', () => { generateMonthlyBatches().catch((e) => console.error('[cron monthly]', e)); }, { timezone: 'UTC' });
   cron.schedule('*/5 * * * *', () => { runDuePersonalAccounts().catch((e) => console.error('[cron personal]', e)); }, { timezone: 'UTC' });
+  cron.schedule('*/15 * * * *', () => {
+    failStaleRenderingPersonalPosts().catch((e) =>
+      console.error('[cron personalStaleRender]', e),
+    );
+    failStaleEarlyPhasePersonalPosts().catch((e) =>
+      console.error('[cron personalStaleEarly]', e),
+    );
+  }, { timezone: 'UTC' });
 
-  console.log('⏱  Scheduler started (publish=1m · analyze=2m · personal=5m · monthly=day-1 09:00)');
+  console.log(
+    '⏱  Scheduler started (publish=1m · analyze=2m · personalAutopilot=5m when account has scheduled generation on · personalStalePipeline=15m · monthly=day-1 09:00)',
+  );
+
+  void (async () => {
+    try {
+      if (personalDirectorResumeOnBootEnabled()) {
+        await resumeInterruptedDirectorPersonalPostsOnBoot();
+      } else {
+        console.log(
+          '[personalDirectorResume] skipped on boot. Stuck director jobs stay paused until you press Generate or set PERSONAL_RESUME_DIRECTOR_ON_BOOT=true.',
+        );
+      }
+    } catch (e) {
+      console.error('[personalDirectorResume] startup', e);
+    }
+    try {
+      await failInterruptedRenderingPersonalPostsOnBoot();
+    } catch (e) {
+      console.error('[personalRenderingBoot] startup sweep', e);
+    }
+  })();
+  void failStaleRenderingPersonalPosts().catch((e) =>
+    console.error('[personalStaleRender] startup sweep', e),
+  );
+  void failStaleEarlyPhasePersonalPosts().catch((e) =>
+    console.error('[personalStaleEarly] startup sweep', e),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -254,11 +297,12 @@ export async function generateMonthlyBatches() {
 }
 
 // ---------------------------------------------------------------------------
-// Personal content — iterate every due personal account and kick off a post
+// Personal content — iterate due personal accounts that opted into Schedule
+// autopilot (`auto_generate_on_schedule`) and kick off a post.
 //
-// Runs every 5 minutes. Selects active personal accounts whose `nextRunAt` is
-// in the past, generates a post for each (limited concurrency), then rolls
-// `nextRunAt` forward based on postsPerDay + postSpacingMinutes.
+// Runs every 5 minutes. Selects **active** accounts with scheduled generation on
+// and `next_run_at` in the past, generates one post each, then rolls `next_run_at`.
+// Accounts with scheduled generation off only run from Generate.
 //
 // One generation can take 30-120 seconds, so we process accounts in parallel
 // with a small cap so we don't stampede Remotion/Claude quotas.
@@ -282,6 +326,8 @@ export async function runDuePersonalAccounts(): Promise<{
     .where(
       and(
         eq(personalAccounts.status, 'active'),
+        eq(personalAccounts.autoGenerateOnSchedule, true),
+        isNotNull(personalAccounts.nextRunAt),
         lte(personalAccounts.nextRunAt, now),
       ),
     )
@@ -294,14 +340,17 @@ export async function runDuePersonalAccounts(): Promise<{
     error?: string;
   }> = [];
 
-  // Process with concurrency = 2 so we don't hit API rate limits.
-  const CONCURRENCY = 2;
+  // Process one account at a time so heavy director pipelines (many fal jobs)
+  // do not stack on top of each other and trip fal.ai's concurrent-run cap.
+  const CONCURRENCY = 1;
   for (let i = 0; i < due.length; i += CONCURRENCY) {
     const batch = due.slice(i, i + CONCURRENCY);
     const outs = await Promise.all(
       batch.map(async (acc) => {
         try {
-          const result = await generateForAccount({ accountId: acc.id });
+          const result = await enqueuePersonalGenerateForAccount(acc.id, () =>
+            generateForAccount({ accountId: acc.id }),
+          );
           // Roll nextRunAt forward.
           const nextRun = rollNextRunAt(acc, new Date());
           await db

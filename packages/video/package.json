@@ -13,7 +13,7 @@
   "scripts": {
     "build": "tsc --noEmit",
     "studio": "remotion studio src/Root.tsx",
-    "lint": "eslint src --ext .ts,.tsx"
+    "lint": "tsc --noEmit"
   },
   "dependencies": {
     "@boost/core": "workspace:*",

@@ -342,7 +342,7 @@ function CaptionsMode({
   const estMinutes = useMemo(() => Math.max(2, Math.round((count * 5 + 30) / 60)), [count]);
 
   return (
-    <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_420px]">
+    <div className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,420px)]">
       <Card>
         <CardContent className="p-5 md:p-6 space-y-5">
           <div>
@@ -353,7 +353,7 @@ function CaptionsMode({
             </p>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <label className="text-xs font-medium text-slate-600">Posts (max)</label>
               <Input
@@ -624,7 +624,7 @@ function AIVideoMode({ clientId, businessName }: { clientId: string; businessNam
   };
 
   return (
-    <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_420px]">
+    <div className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,420px)]">
       <Card>
         <CardContent className="p-5 md:p-6 space-y-5">
           <div>
@@ -748,7 +748,7 @@ function AIVideoMode({ clientId, businessName }: { clientId: string; businessNam
               {showAdvanced ? 'Hide advanced options ↑' : 'Show advanced options ↓'}
             </button>
             {showAdvanced ? (
-              <div className="mt-3 grid grid-cols-2 gap-3 rounded-xl border border-slate-200 p-3">
+              <div className="mt-3 grid grid-cols-1 gap-3 rounded-xl border border-slate-200 p-3 sm:grid-cols-2">
                 <div>
                   <label className="text-[11px] font-medium text-slate-600">Opening frame</label>
                   <select
@@ -1117,7 +1117,7 @@ function AIImageMode({ clientId }: { clientId: string }) {
   };
 
   return (
-    <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_420px]">
+    <div className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,420px)]">
       <Card>
         <CardContent className="p-5 md:p-6 space-y-5">
           <div>
@@ -1274,7 +1274,7 @@ function TemplateMode({ clientId, businessName }: { clientId: string; businessNa
       <Card>
         <CardContent className="p-5 md:p-6">
           <p className="text-sm font-semibold text-slate-900">Pick a template</p>
-          <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-4">
             {shown.map((t) => (
               <button
                 key={t.id}
@@ -1290,15 +1290,15 @@ function TemplateMode({ clientId, businessName }: { clientId: string; businessNa
                   style={{ background: gradientFor(t.id) }}
                 >
                   <Film className="absolute left-1/2 top-1/2 h-10 w-10 -translate-x-1/2 -translate-y-1/2 text-white/80" />
-                  <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-3">
-                    <p className="text-xs font-bold text-white">{t.name}</p>
-                    <p className="mt-0.5 text-[10px] text-white/80">
+                  <div className="absolute inset-x-0 bottom-0 min-w-0 bg-gradient-to-t from-black/70 to-transparent p-2 sm:p-3">
+                    <p className="break-words text-xs font-bold text-white">{t.name}</p>
+                    <p className="mt-0.5 break-words text-[10px] text-white/80">
                       {(t.durationFrames / 30).toFixed(0)}s ·{' '}
                       {t.usesImage ? 'with image' : 'text'}
                     </p>
                   </div>
                 </div>
-                <div className="bg-white p-2 text-[11px] text-slate-500 line-clamp-2">
+                <div className="bg-white p-2 text-[11px] text-slate-500 line-clamp-2 [overflow-wrap:anywhere]">
                   {t.description}
                 </div>
               </button>
@@ -1307,10 +1307,10 @@ function TemplateMode({ clientId, businessName }: { clientId: string; businessNa
         </CardContent>
       </Card>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_380px]">
+      <div className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
         <Card>
           <CardContent className="p-5 md:p-6 space-y-4">
-            <p className="text-sm font-semibold text-slate-900">
+            <p className="break-words text-sm font-semibold text-slate-900">
               Details · <span className="text-[#1D9CA1]">{selected?.name ?? 'None'}</span>
             </p>
             <div>
@@ -1331,7 +1331,7 @@ function TemplateMode({ clientId, businessName }: { clientId: string; businessNa
                 className="mt-1"
               />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <label className="text-xs font-medium text-slate-600">CTA</label>
                 <Input
@@ -1947,15 +1947,15 @@ function PostPreviewCard({ post, onChange }: { post: Post; onChange: () => void 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="absolute inset-0 flex flex-col justify-end bg-slate-900/60 p-4 backdrop-blur-sm"
+            className="absolute inset-0 flex min-w-0 flex-col justify-end overflow-y-auto bg-slate-900/60 p-3 backdrop-blur-sm sm:p-4"
           >
             <motion.div
               initial={{ y: 20 }}
               animate={{ y: 0 }}
               exit={{ y: 20 }}
-              className="rounded-xl bg-white p-4 shadow-2xl"
+              className="max-h-[85vh] w-full min-w-0 overflow-y-auto rounded-xl bg-white p-3 shadow-2xl sm:p-4"
             >
-              <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+              <div className="flex min-w-0 items-center gap-2 text-sm font-semibold text-slate-900">
                 <MessageSquare className="h-4 w-4 text-[#1D9CA1]" />
                 What should be different?
               </div>
@@ -1967,10 +1967,10 @@ function PostPreviewCard({ post, onChange }: { post: Post; onChange: () => void 
                 onChange={(e) => setRegenInstruction(e.target.value)}
                 className="mt-2 no-zoom text-sm"
               />
-              <p className="mt-1 text-[11px] text-slate-400">
+              <p className="mt-1 break-words text-[11px] text-slate-400">
                 Real facts only. We won&apos;t invent names, dates, or events even if asked.
               </p>
-              <div className="mt-3 flex items-center justify-end gap-2">
+              <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
                 <Button
                   variant="ghost"
                   size="sm"

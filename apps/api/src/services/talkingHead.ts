@@ -17,6 +17,7 @@
 import { fal } from '@fal-ai/client';
 import { env, features } from '../env.js';
 import { getModel } from './modelCatalog.js';
+import { withFalConcurrency } from './falConcurrency.js';
 import { generateText } from './claude.js';
 import { buildBrandContext, brandContextToFactsBlock } from './brandContext.js';
 import { listProfiles, profilesToPromptBlock } from './inspirationProfiles.js';
@@ -733,7 +734,7 @@ export async function generateAvatarVideo(
   };
 
   try {
-    const result = await fal.subscribe(model.endpoint, { input, logs: false });
+    const result = await withFalConcurrency(() => fal.subscribe(model.endpoint, { input, logs: false }));
     const data = result.data as any;
     const videoUrl =
       data?.video?.url ??

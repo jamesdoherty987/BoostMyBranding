@@ -698,8 +698,9 @@ export const personalPostStatusEnum = pgEnum('personal_post_status', [
 
 /**
  * One personal social account. "@financebite_ig" is one row; "@financebite_tiktok"
- * is another. Each is locked to a single theme and gets its own daily posting
- * cadence — the scheduler iterates these at the configured hour.
+ * is another. Each is locked to a single theme. Optional **scheduled generation**
+ * (`auto_generate_on_schedule`) drives the 5-minute cron when `next_run_at` is due;
+ * otherwise new videos start only from Generate.
  *
  * `themeId` references a theme in `services/personalThemes.ts` (no FK —
  * themes live in code so we can ship new ones without a migration).
@@ -720,6 +721,12 @@ export const personalAccounts = pgTable(
     handle: text('handle'),
     /** The ContentStudio workspace id the scheduler will post to. */
     contentStudioWorkspaceId: text('contentstudio_workspace_id'),
+    /**
+     * When set, schedules posts to this ContentStudio connected account id
+     * (see GET …/contentstudio/accounts). Otherwise the first account for
+     * `platform` in the workspace is used.
+     */
+    contentStudioAccountId: text('contentstudio_account_id'),
 
     /** Theme lock — see `services/personalThemes.ts::THEMES`. */
     themeId: text('theme_id').notNull(),
@@ -758,6 +765,11 @@ export const personalAccounts = pgTable(
     autoApprove: boolean('auto_approve').default(true).notNull(),
     /** When false, generation still runs but scheduling is skipped. */
     autoSchedule: boolean('auto_schedule').default(true).notNull(),
+    /**
+     * When true, the API scheduler may call `generateForAccount` when
+     * `next_run_at` is due. When false, new videos only start from Generate.
+     */
+    autoGenerateOnSchedule: boolean('auto_generate_on_schedule').default(false).notNull(),
 
     /** Brand accent color for on-screen text / progress bars. */
     accentColor: text('accent_color').default('#FFEC3D'),
@@ -803,6 +815,12 @@ export const personalAccounts = pgTable(
   }),
 );
 
+/** One line in {@link personalPosts.renderActivityLog} while a post is encoding. */
+export interface PersonalPostRenderActivityEntry {
+  at: string;
+  m: string;
+}
+
 /**
  * One row per generated post. Stores the full pipeline — script, assets,
  * rendered MP4, platform id — so re-rendering or debugging is a single
@@ -837,6 +855,8 @@ export const personalPosts = pgTable(
     mediaAssets: jsonb('media_assets').$type<PersonalPostMediaAsset[]>(),
     /** The rendered MP4 URL on R2. */
     videoUrl: text('video_url'),
+    /** Custom poster / YouTube thumbnail (JPEG on R2), e.g. long-form YouTube uploads. */
+    thumbnailUrl: text('thumbnail_url'),
     /** Platform-specific caption (emoji + hashtags). */
     caption: text('caption'),
     hashtags: text('hashtags').array().default([] as unknown as string[]),
@@ -852,6 +872,12 @@ export const personalPosts = pgTable(
     publishUrl: text('publish_url'),
 
     status: personalPostStatusEnum('status').default('queued').notNull(),
+    /** 0–100 while encoding (director stitch / Remotion); null when idle. */
+    renderProgress: integer('render_progress'),
+    /** Short human-readable encode phase for the dashboard (e.g. "Encoding shot 3/12…"). */
+    renderProgressLabel: text('render_progress_label'),
+    /** Recent encode log lines (timestamp + message) for "not stuck" UI; capped in the API. */
+    renderActivityLog: jsonb('render_activity_log').$type<PersonalPostRenderActivityEntry[]>(),
     errorMessage: text('error_message'),
     /** Generation cost in cents (sum of Claude + TTS + scraper + render). */
     costCents: integer('cost_cents').default(0),
@@ -1119,6 +1145,15 @@ export interface PersonalAccountStyleBible {
   motifs?: string[];
   /** Writing samples — Claude mimics these. */
   copySamples?: string[];
+  /** Example video titles — inspire pacing and specificity; do not copy verbatim. */
+  exampleVideoTitles?: string[];
+  /** Example script lines / hooks — inspire tone and rhythm only. */
+  exampleScriptSnippets?: string[];
+  /**
+   * Full reference scripts (one string per script). Injected for structure,
+   * pacing, and tone — the model must not copy wording or claims verbatim.
+   */
+  referenceFullScripts?: string[];
   /** Banned clichés — strings the script must not contain. */
   bannedPhrases?: string[];
 }
@@ -1132,6 +1167,13 @@ export interface PersonalGeneratorConfig {
   /** TTS provider + voice. */
   ttsProvider?: 'elevenlabs' | 'openai' | 'cartesia' | 'none';
   ttsVoiceId?: string;
+  /**
+   * When `ttsVoiceId` is unset or `default`, maps to stock voices per provider.
+   * `british` uses UK-leaning presets (OpenAI: fable/shimmer; ElevenLabs: Charlotte / Arnold).
+   */
+  voiceAccent?: 'american' | 'british';
+  /** When `ttsVoiceId` is unset or `default`, picks male vs female stock voice. */
+  voiceGender?: 'female' | 'male';
 
   /* ── On / off switches (configurable per-account) ─────────── */
   useVoiceover?: boolean;
@@ -1151,6 +1193,43 @@ export interface PersonalGeneratorConfig {
   clipMinSeconds?: number;
   /** Maximum duration for AI-generated video clips (seconds). */
   clipMaxSeconds?: number;
+  /**
+   * Target average seconds per beat (script path) or per shot (director prompt hint).
+   * Clamped when applied (roughly 2–10s). Optional; defaults follow theme.
+   */
+  averageClipSeconds?: number;
+  /**
+   * Visual sourcing bias: `mixed` (default), still frames only, prefer motion clips,
+   * or motion-only (no still-first shots — scraped/AI video where possible).
+   */
+  mediaPreference?: 'mixed' | 'stills_only' | 'motion_preferred' | 'video_only';
+  /**
+   * Edit rhythm — affects director shot duration clamps and how many cuts to plan.
+   * `rapid` = shorter shots, more frequent scene changes (configurable feel).
+   */
+  cutPace?: 'relaxed' | 'normal' | 'rapid';
+  /**
+   * Optional keyword "pop" lower-third cards (names, places, stats) — not full captions.
+   * `off` disables; `subtle` / `bold` tune director + overlay styling.
+   */
+  keywordPopStyle?: 'off' | 'subtle' | 'bold';
+  /** When true, the director must add `imageCaption` on many ai_image shots for spoken dates, names, places, and key stats (≤4 words each). */
+  allowSparseImageText?: boolean;
+  /** TTS playback speed (0.85–1.2). OpenAI + ElevenLabs where supported. */
+  ttsSpeed?: number;
+  /**
+   * Music level under voiceover in FFmpeg stitch (0.05–0.55). Default 0.22.
+   */
+  musicDuckUnderVoice?: number;
+  /** Music level when there is no VO (solo bed), FFmpeg stitch. Default 0.55. */
+  musicSoloVolume?: number;
+  /** Remotion template background music gain 0–1 (optional). */
+  musicBedVolume?: number;
+  /** If true, scripts and director narration must stay grounded in verifiable facts. */
+  trueStoriesOnly?: boolean;
+  /** Freeform rules (multi-line) appended to script + director prompts. */
+  extraContentRules?: string;
+
   /** Skip posts whose quality score is below this (0-100). */
   minQualityScore?: number;
 
@@ -1178,6 +1257,11 @@ export interface PersonalGeneratorConfig {
   letterbox?: boolean;
   /** Apply film-grain overlay. */
   filmGrain?: boolean;
+  /**
+   * When false, still images are encoded as static frames (no Ken Burns zoom/pan).
+   * Default true.
+   */
+  kenBurnsOnStills?: boolean;
 
   /* ── Viral format + hook (optional) ──────────────────────── */
   /**
@@ -1234,6 +1318,12 @@ export interface PersonalGeneratorConfig {
    * fall back to AI-image + Ken Burns, which is ~10× cheaper.
    */
   longformMaxAiVideoShots?: number;
+
+  /**
+   * FFmpeg encode quality when `PERSONAL_STITCH_PRESET` / `PERSONAL_STITCH_CRF`
+   * are unset: `fast` = drafts, `balanced` = default, `high` = cleaner masters (more CPU).
+   */
+  stitchEncodePreset?: 'fast' | 'balanced' | 'high';
 }
 
 /** Shape of a character sheet distilled from reference images. */

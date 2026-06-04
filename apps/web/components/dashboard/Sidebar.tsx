@@ -85,8 +85,8 @@ export function Sidebar() {
             : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
         )}
       >
-        <item.icon className="h-4 w-4" />
-        <span className="flex-1">{item.label}</span>
+        <item.icon className="h-4 w-4 shrink-0" />
+        <span className="min-w-0 flex-1 truncate">{item.label}</span>
         {showBadge ? (
           <span
             className={cn(
@@ -104,9 +104,11 @@ export function Sidebar() {
   return (
     <>
       {/* Mobile top bar */}
-      <div className="fixed top-0 left-0 right-0 z-40 flex items-center justify-between border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur md:hidden safe-pt">
-        <Logo size="sm" />
-        <div className="flex items-center gap-2">
+      <div className="safe-pt fixed left-0 right-0 top-0 z-40 flex min-w-0 items-center justify-between gap-2 border-b border-slate-200 bg-white/95 px-3 py-3 backdrop-blur sm:px-4 md:hidden">
+        <div className="shrink-0">
+          <Logo size="sm" />
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
           {others.length > 0 ? (
             <div className="flex -space-x-1">
               {others.slice(0, 3).map((p) => (

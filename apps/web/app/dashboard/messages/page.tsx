@@ -121,10 +121,10 @@ export default function MessagesPage() {
     <>
       <PageHeader title="Messages" subtitle="Real-time chat across every client" />
 
-      <div className="grid h-[calc(100vh-80px)] grid-cols-1 md:grid-cols-[320px_1fr]">
+      <div className="grid h-[calc(100vh-80px)] min-h-0 min-w-0 grid-cols-1 md:grid-cols-[minmax(0,320px)_minmax(0,1fr)]">
         {/* Inbox list */}
         <aside
-          className={`overflow-y-auto border-r border-slate-200 bg-white ${
+          className={`min-h-0 min-w-0 overflow-y-auto border-r border-slate-200 bg-white ${
             mobileView === 'list' ? 'block' : 'hidden'
           } md:block`}
         >
@@ -159,12 +159,12 @@ export default function MessagesPage() {
 
         {/* Conversation */}
         <section
-          className={`flex flex-col bg-slate-50 ${
+          className={`flex min-h-0 min-w-0 flex-col bg-slate-50 ${
             mobileView === 'thread' ? 'flex' : 'hidden'
           } md:flex`}
         >
           {activeClient ? (
-            <div className="flex items-center gap-3 border-b border-slate-200 bg-white p-4">
+            <div className="flex min-w-0 items-center gap-3 border-b border-slate-200 bg-white p-3 sm:p-4">
               <button
                 onClick={() => setMobileView('list')}
                 className="rounded-lg p-2 text-slate-600 hover:bg-slate-100 md:hidden"
@@ -177,7 +177,7 @@ export default function MessagesPage() {
                   <Image src={activeClient.logoUrl} alt="" fill unoptimized />
                 ) : null}
               </div>
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1">
                 <div className="truncate font-semibold text-slate-900">
                   {activeClient.businessName}
                 </div>
@@ -186,7 +186,7 @@ export default function MessagesPage() {
             </div>
           ) : null}
 
-          <div className="flex-1 space-y-3 overflow-y-auto p-4 md:p-6">
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4 md:p-6">
             {loadingMessages && thread.length === 0 ? (
               <div className="flex justify-center pt-10">
                 <Spinner size={24} />
@@ -231,11 +231,11 @@ export default function MessagesPage() {
               e.preventDefault();
               send();
             }}
-            className="flex items-center gap-2 border-t border-slate-200 bg-white p-3 safe-pb"
+            className="flex min-w-0 items-center gap-2 border-t border-slate-200 bg-white p-3 safe-pb"
           >
             <button
               type="button"
-              className="rounded-full p-2 text-slate-500 hover:bg-slate-100"
+              className="shrink-0 rounded-full p-2 text-slate-500 hover:bg-slate-100"
               aria-label="Attach"
             >
               <Paperclip className="h-4 w-4" />
@@ -247,7 +247,7 @@ export default function MessagesPage() {
                 activeClient ? `Reply to ${activeClient.contactName}…` : 'Select a client…'
               }
               disabled={!activeClient || sending}
-              className="no-zoom"
+              className="no-zoom min-w-0 flex-1"
             />
             <button
               type="submit"
@@ -321,12 +321,12 @@ function InboxRow({
           {client.logoUrl ? <Image src={client.logoUrl} alt="" fill unoptimized /> : null}
         </div>
         <div className="min-w-0 flex-1">
-          <div className="flex items-center justify-between gap-1">
-            <span className="truncate text-sm font-semibold text-slate-900">
+          <div className="flex min-w-0 items-center justify-between gap-1">
+            <span className="min-w-0 truncate text-sm font-semibold text-slate-900">
               {client.businessName}
             </span>
             {last ? (
-              <span className="text-[10px] text-slate-400">{timeAgo(last.createdAt)}</span>
+              <span className="shrink-0 text-[10px] text-slate-400">{timeAgo(last.createdAt)}</span>
             ) : null}
           </div>
           <div className="truncate text-xs text-slate-500">

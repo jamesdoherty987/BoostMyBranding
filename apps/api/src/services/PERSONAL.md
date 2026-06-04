@@ -11,9 +11,11 @@ lets the authenticated user:
 
 1. **Create many "personal channels"**, each locked to one viral niche
    (finance, educational facts, news, language learning, brainrot, etc).
-2. **Schedule automation** — posts per day, posting window, spacing.
-3. **Walk away**. Every 5 minutes the scheduler checks for due channels
-   and runs a full generation pipeline for each.
+2. **Schedule** (Overview) — posts per day, posting window, spacing; optional
+   **Automatically generate videos on schedule** (off by default). When off,
+   only **Generate** creates videos.
+3. **Autopilot** — when scheduled generation is on, every 5 minutes the API
+   checks `next_run_at` and runs the pipeline for due channels.
 
 Everything lives at `/dashboard/personal` — intentionally not linked in
 the sidebar so it stays out of the agency-facing UI.
@@ -91,6 +93,13 @@ With none of them set, the pipeline still runs end-to-end with mocks.
 ```
 pnpm --filter @boost/database migrate
 ```
+
+## ContentStudio posting
+
+- **Credentials:** `CONTENTSTUDIO_API_KEY` and `CONTENTSTUDIO_WORKSPACE_ID` in `.env` (API).
+- **Per channel:** Optional `contentstudio_workspace_id` and `contentstudio_account_id` on `personal_accounts` (Overview → Publishing). Account id pins which connected social account receives the post when several exist for the same platform.
+- **When posts are scheduled:** (1) Account has **Auto-approve** + **Auto-schedule to ContentStudio** on the schedule card, or (2) dashboard **Generate & schedule post** (`scheduleToContentStudio: true` on `POST …/generate`), or (3) cron autopilot uses the same rules as (1) for generated videos.
+- **Scheduler:** `runDuePersonalAccounts` runs every **5 minutes** (`scheduler.ts`), selects `active` accounts with `auto_generate_on_schedule`, due `next_run_at`, and calls `generateForAccount({ accountId })`.
 
 ## Extending
 

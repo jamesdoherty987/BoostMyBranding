@@ -11,18 +11,31 @@
  * works on free fal.ai accounts, just at lower quality.
  *
  * Falls back to deterministic Picsum URLs when FAL_KEY is not set.
+ *
+ * All `fal.subscribe` traffic is serialized through {@link withFalConcurrency}
+ * (see `falConcurrency.ts`) so personal director, cron, inspiration, etc. do
+ * not exceed fal.ai's concurrent-run limit (~10). Override with FAL_MAX_CONCURRENT.
  */
 
 import { fal } from '@fal-ai/client';
 import { env, features } from '../env.js';
 import { getModel, type ModelOption } from './modelCatalog.js';
+import { withFalConcurrency } from './falConcurrency.js';
 
 if (features.fal) fal.config({ credentials: env.FAL_KEY });
+
+/** Routes all fal.subscribe calls through the process-wide concurrency cap. */
+async function falSubscribe(
+  endpoint: string,
+  options: { input?: Record<string, unknown>; logs?: boolean },
+): Promise<Awaited<ReturnType<typeof fal.subscribe>>> {
+  return withFalConcurrency(() => fal.subscribe(endpoint, options as never));
+}
 
 export async function enhanceImage(imageUrl: string, editPrompt: string): Promise<string> {
   if (!features.fal) return `${imageUrl}?enhanced=1`;
 
-  const result = await fal.subscribe('fal-ai/flux-pro/kontext/max', {
+  const result = await falSubscribe('fal-ai/flux-pro/kontext/max', {
     input: { prompt: editPrompt, image_url: imageUrl },
     logs: false,
   });
@@ -69,12 +82,15 @@ export async function generateImage(prompt: string, aspectRatio = '1:1'): Promis
   let lastError: Error | null = null;
   for (const model of GEN_MODELS) {
     try {
-      const result = await fal.subscribe(model.id, {
+      const result = await falSubscribe(model.id, {
         input: model.input(prompt, aspectRatio),
         logs: false,
       });
       const out = (result.data as any)?.images?.[0]?.url;
       if (out) return out as string;
+      // Do not fall through to cheaper models — that would issue another paid
+      // fal job. Empty success is an error (caller / logs), not a fallback trigger.
+      throw new Error(`${model.id}: fal returned success but no image URL`);
     } catch (e) {
       lastError = e as Error;
       const msg = (e as Error).message ?? '';
@@ -156,7 +172,7 @@ export async function animateImage(
   let lastError: Error | null = null;
   for (const model of MODELS) {
     try {
-      const result = await fal.subscribe(model.id, {
+      const result = await falSubscribe(model.id, {
         input: model.input(),
         logs: false,
       });
@@ -165,6 +181,7 @@ export async function animateImage(
         (result.data as any)?.videos?.[0]?.url ??
         (result.data as any)?.url;
       if (out) return { videoUrl: out as string, durationSeconds: duration, fromMock: false };
+      throw new Error(`${model.id}: fal returned success but no video URL`);
     } catch (e) {
       lastError = e as Error;
       const msg = (e as Error).message ?? '';
@@ -236,7 +253,7 @@ export async function generateImageWithReference(args: {
       const out = await generateImage(args.prompt, args.aspectRatio);
       return { imageUrl: out, usedReferences: 0, fromMock: false };
     }
-    const result = await fal.subscribe(model.endpoint, {
+    const result = await falSubscribe(model.endpoint, {
       input: {
         prompt: args.prompt,
         image_urls: refs,
@@ -257,7 +274,7 @@ export async function generateImageWithReference(args: {
       const out = await generateImage(args.prompt, args.aspectRatio);
       return { imageUrl: out, usedReferences: 0, fromMock: false };
     }
-    const result = await fal.subscribe(model.endpoint, {
+    const result = await falSubscribe(model.endpoint, {
       input: { prompt: args.prompt, image_url: refs[0]! },
       logs: false,
     });
@@ -268,7 +285,7 @@ export async function generateImageWithReference(args: {
 
   // Plain Flux models (no reference) — ignore refs, forward prompt.
   const input = fluxInputFor(model, args.prompt, args.aspectRatio);
-  const result = await fal.subscribe(model.endpoint, { input, logs: false });
+  const result = await falSubscribe(model.endpoint, { input, logs: false });
   const out = (result.data as any)?.images?.[0]?.url;
   if (!out) throw new Error(`${model.displayName} did not return an image URL`);
   return { imageUrl: out as string, usedReferences: 0, fromMock: false };
@@ -318,7 +335,7 @@ export async function generateVideoFromImage(args: {
     aspectRatio: args.aspectRatio,
   });
 
-  const result = await fal.subscribe(model.endpoint, { input, logs: false });
+  const result = await falSubscribe(model.endpoint, { input, logs: false });
   const out =
     (result.data as any)?.video?.url ??
     (result.data as any)?.videos?.[0]?.url ??

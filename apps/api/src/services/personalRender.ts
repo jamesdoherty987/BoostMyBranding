@@ -22,6 +22,22 @@ import type { PersonalPostMediaAsset } from '@boost/database';
 
 export type PersonalFormatKind = 'video' | 'slideshow' | 'static_image';
 
+function compositionDims(
+  ar: '9:16' | '1:1' | '16:9' | '4:5' | undefined,
+): { width: number; height: number } {
+  switch (ar) {
+    case '1:1':
+      return { width: 1080, height: 1080 };
+    case '16:9':
+      return { width: 1920, height: 1080 };
+    case '4:5':
+      return { width: 1080, height: 1350 };
+    case '9:16':
+    default:
+      return { width: 1080, height: 1920 };
+  }
+}
+
 export interface RenderPersonalVideoArgs {
   accountId: string;
   postId: string;
@@ -36,6 +52,15 @@ export interface RenderPersonalVideoArgs {
   durationSeconds: number;
   /** Format override from the account config. Falls back to theme.defaultFormat. */
   formatKind?: PersonalFormatKind;
+  /** Frame aspect for Remotion output; defaults to 9:16 portrait. */
+  aspectRatio?: '9:16' | '1:1' | '16:9' | '4:5';
+  /**
+   * Background music gain in Remotion (0.05–0.45). Defaults: viral-short 0.15, slideshow 0.28.
+   * Director / FFmpeg path uses {@link PersonalGeneratorConfig.musicDuckUnderVoice} instead.
+   */
+  musicBedVolume?: number;
+  /** When false, hide burned-in hook / beat / slide text overlays. Default true. */
+  useSubtitles?: boolean;
 }
 
 export interface RenderPersonalVideoResult {
@@ -108,6 +133,16 @@ export async function renderPersonalVideo(
 
   let props: VideoProps;
 
+  const viralMusicVol =
+    typeof args.musicBedVolume === 'number' && Number.isFinite(args.musicBedVolume)
+      ? Math.min(0.45, Math.max(0.05, args.musicBedVolume))
+      : 0.15;
+  const slideMusicVol =
+    typeof args.musicBedVolume === 'number' && Number.isFinite(args.musicBedVolume)
+      ? Math.min(0.5, Math.max(0.08, args.musicBedVolume))
+      : 0.28;
+  const showBurnedInText = args.useSubtitles !== false;
+
   if (templateId === 'slideshow') {
     // Slideshow consumes SlideshowBeat[]. Build from script beats + the
     // per-beat scraped asset. For static_image, drop to a single slide.
@@ -136,10 +171,12 @@ export async function renderPersonalVideo(
         outro: formatKind === 'static_image' ? undefined : args.script.outro,
         voiceoverUrl: args.voiceoverUrl ?? undefined,
         musicUrl: args.musicUrl ?? undefined,
+        musicBedVolume: slideMusicVol,
         watermarkHandle: args.watermarkHandle,
         accentColor: args.accentColor ?? undefined,
         themeColor: args.theme.accentColor,
         showProgress: args.theme.template === 'slideshow',
+        showBurnedInText,
       } as unknown as VideoProps['options'],
     };
   } else {
@@ -174,17 +211,26 @@ export async function renderPersonalVideo(
         outro: args.script.outro,
         voiceoverUrl: args.voiceoverUrl ?? undefined,
         musicUrl: args.musicUrl ?? undefined,
+        musicBedVolume: viralMusicVol,
         backgroundLoopUrl,
         watermarkHandle: args.watermarkHandle,
         accentColor: args.accentColor ?? undefined,
         themeColor: args.theme.accentColor,
+        showBurnedInText,
       } as unknown as VideoProps['options'],
     };
   }
 
   const tmpPath = path.join(tmpdir(), `personal-${randomUUID()}.mp4`);
+  const { width, height } = compositionDims(args.aspectRatio);
   try {
-    const result = await renderVideo({ templateId, props, outputPath: tmpPath });
+    const result = await renderVideo({
+      templateId,
+      props,
+      outputPath: tmpPath,
+      compositionWidth: width,
+      compositionHeight: height,
+    });
     const buffer = await readFile(tmpPath);
     const { url } = await uploadFile(
       `personal/${args.accountId}/videos`,

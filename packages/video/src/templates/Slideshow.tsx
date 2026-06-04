@@ -59,6 +59,10 @@ export interface SlideshowExtras {
   themeColor?: string;
   /** Numbered progress indicator ("3 / 7") in the corner. */
   showProgress?: boolean;
+  /** Background music linear gain (Remotion). Default 0.28. */
+  musicBedVolume?: number;
+  /** When false, hide burned-in hook / slide / outro text. Default true. */
+  showBurnedInText?: boolean;
 }
 
 /* ═══════════════════════════════════════════════════════════════════ */
@@ -72,6 +76,8 @@ export const Slideshow: React.FC<VideoProps> = (props) => {
   const palette = props.brand;
   const accent = extras.accentColor ?? extras.themeColor ?? palette.accent;
   const variant = extras.variant ?? 'slideshow';
+  const musicVol = extras.musicBedVolume ?? 0.28;
+  const showBurnedInText = extras.showBurnedInText !== false;
 
   const beatFrames = slides.map((s) =>
     Math.round(Math.max(1.2, Math.min(6, s.durationSeconds)) * fps),
@@ -81,13 +87,19 @@ export const Slideshow: React.FC<VideoProps> = (props) => {
 
   return (
     <AbsoluteFill style={{ background: palette.dark }}>
-      {extras.musicUrl ? <Audio src={extras.musicUrl} volume={0.28} /> : null}
+      {extras.musicUrl ? <Audio src={extras.musicUrl} volume={musicVol} /> : null}
       {extras.voiceoverUrl ? <Audio src={extras.voiceoverUrl} volume={1.0} /> : null}
 
       <Series>
         {extras.hook ? (
           <Series.Sequence durationInFrames={hookFrames}>
-            <HookSlide text={extras.hook} palette={palette} accent={accent} variant={variant} />
+            <HookSlide
+              text={extras.hook}
+              palette={palette}
+              accent={accent}
+              variant={variant}
+              showBurnedInText={showBurnedInText}
+            />
           </Series.Sequence>
         ) : null}
 
@@ -102,6 +114,7 @@ export const Slideshow: React.FC<VideoProps> = (props) => {
               variant={variant}
               showProgress={extras.showProgress ?? variant === 'slideshow'}
               watermark={extras.watermarkHandle}
+              showBurnedInText={showBurnedInText}
             />
           </Series.Sequence>
         ))}
@@ -113,6 +126,7 @@ export const Slideshow: React.FC<VideoProps> = (props) => {
               watermark={extras.watermarkHandle}
               palette={palette}
               accent={accent}
+              showBurnedInText={showBurnedInText}
             />
           </Series.Sequence>
         ) : null}
@@ -132,7 +146,18 @@ const SlideScene: React.FC<{
   variant: SlideshowExtras['variant'];
   showProgress: boolean;
   watermark?: string;
-}> = ({ slide, index, total, palette, accent, variant, showProgress, watermark }) => {
+  showBurnedInText?: boolean;
+}> = ({
+  slide,
+  index,
+  total,
+  palette,
+  accent,
+  variant,
+  showProgress,
+  watermark,
+  showBurnedInText = true,
+}) => {
   const frame = useCurrentFrame();
   const { durationInFrames } = useVideoConfig();
 
@@ -212,7 +237,7 @@ const SlideScene: React.FC<{
       ) : null}
 
       {/* Eyebrow (chapter label) */}
-      {slide.eyebrow ? (
+      {showBurnedInText && slide.eyebrow ? (
         <div
           style={{
             position: 'absolute',
@@ -234,7 +259,8 @@ const SlideScene: React.FC<{
       ) : null}
 
       {/* Main copy */}
-      {isScripture ? (
+      {showBurnedInText ? (
+        isScripture ? (
         // Scripture gets centered serif treatment, no on-screen attribution
         // so the verse reads cleanly and the reference lands on the next beat.
         <AbsoluteFill
@@ -285,7 +311,8 @@ const SlideScene: React.FC<{
             {slide.onScreen}
           </div>
         </div>
-      )}
+      )
+      ) : null}
 
       {/* Watermark */}
       {watermark ? (
@@ -315,7 +342,8 @@ const HookSlide: React.FC<{
   palette: BrandPalette;
   accent: string;
   variant: SlideshowExtras['variant'];
-}> = ({ text, palette, accent, variant }) => {
+  showBurnedInText?: boolean;
+}> = ({ text, palette, accent, variant, showBurnedInText = true }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const s = spring({ frame, fps, config: { damping: 14, stiffness: 160 } });
@@ -330,21 +358,23 @@ const HookSlide: React.FC<{
         padding: 60,
       }}
     >
-      <div
-        style={{
-          transform: `scale(${0.92 + s * 0.08})`,
-          color: '#fff',
-          fontFamily: variant === 'scripture-card' ? FONTS.serif : FONTS.display,
-          fontWeight: 900,
-          fontSize,
-          lineHeight: 1.03,
-          textAlign: 'center',
-          letterSpacing: -2,
-          textShadow: `0 6px 30px ${palette.dark}`,
-        }}
-      >
-        {text}
-      </div>
+      {showBurnedInText ? (
+        <div
+          style={{
+            transform: `scale(${0.92 + s * 0.08})`,
+            color: '#fff',
+            fontFamily: variant === 'scripture-card' ? FONTS.serif : FONTS.display,
+            fontWeight: 900,
+            fontSize,
+            lineHeight: 1.03,
+            textAlign: 'center',
+            letterSpacing: -2,
+            textShadow: `0 6px 30px ${palette.dark}`,
+          }}
+        >
+          {text}
+        </div>
+      ) : null}
     </AbsoluteFill>
   );
 };
@@ -356,7 +386,8 @@ const OutroSlide: React.FC<{
   watermark?: string;
   palette: BrandPalette;
   accent: string;
-}> = ({ text, watermark, palette, accent }) => {
+  showBurnedInText?: boolean;
+}> = ({ text, watermark, palette, accent, showBurnedInText = true }) => {
   const frame = useCurrentFrame();
   const fade = interpolate(frame, [0, 6], [0, 1], { extrapolateRight: 'clamp' });
   return (
@@ -371,7 +402,7 @@ const OutroSlide: React.FC<{
       }}
     >
       <div style={{ textAlign: 'center' }}>
-        {text ? (
+        {showBurnedInText && text ? (
           <div
             style={{
               fontFamily: FONTS.display,

@@ -24,16 +24,233 @@ export function buildPersonalContentRulesPrompt(
 
 const MAX_REFERENCE_SCRIPT_CHARS = 9000;
 
+export function dedupeTitleLines(titles: string[] | undefined): string[] {
+  if (!titles?.length) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of titles) {
+    const t = raw.trim();
+    if (!t) continue;
+    const k = t.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(t);
+  }
+  return out;
+}
+
+function titleWordCount(title: string): number {
+  return title.trim().split(/\s+/).filter(Boolean).length;
+}
+
+function medianSorted(sorted: number[]): number {
+  if (!sorted.length) return 0;
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
+}
+
+/**
+ * Light guardrails when example titles exist: empty, topic echo, or exact reuse
+ * of a saved example. Punctuation and length are left to the model + prompts.
+ */
+export function validateDirectorTitleAgainstExamples(
+  title: string | undefined,
+  topic: string,
+  examples: string[],
+): string | null {
+  const ex = examples.map((e) => e.trim()).filter(Boolean);
+  if (!ex.length) return null;
+
+  const t = (title ?? '').trim();
+  if (!t) return 'The JSON `title` was empty.';
+
+  const norm = (s: string) =>
+    s
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .replace(/[""`''’]/g, '');
+  if (norm(t) === norm(topic)) {
+    return 'The `title` is the same as the raw topic seed — write a feed-ready headline inspired by your examples instead.';
+  }
+
+  for (const exLine of ex) {
+    if (norm(t) === norm(exLine)) {
+      return 'The `title` must not copy a saved example verbatim — invent a new line for this topic.';
+    }
+  }
+
+  return null;
+}
+
+function normHeadline(s: string): string {
+  return s
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .replace(/[""`''’]/g, '');
+}
+
+/** Rough "same headline" check vs a past title (long words only). */
+function headlineTooSimilarToPast(candidate: string, past: string): boolean {
+  const c = normHeadline(candidate);
+  const p = normHeadline(past);
+  if (!c || !p) return false;
+  if (c === p) return true;
+  if (c.length >= 14 && p.length >= 14 && (c.includes(p) || p.includes(c))) return true;
+  const words = (s: string) =>
+    new Set(
+      s
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .split(/\s+/)
+        .filter((w) => w.length > 3),
+    );
+  const A = words(c);
+  const B = words(p);
+  if (A.size === 0 || B.size === 0) return false;
+  let n = 0;
+  for (const w of A) if (B.has(w)) n++;
+  return n / Math.min(A.size, B.size) >= 0.45;
+}
+
+/**
+ * Headline checks for the title generator: base guards + avoid near-duplicates
+ * of already-published channel titles.
+ */
+export function validateChannelHeadline(
+  title: string | undefined,
+  topic: string,
+  examples: string[],
+  recentVideoTitles?: string[],
+): string | null {
+  const ex = examples.map((e) => e.trim()).filter(Boolean);
+  if (!ex.length) return null;
+
+  const base = validateDirectorTitleAgainstExamples(title, topic, ex);
+  if (base) return base;
+
+  const t = (title ?? '').trim();
+
+  const recent = dedupeTitleLines(recentVideoTitles);
+  for (const past of recent) {
+    if (headlineTooSimilarToPast(t, past)) {
+      return `Too similar to an already-published title on this channel — rewrite with a different angle and different keywords (published: "${past.slice(0, 90)}${past.length > 90 ? '…' : ''}").`;
+    }
+  }
+
+  return null;
+}
+
+/** Observational digest from example titles — inspiration, not a checklist. */
+export function formatExampleTitlePatternDigest(examples: string[]): string {
+  const ex = examples.map((e) => e.trim()).filter(Boolean);
+  if (!ex.length) return '';
+
+  const counts = ex.map(titleWordCount).sort((a, b) => a - b);
+  const median = medianSorted(counts);
+  const minW = counts[0]!;
+  const maxW = counts[counts.length - 1]!;
+  const q = ex.filter((e) => /\?\s*$/.test(e)).length;
+  const qPct = Math.round((100 * q) / ex.length);
+
+  const starters = new Map<string, number>();
+  for (const line of ex) {
+    const w = line.split(/\s+/).filter(Boolean);
+    if (w.length >= 2) {
+      const key = `${w[0]} ${w[1]}`.replace(/[?,:;]$/, '');
+      starters.set(key, (starters.get(key) ?? 0) + 1);
+    } else if (w.length === 1) {
+      const k = w[0]!.replace(/[?,:;]$/, '');
+      starters.set(k, (starters.get(k) ?? 0) + 1);
+    }
+  }
+  const top = [...starters.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
+
+  const lines: string[] = [
+    '',
+    'What your saved examples tend to do (use your judgment — match the *feel*, invent new words):',
+    `- Rough length: about ${minW}–${maxW} words in the samples (median ~${median.toFixed(1)}).`,
+    `- Questions vs statements: about ${qPct}% of the samples end with "?".`,
+  ];
+  if (top.length) {
+    lines.push(`- Common opening rhythms in the samples: ${top.map(([k, v]) => `"${k}" (${v}×)`).join(', ')}.`);
+  }
+  return lines.join('\n');
+}
+
+/**
+ * When the style bible lists example video titles, force the model to treat
+ * title pattern as step zero (before hook/beats) and avoid reusing past titles.
+ */
+export function buildTitleFirstWorkflowPrompt(
+  styleBible: PersonalAccountStyleBible | undefined,
+  recentVideoTitles: string[] | undefined,
+): string {
+  const examples = styleBible?.exampleVideoTitles?.filter(Boolean) ?? [];
+  if (examples.length === 0) return '';
+
+  const recent = dedupeTitleLines(recentVideoTitles).slice(0, 40);
+  const guidance = styleBible?.videoTitleGuidance?.trim();
+  const lines: string[] = [
+    '',
+    '══════════════════════════════════════════════════════════════════',
+    'STEP 0 — JSON `title` (when example titles exist below)',
+    '══════════════════════════════════════════════════════════════════',
+    '',
+    'The operator saved **example video titles** in STYLE REFERENCES. Treat them as the headline voice for this channel: length, punctuation, curiosity, specificity — learn the pattern, do not copy lines.',
+    '',
+    'Before hook or beats:',
+    '1. Read every example title and notice what they share (not the facts — those are samples only).',
+    '2. Invent **one** new `title` for **TOPIC FOR THIS VIDEO** that could sit beside the examples in a feed — same spirit, fresh wording for this topic only.',
+    '3. Aim for the same strength and specificity as the examples; avoid bland SEO filler.',
+  ];
+  if (guidance) {
+    lines.push('', 'OPERATOR — WHAT THEY WANT IN A TITLE (follow unless it conflicts with examples):', guidance);
+  }
+  if (recent.length > 0) {
+    lines.push(
+      '4. Compare your candidate `title` against **ALREADY-PUBLISHED TITLES ON THIS CHANNEL** (list below).',
+      '   - Do **not** reuse any line, do **not** trivially edit one (no synonym swap only, no reorder-only change).',
+      '   - If it is too close to any published title, pick a different angle until it is clearly distinct.',
+    );
+  } else {
+    lines.push(
+      '4. No prior titles on file — still match the example pattern tightly (do not drift into generic titles).',
+    );
+  }
+  lines.push(
+    '5. Only after you have that `title` in mind, write hook + beats so they **deliver what the title promises**.',
+    '',
+    'Avoid a generic `title` that ignores the example list — the examples are the north star for headline style.',
+  );
+  lines.push(formatExampleTitlePatternDigest(examples));
+  if (recent.length > 0) {
+    lines.push('', 'ALREADY-PUBLISHED TITLES (duplicate-avoidance — do not reuse or near-copy):');
+    for (const t of recent) lines.push(`  • ${t}`);
+  }
+  lines.push('', 'EXAMPLE TITLES TO MATCH IN PATTERN (not wording — for THIS topic only):');
+  for (const t of examples.slice(0, 20)) lines.push(`  • "${t}"`);
+  lines.push('══════════════════════════════════════════════════════════════════', '');
+  return lines.join('\n');
+}
+
 /** Example titles + script lines + optional full scripts for style (never verbatim copy). */
 export function buildStyleExamplesPrompt(styleBible?: PersonalAccountStyleBible): string {
   if (!styleBible) return '';
   const titles = styleBible.exampleVideoTitles?.filter(Boolean) ?? [];
   const snippets = styleBible.exampleScriptSnippets?.filter(Boolean) ?? [];
   const fullScripts = styleBible.referenceFullScripts?.filter(Boolean) ?? [];
-  if (!titles.length && !snippets.length && !fullScripts.length) return '';
+  const titleGuide = styleBible.videoTitleGuidance?.trim();
+  if (!titles.length && !snippets.length && !fullScripts.length && !titleGuide) return '';
   const lines: string[] = [
     '',
     'STYLE REFERENCES (required: shape your video title, hook, beats, and caption to match this energy — do not ignore):',
+    '',
+    titles.length
+      ? 'When example video titles appear below, the JSON `title` field is **as binding as** the anti-slop rules: it must visibly belong in the same series as those examples.'
+      : titleGuide
+        ? 'The operator added **title preferences** below — use them for the JSON `title` when you have no example titles on file.'
+        : 'Use the references below to match voice and structure.',
     '',
     'ANTI-COPY RULES (non-negotiable):',
     '- Do NOT reuse sentences, distinctive phrases, jokes, or statistics from the references.',
@@ -45,10 +262,19 @@ export function buildStyleExamplesPrompt(styleBible?: PersonalAccountStyleBible)
     for (const t of titles.slice(0, 20)) lines.push(`  • "${t}"`);
     lines.push(
       '',
-      'TITLE PATTERN (mandatory when examples exist):',
-      '- Your JSON `title` for THIS topic must read like the **next video in the same playlist** as the examples above.',
-      '- Match their **typical length** (similar word count band), **punctuation habits** (colons, dashes, question marks, ALL CAPS bits), **whether they lead with a number or a bold claim**, and **specificity level** (vague "Things you didn\'t know" vs concrete "Why Rome fell in 476").',
-      '- Do **not** ship a generic SEO title if the examples are punchy, contrarian, or hyper-specific.',
+      'TITLE PATTERN (when examples exist):',
+      '- Your JSON `title` for THIS topic should feel like the **next video in the same playlist** as the examples above.',
+      '- Mirror how they use length, punctuation (including `:` or `?` if that is how the samples read), caps, and specificity — by imitation, not by rules from the system.',
+      '- Prefer punchy, specific lines over generic SEO if that is what the samples show.',
+    );
+  }
+  if (titleGuide) {
+    lines.push(
+      '',
+      titles.length
+        ? 'OPERATOR — TITLE PREFERENCES (apply alongside the examples):'
+        : 'OPERATOR — TITLE PREFERENCES (no example titles on file — use for the JSON `title`):',
+      titleGuide,
     );
   }
   if (snippets.length) {
@@ -75,7 +301,7 @@ export function buildStyleExamplesPrompt(styleBible?: PersonalAccountStyleBible)
   lines.push(
     '',
     'FOLLOW-THROUGH (mandatory): The JSON `title`, `hook`, every shot `voiceover` / `onScreen`, and `caption` must read like the **same creator** as the style bible + references.',
-    '- **Title:** If example titles exist, the new `title` must mirror their **visible pattern** (not paraphrase an old title — invent a new one for THIS topic that would sit beside them in a feed).',
+    '- **Title:** If example titles exist, the new `title` must mirror their **visible pattern** (not paraphrase an old title — invent a new one for THIS topic that would sit beside them in a feed). If only operator title preferences exist, follow those for `title`.',
     '- **Script / storyboard:** If reference full scripts exist, match **how** they build curiosity, land facts, and pace lines — without reusing phrases. If only snippets exist, match hook line energy the same way.',
     '- Do not output generic hooks or titles when the references show punchy, specific, or numbered patterns.',
   );

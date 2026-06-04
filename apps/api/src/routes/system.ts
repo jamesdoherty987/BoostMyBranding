@@ -21,6 +21,8 @@ systemRouter.get('/status', (_req, res) => {
       stripe: features.stripe,
       resend: features.resend,
       contentStudio: features.contentStudio,
+      /** Default workspace id present on server (boolean only). */
+      contentStudioDefaultWorkspace: features.contentStudioDefaultWorkspace,
     },
   });
 });

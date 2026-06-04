@@ -172,6 +172,10 @@ export function LongformPanel({
     };
   }, [targetSeconds, maxAiVideo]);
 
+  const exampleTitleCount = (account.styleBible?.exampleVideoTitles ?? []).filter((t) =>
+    String(t).trim(),
+  ).length;
+
   const characterRefCount = useCharacterRefCount(
     characters ?? [],
     account.characterId,
@@ -286,6 +290,54 @@ export function LongformPanel({
 
       {enabled ? (
         <>
+          <Card>
+            <CardContent className="p-6">
+              <div className="mb-2 flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-violet-500" />
+                <h4 className="text-sm font-bold text-slate-900">Title style</h4>
+              </div>
+              {exampleTitleCount === 0 ? (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                  <strong>No example video titles saved.</strong> Long-form still runs, but the
+                  headline will not be pattern-matched to your channel. Add examples under{' '}
+                  <strong>Style &amp; config → Example video titles</strong> and click{' '}
+                  <strong>Save configuration</strong> before generating.
+                  {onSwitchTab ? (
+                    <>
+                      {' '}
+                      <button
+                        type="button"
+                        onClick={() => onSwitchTab('config')}
+                        className="font-semibold text-violet-800 underline-offset-2 hover:underline"
+                      >
+                        Open Style &amp; config →
+                      </button>
+                    </>
+                  ) : null}
+                </div>
+              ) : (
+                <p className="text-xs text-slate-600">
+                  Using <strong>{exampleTitleCount}</strong> saved example title
+                  {exampleTitleCount === 1 ? '' : 's'} — the headline model studies them for tone,
+                  length, and punctuation, and tries not to echo titles already on this channel. You can
+                  add extra title instructions in{' '}
+                  {onSwitchTab ? (
+                    <button
+                      type="button"
+                      onClick={() => onSwitchTab('config')}
+                      className="font-semibold text-violet-700 underline-offset-2 hover:underline"
+                    >
+                      Style &amp; config
+                    </button>
+                  ) : (
+                    'Style & config'
+                  )}
+                  .
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
           {/* ── Duration ────────────────────────────────────── */}
           <Card>
             <CardContent className="p-6">

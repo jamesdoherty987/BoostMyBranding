@@ -33,7 +33,7 @@ import {
   type Storyboard,
 } from './personalDirector.js';
 import { broadcast } from './realtime.js';
-import { recentTopics, getPersonalProcessBootAt, personalPostIsFailed } from './personalAccounts.js';
+import { recentTopics, getPersonalProcessBootAt, personalPostIsFailed, recentVideoTitles } from './personalAccounts.js';
 import { chooseTopic } from './personalScript.js';
 import { getCharacterUnsafe } from './personalCharacters.js';
 import { internalListForPipeline } from './personalAccountMedia.js';
@@ -412,6 +412,8 @@ export async function generateForAccountDirector(
         })()
       : undefined;
 
+    const usedVideoTitles = await recentVideoTitles(account.id, 40);
+
     /* ── Long-form mode ──────────────────────────────────────
      * Auto-enabled when:
      *   - the theme is `animated-explainer` (the themes built for it)
@@ -493,6 +495,7 @@ export async function generateForAccountDirector(
           }
         : undefined,
       scriptModel: genConfig.scriptModel,
+      recentVideoTitles: usedVideoTitles,
     });
     totalCostCents += 3;
 

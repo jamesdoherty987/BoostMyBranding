@@ -35,7 +35,11 @@ import { generateJSON } from './claude.js';
 import { withRetry } from './retry.js';
 import type { PersonalTheme } from './personalThemes.js';
 import type { PersonalAccountStyleBible } from '@boost/database';
-import { buildStyleExamplesPrompt } from './personalContentHints.js';
+import {
+  buildStyleExamplesPrompt,
+  buildTitleFirstWorkflowPrompt,
+} from './personalContentHints.js';
+import { generateChannelVideoTitle } from './personalChannelTitle.js';
 
 /* ═══════════════════════════════════════════════════════════════════ */
 /* Data shapes                                                          */
@@ -288,14 +292,45 @@ export interface DirectArgs {
   };
   /** Claude model for storyboard JSON. */
   scriptModel?: 'sonnet' | 'opus';
+  /** Recent `script.title` values on this channel — avoid duplicate headlines. */
+  recentVideoTitles?: string[];
+  /**
+   * When set, the director must paste this exact string into JSON `title`.
+   * Normally computed inside {@link planStoryboard} via {@link generateChannelVideoTitle}.
+   */
+  lockedVideoTitle?: string;
 }
 
 export async function planStoryboard(args: DirectArgs): Promise<Storyboard> {
-  const prompt = buildDirectorPrompt(args);
+  const exampleTitles = (args.styleBible?.exampleVideoTitles ?? []).map((t) => t.trim()).filter(Boolean);
+
+  const lockedVideoTitle =
+    exampleTitles.length > 0
+      ? await generateChannelVideoTitle({
+          topic: args.topic,
+          language: args.language,
+          styleBible: args.styleBible,
+          recentVideoTitles: args.recentVideoTitles,
+          scriptModel: args.scriptModel,
+        })
+      : undefined;
+
+  if (process.env.PERSONAL_DEBUG_TITLES === '1') {
+    console.info('[director:planStoryboard]', {
+      exampleTitleCount: exampleTitles.length,
+      topic: args.topic.slice(0, 100),
+      lockedTitle: lockedVideoTitle?.slice(0, 120),
+    });
+  }
   // Long-form storyboards emit a lot more JSON — 5-8 chapters × 3-5
   // shots with full cinematography fields per shot easily crosses
   // the default 4k budget. Bump to 12k when longform is on.
   const maxTokens = args.longform?.enabled ? 12_000 : 4_096;
+
+  const prompt = buildDirectorPrompt({
+    ...args,
+    lockedVideoTitle,
+  });
   const raw = await withRetry(
     () =>
       generateJSON<Storyboard>(prompt, {
@@ -319,8 +354,9 @@ export async function planStoryboard(args: DirectArgs): Promise<Storyboard> {
     allowSparseImageText: args.allowSparseImageText,
   };
   if (args.longform?.enabled) normOpts.longform = true;
+
   const out: Storyboard = {
-    title: raw.title ?? args.topic,
+    title: (lockedVideoTitle?.trim() || (raw.title ?? '').trim() || args.topic).trim(),
     hook: raw.hook ?? '',
     outro: raw.outro ?? '',
     caption: raw.caption ?? '',
@@ -727,16 +763,28 @@ function buildDirectorPrompt(args: DirectArgs): string {
     ? '              "imageCaption": "<on ai_image: set ≤4 words when VO gives a date, year, name, place, money, %, or stat; use often when facts are spoken; omit only if frame already shows same text>"'
     : '              "imageCaption": "<optional ≤4 words on rare ai_image shots>"';
 
+  const locked = args.lockedVideoTitle?.trim();
   const exampleTitleCount = (args.styleBible?.exampleVideoTitles ?? []).filter(Boolean).length;
-  const titleJsonContract =
-    exampleTitleCount > 0
-      ? '<5-12 words — MUST mirror STYLE of ACCOUNT example titles (length, punctuation, question vs claim, numbers, specificity); must look like the next video in the same series>'
-      : '<5-9 words>';
-
+  const titleFirst =
+    locked && locked.length > 0
+      ? ''
+      : buildTitleFirstWorkflowPrompt(args.styleBible, args.recentVideoTitles);
+  const lockedTitleBlock =
+    locked && locked.length > 0
+      ? `\n\nLOCKED TITLE — JSON "title" must be this exact string (do not edit):\n<<< ${locked} >>>\nHook and shots must match this title and the topic.\n`
+      : '';
+  const titleJsonLine =
+    locked && locked.length > 0
+      ? `  "title": ${JSON.stringify(locked)},`
+      : `  "title": "${
+          exampleTitleCount > 0
+            ? '<one line — MUST obey STEP 0 + STYLE REFERENCES: same headline *species* as example titles for THIS topic; MUST differ from every ALREADY-PUBLISHED title; never generic>'
+            : '<5-9 words>'
+        }",`;
   const targetForPrompt = longform ? longformTarget : args.targetDurationSeconds;
 
   return `You are a ${longform ? 'long-form video' : 'short-form video'} DIRECTOR, not a script writer. Plan a storyboard for a ${targetForPrompt}s ${args.theme.name} video on topic: "${args.topic}".
-
+${titleFirst}${lockedTitleBlock}
 THEME: ${args.theme.name} — ${args.theme.tagline}
 DEFAULT VISUAL STYLE: ${args.theme.visualStyle}
 DEFAULT VOICE: ${args.theme.voiceGuide}
@@ -764,7 +812,7 @@ hard_cut (default), match_cut, whip_pan, dip_to_black, cross_dissolve, flash_cut
 
 OUTPUT contract — return ONLY JSON:
 {
-  "title": "${titleJsonContract}",
+${titleJsonLine}
   "hook": "<opening spoken line, ≤3 seconds>",
   "outro": "<closing CTA, one sentence>",
   "caption": "<post caption, 1-3 sentences, ≤3 emoji>",

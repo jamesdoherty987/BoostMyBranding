@@ -19,7 +19,11 @@ import { generateJSON } from './claude.js';
 import { withRetry } from './retry.js';
 import type { PersonalTheme } from './personalThemes.js';
 import type { PersonalAccountStyleBible } from '@boost/database';
-import { buildStyleExamplesPrompt } from './personalContentHints.js';
+import {
+  buildStyleExamplesPrompt,
+  buildTitleFirstWorkflowPrompt,
+} from './personalContentHints.js';
+import { generateChannelVideoTitle } from './personalChannelTitle.js';
 
 export interface PersonalScript {
   title: string;
@@ -82,12 +86,36 @@ export interface GenerateScriptArgs {
   averageClipSeconds?: number;
   /** Claude model for script JSON. */
   scriptModel?: 'sonnet' | 'opus';
+  /** Recent `script.title` values on this channel — avoid duplicate headlines. */
+  recentVideoTitles?: string[];
+  /**
+   * When set, script JSON `title` must match exactly (normally from
+   * {@link generateChannelVideoTitle} inside {@link generateScript}).
+   */
+  lockedVideoTitle?: string;
 }
 
 export async function generateScript(
   args: GenerateScriptArgs,
 ): Promise<PersonalScript> {
-  const prompt = buildScriptPrompt(args);
+  const exampleTitles = (args.styleBible?.exampleVideoTitles ?? []).map((t) => t.trim()).filter(Boolean);
+
+  const lockedVideoTitle =
+    args.lockedVideoTitle?.trim() ||
+    (exampleTitles.length > 0
+      ? await generateChannelVideoTitle({
+          topic: args.topic,
+          language: args.language,
+          styleBible: args.styleBible,
+          recentVideoTitles: args.recentVideoTitles,
+          scriptModel: args.scriptModel,
+        })
+      : undefined);
+
+  const prompt = buildScriptPrompt({
+    ...args,
+    lockedVideoTitle: lockedVideoTitle || undefined,
+  });
   const script = await withRetry(
     () =>
       generateJSON<PersonalScript>(prompt, {
@@ -96,6 +124,10 @@ export async function generateScript(
       }),
     { label: `personal_script:${args.theme.id}:${args.topic.slice(0, 40)}`, attempts: 2 },
   );
+
+  if (lockedVideoTitle) {
+    script.title = lockedVideoTitle;
+  }
 
   // Sanity defaults — Claude very occasionally omits fields.
   script.beats = (script.beats ?? [])
@@ -159,11 +191,6 @@ function buildScriptPrompt(args: GenerateScriptArgs): string {
   // ── Style bible (the biggest anti-slop lever we have) ───────
   const sb = args.styleBible;
   const styleExamples = buildStyleExamplesPrompt(sb);
-  const exampleTitleCount = sb?.exampleVideoTitles?.filter(Boolean).length ?? 0;
-  const scriptTitleContract =
-    exampleTitleCount > 0
-      ? '<title for THIS topic — match PATTERN of STYLE REFERENCES example titles (length, punctuation, specificity); 5-12 words typical when examples exist>'
-      : '<catchy title, 5-9 words>';
   const coreStyleBible = sb
     ? [
         '',
@@ -202,8 +229,27 @@ function buildScriptPrompt(args: GenerateScriptArgs): string {
 
   const appendix = args.promptAppendix?.trim() ? `\n\n${args.promptAppendix.trim()}` : '';
 
-  return `You are a short-form video scriptwriter specialised in the "${args.theme.name}" niche, writing for an operator who HATES generic AI-slop content. Your job is to produce a script a skilled human editor would not be embarrassed to ship.
+  const locked = args.lockedVideoTitle?.trim();
+  const exampleTitleCount = sb?.exampleVideoTitles?.filter(Boolean).length ?? 0;
+  const titleFirst =
+    locked && locked.length > 0
+      ? ''
+      : buildTitleFirstWorkflowPrompt(sb, args.recentVideoTitles);
+  const lockedTitleBlock =
+    locked && locked.length > 0
+      ? `\n\nLOCKED TITLE — JSON "title" must be this exact string (do not edit):\n<<< ${locked} >>>\nHook and beats must match this title.\n`
+      : '';
+  const scriptTitleContract =
+    exampleTitleCount > 0
+      ? '<one line — MUST obey STEP 0 + STYLE REFERENCES: same headline *species* as example titles for THIS topic; MUST differ from every ALREADY-PUBLISHED title; never generic>'
+      : '<catchy title, 5-9 words>';
+  const titleJsonLine =
+    locked && locked.length > 0
+      ? `  "title": ${JSON.stringify(locked)},`
+      : `  "title": "${scriptTitleContract}",`;
 
+  return `You are a short-form video scriptwriter specialised in the "${args.theme.name}" niche, writing for an operator who HATES generic AI-slop content. Your job is to produce a script a skilled human editor would not be embarrassed to ship.
+${titleFirst}${lockedTitleBlock}
 THEME: ${args.theme.name} — ${args.theme.tagline}
 DESCRIPTION: ${args.theme.description}
 VOICE GUIDE: ${args.theme.voiceGuide}
@@ -240,7 +286,7 @@ SAFETY CONSTRAINT: If the topic requires medical, legal, or financial advice, ke
 
 Return ONLY JSON matching:
 {
-  "title": "${scriptTitleContract}",
+${titleJsonLine}
   "hook": "<spoken opener>",
   "topic": "<normalised topic>",
   "beats": [

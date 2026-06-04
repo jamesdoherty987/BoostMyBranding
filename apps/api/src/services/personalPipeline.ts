@@ -48,7 +48,7 @@ import {
 } from './personalContentPosting.js';
 import { generateImage } from './fal.js';
 import { broadcast } from './realtime.js';
-import { recentTopics } from './personalAccounts.js';
+import { recentTopics, recentVideoTitles } from './personalAccounts.js';
 import { features } from '../env.js';
 import { withRetry } from './retry.js';
 import { checkScriptRules } from './personalQuality.js';
@@ -252,6 +252,8 @@ async function generateForAccountScript(
       .filter(Boolean)
       .join('\n\n');
 
+    const usedVideoTitles = await recentVideoTitles(account.id, 40);
+
     const script = await generateScript({
       theme,
       topic,
@@ -276,6 +278,7 @@ async function generateForAccountScript(
       promptAppendix: scriptPromptAppendix || undefined,
       averageClipSeconds: genConfig.averageClipSeconds,
       scriptModel: genConfig.scriptModel,
+      recentVideoTitles: usedVideoTitles,
     });
     if (script.blocked) {
       await markFailed(postId, `Blocked by safety filter: ${script.blockReason ?? 'unspecified'}`);

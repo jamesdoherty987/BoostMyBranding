@@ -308,6 +308,30 @@ export async function recentTopics(accountId: string, limit = 20): Promise<strin
   return rows.map((r) => r.topic);
 }
 
+/** Titles from recent posts' `script` JSON — used to avoid duplicate video titles. */
+export async function recentVideoTitles(accountId: string, limit = 40): Promise<string[]> {
+  if (!isDbConfigured()) return [];
+  const db = getDb();
+  const cap = Math.min(80, Math.max(1, Math.round(limit)));
+  const rows = await db
+    .select({ script: personalPosts.script })
+    .from(personalPosts)
+    .where(eq(personalPosts.accountId, accountId))
+    .orderBy(desc(personalPosts.createdAt))
+    .limit(cap);
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const r of rows) {
+    const t = (r.script as { title?: string } | null | undefined)?.title?.trim();
+    if (!t) continue;
+    const k = t.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(t);
+  }
+  return out;
+}
+
 /* ─── Post listing ───────────────────────────────────────────────── */
 
 export interface PersonalPostPayload {

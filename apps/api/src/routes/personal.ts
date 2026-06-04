@@ -320,10 +320,12 @@ const createAccountBodySchema = z.object({
       motifs: z.array(z.string().max(200)).max(20).optional(),
       copySamples: z.array(z.string().max(1000)).max(20).optional(),
       exampleVideoTitles: z.array(z.string().max(200)).max(25).optional(),
+      videoTitleGuidance: z.string().max(1500).optional(),
       exampleScriptSnippets: z.array(z.string().max(2000)).max(40).optional(),
       referenceFullScripts: z.array(z.string().max(25000)).max(5).optional(),
       bannedPhrases: z.array(z.string().max(200)).max(60).optional(),
     })
+    .passthrough()
     .optional(),
   generatorConfig: z
     .object({
@@ -368,6 +370,8 @@ const createAccountBodySchema = z.object({
         .optional(),
       letterbox: z.boolean().optional(),
       filmGrain: z.boolean().optional(),
+      /** When false, stills are static in the final stitch (no Ken Burns). */
+      kenBurnsOnStills: z.boolean().optional(),
       longformEnabled: z.boolean().optional(),
       longformTargetSeconds: z.number().positive().max(480).optional(),
       longformAnimationStyle: z
@@ -384,6 +388,7 @@ const createAccountBodySchema = z.object({
       longformMaxAiVideoShots: z.number().int().min(0).max(30).optional(),
       stitchEncodePreset: z.enum(['fast', 'balanced', 'high']).optional(),
     })
+    .passthrough()
     .optional(),
 });
 

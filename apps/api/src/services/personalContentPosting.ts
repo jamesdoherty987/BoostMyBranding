@@ -16,7 +16,9 @@ export function hasResolvableContentStudioWorkspace(account: PersonalAccountRow)
  * True when we should call ContentStudio after a successful render.
  * - `scheduleToContentStudio` on the generate request: one-off "generate & post"
  *   (still requires API key + a workspace id on env or this account).
- * - Otherwise: legacy behaviour — both account.autoSchedule and account.autoApprove.
+ * - Otherwise: auto-schedule is on AND (auto-approve OR a pinned ContentStudio
+ *   account id). Requiring approve alone blocked posting for users who had
+ *   linked a social account but left auto-approve off.
  */
 export function shouldSchedulePersonalToContentStudio(
   args: {
@@ -26,10 +28,16 @@ export function shouldSchedulePersonalToContentStudio(
   },
   account: PersonalAccountRow,
 ): boolean {
-  if (args.scheduleToContentStudio === true) {
-    return Boolean(features.contentStudio && hasResolvableContentStudioWorkspace(account));
+  if (!features.contentStudio || !hasResolvableContentStudioWorkspace(account)) {
+    return false;
   }
-  return (args.autoSchedule ?? account.autoSchedule) && account.autoApprove;
+  if (args.scheduleToContentStudio === true) {
+    return true;
+  }
+  const auto = args.autoSchedule ?? account.autoSchedule;
+  if (!auto) return false;
+  const pinned = Boolean(account.contentStudioAccountId?.trim());
+  return account.autoApprove || pinned;
 }
 
 /** When set, schedulePost uses this ContentStudio account id instead of auto-pick. */

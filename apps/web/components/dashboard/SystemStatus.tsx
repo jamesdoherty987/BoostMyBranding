@@ -30,6 +30,7 @@ type Status = {
   stripe: boolean;
   resend: boolean;
   contentStudio: boolean;
+  contentStudioDefaultWorkspace?: boolean;
 };
 
 export function SystemStatus() {

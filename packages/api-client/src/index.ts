@@ -92,6 +92,7 @@ export class BoostApi {
       stripe: boolean;
       resend: boolean;
       contentStudio: boolean;
+      contentStudioDefaultWorkspace: boolean;
     }>('/api/v1/system/status');
   }
 
@@ -2455,6 +2456,8 @@ export interface PersonalAccountStyleBible {
   motifs?: string[];
   copySamples?: string[];
   exampleVideoTitles?: string[];
+  /** Optional: tell the AI what you want in a headline (besides the example titles). */
+  videoTitleGuidance?: string;
   exampleScriptSnippets?: string[];
   /** Full scripts to learn structure / pacing from — never copy verbatim. */
   referenceFullScripts?: string[];

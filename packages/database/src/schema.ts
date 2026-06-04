@@ -1147,6 +1147,11 @@ export interface PersonalAccountStyleBible {
   copySamples?: string[];
   /** Example video titles — inspire pacing and specificity; do not copy verbatim. */
   exampleVideoTitles?: string[];
+  /**
+   * Optional freeform notes for the title model (tone, curiosity angle, taboo patterns).
+   * Shown only when generating the locked video title — not general script rules.
+   */
+  videoTitleGuidance?: string;
   /** Example script lines / hooks — inspire tone and rhythm only. */
   exampleScriptSnippets?: string[];
   /**

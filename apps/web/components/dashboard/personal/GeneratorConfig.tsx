@@ -25,6 +25,21 @@ import type {
 import { ApiError } from '@boost/api-client';
 import { api } from '@/lib/dashboard/api';
 
+type TitleExampleRow = { id: string; text: string };
+
+function newTitleExampleRowId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `title-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function initExampleTitleRows(bible: PersonalAccountStyleBible): TitleExampleRow[] {
+  const titles = (bible.exampleVideoTitles ?? []).map((s) => s.trim()).filter(Boolean);
+  if (titles.length === 0) return [{ id: newTitleExampleRowId(), text: '' }];
+  return titles.map((text) => ({ id: newTitleExampleRowId(), text }));
+}
+
 export function GeneratorConfigPanel({
   account,
   characters,
@@ -44,9 +59,10 @@ export function GeneratorConfigPanel({
   const [donts, setDonts] = useState<string>((initBible.donts ?? []).join('\n'));
   const [motifs, setMotifs] = useState<string>((initBible.motifs ?? []).join('\n'));
   const [copySamples, setCopySamples] = useState<string>((initBible.copySamples ?? []).join('\n'));
-  const [exampleVideoTitles, setExampleVideoTitles] = useState<string>(
-    (initBible.exampleVideoTitles ?? []).join('\n'),
+  const [exampleTitleRows, setExampleTitleRows] = useState<TitleExampleRow[]>(() =>
+    initExampleTitleRows(initBible),
   );
+  const [videoTitleGuidance, setVideoTitleGuidance] = useState(initBible.videoTitleGuidance ?? '');
   const [exampleScriptSnippets, setExampleScriptSnippets] = useState<string>(
     (initBible.exampleScriptSnippets ?? []).join('\n'),
   );
@@ -73,7 +89,8 @@ export function GeneratorConfigPanel({
     setDonts((bible.donts ?? []).join('\n'));
     setMotifs((bible.motifs ?? []).join('\n'));
     setCopySamples((bible.copySamples ?? []).join('\n'));
-    setExampleVideoTitles((bible.exampleVideoTitles ?? []).join('\n'));
+    setExampleTitleRows(initExampleTitleRows(bible));
+    setVideoTitleGuidance(bible.videoTitleGuidance ?? '');
     setExampleScriptSnippets((bible.exampleScriptSnippets ?? []).join('\n'));
     setReferenceScriptSlots(initReferenceScriptSlots(bible.referenceFullScripts));
     setBannedPhrases((bible.bannedPhrases ?? []).join('\n'));
@@ -99,7 +116,9 @@ export function GeneratorConfigPanel({
           donts: splitLines(donts),
           motifs: splitLines(motifs),
           copySamples: splitLines(copySamples),
-          exampleVideoTitles: splitLines(exampleVideoTitles),
+          exampleVideoTitles: exampleTitleRows.map((r) => r.text.trim()).filter(Boolean),
+          // Always send a string (may be '') so JSON merge overwrites; omitting the key would leave old DB text.
+          videoTitleGuidance: videoTitleGuidance.trim(),
           exampleScriptSnippets: splitLines(exampleScriptSnippets),
           referenceFullScripts: packReferenceFullScripts(referenceScriptSlots),
           bannedPhrases: splitLines(bannedPhrases),
@@ -190,13 +209,68 @@ export function GeneratorConfigPanel({
             </Field>
             <Field
               label="Example video titles"
-              hint="One per line. New video titles will match this pattern (length, punctuation, how specific or punchy they are) — not copy these words."
+              hint="One field per example. The model studies these for tone, length, and punctuation — then writes a new title per topic. Save configuration before generating."
+            >
+              <div className="space-y-2">
+                {exampleTitleRows.map((row, index) => (
+                  <div key={row.id} className="flex gap-2">
+                    <Input
+                      value={row.text}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setExampleTitleRows((rows) =>
+                          rows.map((r) => (r.id === row.id ? { ...r, text: v } : r)),
+                        );
+                      }}
+                      placeholder={
+                        index === 0
+                          ? 'e.g. How Did Ancient Humans Survive Deadly Winters?'
+                          : 'Another title in the same style'
+                      }
+                      className="min-w-0 flex-1 text-sm"
+                      maxLength={200}
+                    />
+                    {exampleTitleRows.length > 1 ? (
+                      <button
+                        type="button"
+                        className="inline-flex shrink-0 items-center justify-center rounded-lg border border-slate-200 px-2 text-rose-600 hover:bg-rose-50"
+                        title="Remove this example"
+                        onClick={() =>
+                          setExampleTitleRows((rows) => rows.filter((r) => r.id !== row.id))
+                        }
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    ) : null}
+                  </div>
+                ))}
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="h-8 gap-1 px-2 text-xs"
+                  disabled={exampleTitleRows.length >= 25}
+                  onClick={() =>
+                    setExampleTitleRows((rows) =>
+                      rows.length >= 25 ? rows : [...rows, { id: newTitleExampleRowId(), text: '' }],
+                    )
+                  }
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Add another title example
+                </Button>
+              </div>
+            </Field>
+            <Field
+              label="What you want in a title (optional)"
+              hint="Extra direction for the headline-only step — e.g. always a question, no clickbait numbers, two-part titles OK. Shown to the model with your examples."
             >
               <Textarea
                 rows={3}
-                value={exampleVideoTitles}
-                onChange={(e) => setExampleVideoTitles(e.target.value)}
-                placeholder={'The day everything clicked\nWhy nobody talks about this'}
+                value={videoTitleGuidance}
+                onChange={(e) => setVideoTitleGuidance(e.target.value)}
+                placeholder='e.g. "Curiosity questions only, no spoiler in the title" or "Match the dry documentary voice of the examples"'
+                maxLength={1500}
+                className="text-sm"
               />
             </Field>
             <Field
@@ -914,6 +988,8 @@ export function GeneratorConfigPanel({
 
 function splitLines(s: string): string[] {
   return s
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
     .split('\n')
     .map((l) => l.trim())
     .filter(Boolean);

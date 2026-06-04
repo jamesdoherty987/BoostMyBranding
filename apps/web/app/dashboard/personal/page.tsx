@@ -1,17 +1,9 @@
 'use client';
 
 /**
- * Personal content automation — the "secret" dashboard.
+ * Personal content automation — your own viral-content channels.
  *
- * Intentionally not linked from the main sidebar (reach it via
- * /dashboard/personal). Lets the authenticated user create multiple
- * personal social accounts, lock each to a viral-content theme, and
- * kick off video generation (manual or optional scheduled autopilot).
- *
- * Three columns at desktop:
- *   1. account list + add button
- *   2. selected account detail (theme, schedule, direction)
- *   3. posts grid for that account
+ * Reachable from the dashboard sidebar ("Personal") or ⌘K → "Personal channels" (g then p).
  */
 
 import { useEffect, useMemo, useState } from 'react';
@@ -33,12 +25,14 @@ import {
   CalendarPlus,
 } from 'lucide-react';
 import { Badge, Button, Card, CardContent, Input, Textarea, Spinner, toast } from '@boost/ui';
-import type {
-  PersonalAccount,
-  PersonalPost,
-  PersonalThemeSummary,
-  PersonalPlatform,
+import {
+  ApiError,
+  type PersonalAccount,
+  type PersonalPost,
+  type PersonalThemeSummary,
+  type PersonalPlatform,
 } from '@boost/api-client';
+import Link from 'next/link';
 import { api } from '@/lib/dashboard/api';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { MediaLibrary } from '@/components/dashboard/personal/MediaLibrary';
@@ -57,10 +51,15 @@ const PLATFORMS: PersonalPlatform[] = [
 
 export default function PersonalDashboardPage() {
   const { data: themes } = useSWR('personal:themes', () => api.personalThemes());
-  const { data: accounts, mutate: refetchAccounts } = useSWR(
-    'personal:accounts',
-    () => api.listPersonalAccounts(),
-  );
+  const {
+    data: accounts,
+    error: accountsError,
+    isLoading: accountsLoading,
+    mutate: refetchAccounts,
+  } = useSWR('personal:accounts', () => api.listPersonalAccounts(), {
+    shouldRetryOnError: true,
+    errorRetryCount: 3,
+  });
   const { data: features } = useSWR('personal:features', () => api.personalFeatures());
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -74,11 +73,13 @@ export default function PersonalDashboardPage() {
 
   const selected = accounts?.find((a) => a.id === selectedId) ?? null;
 
+  const accountsUnauthorized = accountsError instanceof ApiError && accountsError.status === 401;
+
   return (
     <div className="min-h-screen bg-slate-50 pb-20">
       <PageHeader
         title="Personal channels"
-        subtitle="A private, fully-automated pipeline for your own social accounts. Pick a viral niche, set a schedule, walk away. Not linked from the client-facing dashboard."
+        subtitle="Automated pipeline for your own social accounts: themes, schedule, and generation. Use the sidebar or ⌘K → Personal (g, p)."
       />
 
       <FeatureBanner features={features} />
@@ -95,8 +96,58 @@ export default function PersonalDashboardPage() {
               <Plus className="h-4 w-4" />
               New channel
             </Button>
+            {accountsError ? (
+              <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">
+                <div className="font-semibold">
+                  {accountsUnauthorized ? 'Sign in required' : 'Couldn&apos;t load channels'}
+                </div>
+                <p className="mt-2 break-words text-xs leading-relaxed text-rose-800/90">
+                  {(accountsError as Error).message ?? 'Request failed'}
+                </p>
+                {accountsUnauthorized ? (
+                  <div className="mt-3 space-y-2 text-xs leading-relaxed text-rose-800/90">
+                    <p>
+                      The API only accepts the <code className="rounded bg-rose-100 px-1 font-mono text-[11px]">bmb_session</code>{' '}
+                      cookie set when you sign in on{' '}
+                      <Link href="/team" className="font-semibold underline underline-offset-2">
+                        Team sign-in
+                      </Link>
+                      . If DevTools shows a different cookie named <code className="font-mono">session</code>, that is
+                      ignored here (often another local app). Sign in again from this site so{' '}
+                      <code className="font-mono">bmb_session</code> is set on <code className="font-mono">localhost</code>.
+                    </p>
+                  </div>
+                ) : (
+                  <p className="mt-3 text-xs text-rose-800/80">
+                    If you just pulled code updates, run{' '}
+                    <code className="rounded bg-rose-100 px-1 py-0.5 font-mono text-[11px]">pnpm db:migrate</code> from the
+                    repo root so Postgres has the latest columns, then restart the API.
+                  </p>
+                )}
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button variant="secondary" size="sm" onClick={() => void refetchAccounts()}>
+                    Try again
+                  </Button>
+                  {accountsUnauthorized ? (
+                    <Button variant="primary" size="sm" onClick={() => { window.location.href = '/team'; }}>
+                      Team sign-in
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
             <div className="mt-4 space-y-2">
-              {accounts?.length === 0 ? (
+              {accountsLoading && !accounts ? (
+                <div className="space-y-2">
+                  {[1, 2, 3].map((i) => (
+                    <div
+                      key={i}
+                      className="h-[72px] animate-pulse rounded-xl border border-slate-200 bg-slate-100/80"
+                    />
+                  ))}
+                </div>
+              ) : null}
+              {!accountsLoading && !accountsError && accounts?.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
                   No channels yet. Create one to start posting.
                 </div>
@@ -151,6 +202,25 @@ export default function PersonalDashboardPage() {
                 features={features}
                 onChanged={refetchAccounts}
               />
+            ) : accountsError ? (
+              <Card>
+                <CardContent className="p-8 text-center text-slate-600">
+                  <AlertTriangle className="mx-auto mb-3 h-10 w-10 text-rose-500" />
+                  <p className="text-sm font-medium text-slate-900">
+                    {accountsUnauthorized ? 'You are not signed in to the API' : 'Fix the error in the sidebar'}
+                  </p>
+                  <p className="mt-2 text-xs text-slate-500">
+                    {accountsUnauthorized
+                      ? 'Use Team sign-in so the browser gets a bmb_session cookie for this API.'
+                      : 'The list request failed — your channels may still exist in the database.'}
+                  </p>
+                  {accountsUnauthorized ? (
+                    <Button variant="primary" size="sm" className="mt-4" onClick={() => { window.location.href = '/team'; }}>
+                      Open team sign-in
+                    </Button>
+                  ) : null}
+                </CardContent>
+              </Card>
             ) : (
               <EmptyState
                 themes={themes ?? []}

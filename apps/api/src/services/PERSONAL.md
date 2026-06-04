@@ -90,15 +90,21 @@ With none of them set, the pipeline still runs end-to-end with mocks.
 
 ## Running the migration
 
+After pulling schema changes, apply SQL in `packages/database/drizzle/` to the **same** database as `DATABASE_URL` (repo-root `.env`). If `GET /personal/accounts` fails with `column "contentstudio_account_id" does not exist`, you skipped this step.
+
+```bash
+pnpm db:migrate
+# same as:
+pnpm --filter @boost/database db:migrate
 ```
-pnpm --filter @boost/database migrate
-```
+
+Then restart the API dev process so it reconnects cleanly.
 
 ## ContentStudio posting
 
 - **Credentials:** `CONTENTSTUDIO_API_KEY` and `CONTENTSTUDIO_WORKSPACE_ID` in `.env` (API).
 - **Per channel:** Optional `contentstudio_workspace_id` and `contentstudio_account_id` on `personal_accounts` (Overview → Publishing). Account id pins which connected social account receives the post when several exist for the same platform.
-- **When posts are scheduled:** (1) Account has **Auto-approve** + **Auto-schedule to ContentStudio** on the schedule card, or (2) dashboard **Generate & schedule post** (`scheduleToContentStudio: true` on `POST …/generate`), or (3) cron autopilot uses the same rules as (1) for generated videos.
+- **When posts are scheduled:** (1) **Auto-schedule** is on and either **Auto-approve** is on *or* a **pinned ContentStudio account** is set on the account (workspace + API key required), or (2) dashboard **Generate & schedule post** (`scheduleToContentStudio: true` on `POST …/generate`), or (3) cron autopilot uses the same rules as (1).
 - **Scheduler:** `runDuePersonalAccounts` runs every **5 minutes** (`scheduler.ts`), selects `active` accounts with `auto_generate_on_schedule`, due `next_run_at`, and calls `generateForAccount({ accountId })`.
 
 ## Extending

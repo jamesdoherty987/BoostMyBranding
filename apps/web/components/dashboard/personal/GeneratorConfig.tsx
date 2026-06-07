@@ -999,7 +999,7 @@ export function GeneratorConfigPanel({
                       }
                       const n = Math.round(Number(raw));
                       if (!Number.isFinite(n)) return;
-                      setGen({ ...gen, longformMaxAiVideoShots: Math.min(30, Math.max(0, n)) });
+                      setGen({ ...gen, longformMaxAiVideoShots: Math.min(20, Math.max(0, n)) });
                     }}
                     min={0}
                     max={30}

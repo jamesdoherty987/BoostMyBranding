@@ -1605,12 +1605,13 @@ function PostsGrid({
   const [clearingFailed, setClearingFailed] = useState(false);
 
   async function clearAllFailed() {
-    if (failedInView.length === 0) return;
     if (
       !(await confirmDialog({
-        title: 'Remove all failed videos?',
+        title: 'Delete all failed videos?',
         description:
-          'This permanently deletes every failed post for this channel, including failures not shown in this recent list. This cannot be undone.',
+          failedInView.length > 0
+            ? `This permanently deletes every failed post for this channel (${failedInView.length} failed in this list; any other failed rows in the database are included too). This cannot be undone.`
+            : 'This permanently deletes every failed post for this channel, including failures that are not in this recent list. This cannot be undone.',
         confirmLabel: 'Delete all failed',
         danger: true,
       }))
@@ -1667,19 +1668,23 @@ function PostsGrid({
           <h3 className="text-sm font-bold uppercase tracking-wide text-slate-600">
             Recent posts ({list.length})
           </h3>
-          {failedInView.length > 0 ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="gap-1.5 border-rose-200 text-rose-700 hover:bg-rose-50"
-              disabled={clearingFailed}
-              onClick={() => void clearAllFailed()}
-            >
-              {clearingFailed ? <Spinner className="h-3.5 w-3.5" /> : <Trash2 className="h-3.5 w-3.5" />}
-              Remove all failed
-            </Button>
-          ) : null}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="gap-1.5 border-rose-200 text-rose-700 hover:bg-rose-50"
+            disabled={clearingFailed}
+            onClick={() => void clearAllFailed()}
+            title="Deletes every post in failed status for this channel (not only the ones visible here)"
+          >
+            {clearingFailed ? <Spinner className="h-3.5 w-3.5" /> : <Trash2 className="h-3.5 w-3.5" />}
+            Delete all failed
+            {failedInView.length > 0 ? (
+              <span className="ml-0.5 rounded-full bg-rose-100 px-1.5 py-0 text-[10px] font-bold tabular-nums text-rose-800">
+                {failedInView.length}
+              </span>
+            ) : null}
+          </Button>
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {list.map((p) => (
@@ -1923,12 +1928,27 @@ function PostCard({
           if (sec == null) return null;
           const approx = post.durationSeconds == null && post.plannedDurationSeconds != null;
           return (
-            <div className="absolute right-2 top-2 rounded-md bg-black/60 px-2 py-0.5 text-[11px] font-medium text-white">
+            <div className="absolute right-2 top-2 z-[15] rounded-md bg-black/60 px-2 py-0.5 text-[11px] font-medium text-white">
               {approx ? '~' : ''}
               {sec}s
             </div>
           );
         })()}
+        {!playing ? (
+          <button
+            type="button"
+            aria-label="Delete this video"
+            title="Delete this video"
+            disabled={deleting}
+            onClick={(e) => {
+              e.stopPropagation();
+              void deleteThisPost();
+            }}
+            className="absolute bottom-2 right-2 z-20 inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/20 bg-black/55 text-white shadow-md backdrop-blur-sm transition hover:bg-rose-600/90 disabled:opacity-50"
+          >
+            {deleting ? <Spinner className="h-3.5 w-3.5" /> : <Trash2 className="h-3.5 w-3.5" />}
+          </button>
+        ) : null}
       </div>
       {genUi ? (
         <div className="relative z-10 min-w-0 border-t border-slate-200/90 bg-slate-950 px-3 py-2.5 text-white">
@@ -1989,17 +2009,6 @@ function PostCard({
               Regenerate thumbnail
             </Button>
           ) : null}
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-7 gap-1 border-rose-200 px-2 text-[11px] text-rose-700 hover:bg-rose-50"
-            disabled={deleting}
-            onClick={() => void deleteThisPost()}
-          >
-            {deleting ? <Spinner className="h-3 w-3" /> : <Trash2 className="h-3 w-3" />}
-            Delete
-          </Button>
           <div className="flex flex-wrap gap-1">
             {post.voiceoverUrl ? (
               <span className="inline-flex items-center gap-1 rounded-md bg-purple-50 px-1.5 py-0.5 text-[10px] text-purple-700">

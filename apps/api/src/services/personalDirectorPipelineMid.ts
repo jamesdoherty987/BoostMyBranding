@@ -54,6 +54,7 @@ import { buildVisualBrandHintsForShots } from './personalContentHints.js';
 import {
   generateAiImage,
   generateAiVideo,
+  getAiModel,
   isFalFatalAccountError,
   pickDefaultModel,
   pickImageModelForLongform,
@@ -576,35 +577,39 @@ export async function directorPipelineFromResolvedStoryboard(
         }
       }
 
-      if (!asset && effectiveKind === 'ai_video' && defaultVideoModel && features.fal) {
-        const video = await withAbortWhenPersonalPostFailed(
-          postId,
-          withTimeout(
-            aiVideoTimeoutMs,
-            `director_video:${account.id}:${fs.shot.id}`,
-            withRetry(
-              () =>
-                generateAiVideo({
-                  modelId: defaultVideoModel,
-                  prompt,
-                  negativePrompt: negativePrompt || undefined,
-                  aspectRatio: videoAspectFrom(aspectRatio),
-                  durationSeconds: (() => {
-                    const cMin = genConfig.clipMinSeconds ?? (longformEnabled ? 4 : 2);
-                    const cMax = genConfig.clipMaxSeconds ?? (longformEnabled ? 10 : 5);
-                    const clipLo = Math.min(cMin, cMax);
-                    const clipHi = Math.max(cMin, cMax);
-                    return Math.min(clipHi, Math.max(clipLo, fs.shot.durationSeconds));
-                  })(),
-                  referenceImageUrls: refs,
-                  scopePath: `personal/${account.id}/ai-video`,
-                }),
-              { label: `director_video:${account.id}:${fs.shot.id}`, attempts: 1 },
+      if (!asset && effectiveKind === 'ai_video' && defaultVideoModel) {
+        const videoModel = getAiModel(defaultVideoModel);
+        const needsFal = videoModel?.provider === 'fal';
+        if (videoModel && (!needsFal || features.fal)) {
+          const video = await withAbortWhenPersonalPostFailed(
+            postId,
+            withTimeout(
+              aiVideoTimeoutMs,
+              `director_video:${account.id}:${fs.shot.id}`,
+              withRetry(
+                () =>
+                  generateAiVideo({
+                    modelId: defaultVideoModel,
+                    prompt,
+                    negativePrompt: negativePrompt || undefined,
+                    aspectRatio: videoAspectFrom(aspectRatio),
+                    durationSeconds: (() => {
+                      const cMin = genConfig.clipMinSeconds ?? (longformEnabled ? 4 : 2);
+                      const cMax = genConfig.clipMaxSeconds ?? (longformEnabled ? 10 : 5);
+                      const clipLo = Math.min(cMin, cMax);
+                      const clipHi = Math.max(cMin, cMax);
+                      return Math.min(clipHi, Math.max(clipLo, fs.shot.durationSeconds));
+                    })(),
+                    referenceImageUrls: refs,
+                    scopePath: `personal/${account.id}/ai-video`,
+                  }),
+                { label: `director_video:${account.id}:${fs.shot.id}`, attempts: 1 },
+              ),
             ),
-          ),
-        );
-        asset = { url: video.url, kind: 'video' };
-        shotCost = video.costCents;
+          );
+          asset = { url: video.url, kind: 'video' };
+          shotCost = video.costCents;
+        }
       } else if (
         effectiveKind === 'scraped_video' ||
         effectiveKind === 'scraped_image' ||

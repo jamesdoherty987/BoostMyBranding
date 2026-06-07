@@ -391,7 +391,7 @@ const createAccountBodySchema = z.object({
           'custom',
         ])
         .optional(),
-      longformMaxAiVideoShots: z.number().int().min(0).max(30).optional(),
+      longformMaxAiVideoShots: z.number().int().min(0).max(20).optional(),
       longformIntroEnabled: z.boolean().optional(),
       longformIntroSeconds: z.number().min(1.5).max(5).optional(),
       stitchEncodePreset: z.enum(['fast', 'balanced', 'high']).optional(),

@@ -31,11 +31,16 @@
  * `PERSONAL_DEBUG_MIX_AUDIO=1` or `PERSONAL_DEBUG_STITCH_TIMELINE=1`.
  * `PERSONAL_DEBUG_STITCH_FFMPEG=1` — FFmpeg `-loglevel verbose`, argv, full filter string, stderr tail on failure.
  * `PERSONAL_DEBUG_STITCH_NORMALIZE=1` — pre-invoke JSON for **every** normalize shot (argv + filters) without verbose FFmpeg.
+ * `PERSONAL_LOG_DRAWTEXT_NORMALIZE=1` — per-shot drawtext filter snippets + overlay inline text preview / legacy `ov-*.txt` dumps (high volume).
+ * `PERSONAL_LOG_FFMPEG_VERSION=1` — one-line `ffmpeg -version` head at stitch start (also when `PERSONAL_DEBUG_STITCH_FFMPEG=1`).
  * Failed normalize always logs `[stitcher:normalize-failed]` with argv, filters, and full FFmpeg stderr when available.
+ * Drawtext: short keyword/caption overlays use **inline** `text='…'` (sanitized + escaped), not `textfile=`. Some Windows libavfilter
+ * builds treat substrings like `text_w` inside `x=(main_w-text_w)/2` as the `text` option when `textfile=` is present ("Both text and text file provided").
+ * Never use `text_align=` with `textfile=` — `text_align` can be parsed as `text` + garbage on other builds.
  */
 
 import { randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -163,6 +168,30 @@ function stitchFfmpegDebugTrace(): boolean {
 function stitchNormalizeDumpEveryShot(): boolean {
   const v = process.env.PERSONAL_DEBUG_STITCH_NORMALIZE?.trim().toLowerCase();
   return v === '1' || v === 'true' || v === 'yes' || v === 'on';
+}
+
+function stitchLogFfmpegVersionEnabled(): boolean {
+  const v = process.env.PERSONAL_LOG_FFMPEG_VERSION?.trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes' || v === 'on';
+}
+
+/** First lines of `ffmpeg -version` — correlates drawtext / filter quirks to a specific build. */
+function logFfmpegBuildVersionHead(ffmpegBin: string): void {
+  const want = stitchFfmpegDebugTrace() || stitchLogFfmpegVersionEnabled();
+  if (!want) return;
+  try {
+    const out = execFileSync(ffmpegBin, ['-hide_banner', '-version'], {
+      encoding: 'utf8',
+      maxBuffer: 96 * 1024,
+    });
+    const lines = out.split(/\r?\n/).filter(Boolean);
+    const head = lines.slice(0, 3).join(' | ');
+    console.info(`[stitcher:ffmpeg-version] ${head}`);
+  } catch (e) {
+    console.warn(
+      `[stitcher:ffmpeg-version] exec failed: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
 }
 
 function tlog(msg: string) {
@@ -444,13 +473,11 @@ async function encodeNamesNumbersTitleCardMp4(p: {
   let y = Math.round(p.height * 0.17);
   for (let li = 0; li < p.lines.length; li++) {
     const line = p.lines[li]!;
-    const tf = path.join(p.workDir, `titlecard-line-${li}-${randomUUID().slice(0, 8)}.txt`);
-    writeFileSync(tf, sanitizeOverlayFileText(line, 240), 'utf8');
-    p.textFilesOut.push(tf);
+    const lineSan = sanitizeOverlayFileText(line, 240);
+    const textIn = escapeDrawtextInlineText(lineSan);
     const fontEsc = ffmpegFilterPath(font);
-    const tfEsc = ffmpegFilterPath(tf);
     vfParts.push(
-      `drawtext=fontfile=${fontEsc}:textfile=${tfEsc}:reload=0:fontsize=${fs}:fontcolor=#141414:x=(w-text_w)/2:y=${y}:box=0`,
+      `drawtext=fontfile=${fontEsc}:text='${textIn}':fontsize=${fs}:fontcolor=#141414:x=(w-tw)/2:y=${y}:box=0`,
     );
     y += Math.round(fs * 1.42);
     if (y > p.height * 0.9) break;
@@ -515,6 +542,7 @@ export async function stitchShots(args: StitchArgs): Promise<StitchResult> {
 
   const workDir = path.join(tmpdir(), `stitch-${randomUUID()}`);
   mkdirSync(workDir, { recursive: true });
+  logFfmpegBuildVersionHead(ffmpegBin);
   const cleanups: string[] = [];
 
   try {
@@ -1193,7 +1221,77 @@ function overlayFontPath(): string | null {
   return null;
 }
 
-/** Strip control chars / odd whitespace so drawtext + textfile stay reliable. */
+function stitchLogDrawtextNormalizeEnabled(): boolean {
+  const v = process.env.PERSONAL_LOG_DRAWTEXT_NORMALIZE?.trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes' || v === 'on';
+}
+
+/**
+ * Log every `ov-{segment}-*.txt` next to drawtext (legacy) — bytes, UTF-8 BOM, short preview, hex head.
+ * Helps diagnose encoding and empty files when overlays still use sidecar files.
+ */
+function logNormalizeOverlayTextfilesDebug(args: { tag: string; segmentIndex: number; workDir: string }): void {
+  const { tag, segmentIndex, workDir } = args;
+  const verbose =
+    stitchLogDrawtextNormalizeEnabled() || stitchFfmpegDebugTrace() || stitchNormalizeDumpEveryShot();
+  let names: string[] = [];
+  try {
+    names = readdirSync(workDir).filter(
+      (n) => n.startsWith(`ov-${segmentIndex}-`) && n.endsWith('.txt'),
+    );
+  } catch (e) {
+    console.warn(
+      `[stitcher:overlay-files] ${JSON.stringify({ tag, segmentIndex, workDir, err: e instanceof Error ? e.message : String(e) })}`,
+    );
+    return;
+  }
+  if (names.length === 0) {
+    if (verbose) {
+      console.info(
+        `[stitcher:overlay-files] ${JSON.stringify({
+          tag,
+          segmentIndex,
+          workDir,
+          note: 'no ov-*.txt (keyword/caption overlays use inline drawtext text=…)',
+        })}`,
+      );
+    }
+    return;
+  }
+  for (const n of names.sort()) {
+    try {
+      const fp = path.join(workDir, n);
+      const buf = readFileSync(fp);
+      const utf8 = buf.toString('utf8');
+      const preview = utf8.replace(/\r?\n/g, '\\n').slice(0, 200);
+      const hex = buf.subarray(0, Math.min(64, buf.length)).toString('hex');
+      const bomUtf8 = buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf;
+      console.info(
+        `[stitcher:overlay-files] ${JSON.stringify({
+          tag,
+          segmentIndex,
+          file: n,
+          bytes: buf.length,
+          utf8Len: utf8.length,
+          bomUtf8,
+          preview,
+          hex64: hex,
+        })}`,
+      );
+    } catch (e) {
+      console.warn(
+        `[stitcher:overlay-files] ${JSON.stringify({
+          tag,
+          segmentIndex,
+          file: n,
+          err: e instanceof Error ? e.message : String(e),
+        })}`,
+      );
+    }
+  }
+}
+
+/** Strip control chars / odd whitespace so drawtext overlays stay reliable. */
 function sanitizeOverlayFileText(raw: string, maxLen: number): string {
   const t = raw.replace(/\r?\n/g, ' ').replace(/\s+/g, ' ').trim().slice(0, maxLen);
   return Array.from(t)
@@ -1202,6 +1300,25 @@ function sanitizeOverlayFileText(raw: string, maxLen: number): string {
       return c === 9 || (c >= 32 && c !== 127);
     })
     .join('');
+}
+
+/**
+ * Escape user text for drawtext `text='…'` (no `textfile=`).
+ *
+ * FFmpeg filter escaping (see https://ffmpeg.org/ffmpeg-filters.html §4.2 "Notes on filtergraph escaping"):
+ * we pass the filtergraph as a **single argv element** (no shell), so shell-level escaping does not apply.
+ * For `text='…'`, commas and colons inside the quotes are accepted (see flite `text='…'` examples in the same manual).
+ *
+ * We still:
+ * - Double `\` so pathological backslashes survive first-level parsing.
+ * - Map ASCII `'` → U+2019 so the quoted `text='…'` wrapper stays unambiguous without `\'`.
+ * - Prefix each `%` with `\` so `%{…}` drawtext expansion (https://ffmpeg.org/ffmpeg-filters.html#drawtext-1) never runs on user copy.
+ */
+function escapeDrawtextInlineText(raw: string): string {
+  let s = raw.replace(/\\/g, '\\\\');
+  s = s.replace(/'/g, '\u2019');
+  s = s.replace(/%/g, '\\%');
+  return s;
 }
 
 /** Paths inside FFmpeg filter strings (escape `:` for Windows drive letters). */
@@ -1217,6 +1334,37 @@ function ffmpegCliFilesystemPath(p: string): string {
   const abs = path.resolve(p);
   if (process.platform === 'win32') return abs.replace(/\\/g, '/');
   return abs;
+}
+
+/**
+ * Windows static stills use `-filter_complex`. Comma-chaining **two or more** `drawtext`
+ * filters in one `[0:v]…[out]` graph can trip some Windows FFmpeg / libavfilter builds
+ * (filter init / label issues). When there are 2+ drawtext entries, use explicit `[dtN]`
+ * labels between them. (Unrelated to `textfile` + `text_align` / `tw` option-parse bugs.)
+ */
+function windowsStaticFilterComplexExpr(filters: string[]): string {
+  const firstDt = filters.findIndex((f) => f.startsWith('drawtext='));
+  if (firstDt < 0) {
+    return `[0:v]${filters.join(',')}[normv]`;
+  }
+  const tail = filters.slice(firstDt);
+  const draws = tail.filter((f) => f.startsWith('drawtext='));
+  if (tail.some((f) => !f.startsWith('drawtext='))) {
+    return `[0:v]${filters.join(',')}[normv]`;
+  }
+  const head = filters.slice(0, firstDt).join(',');
+  if (draws.length <= 1) {
+    const mid = [head, draws[0]].filter(Boolean).join(',');
+    return `[0:v]${mid}[normv]`;
+  }
+  const d0 = draws[0]!;
+  const headPrefix = head ? `${head},` : '';
+  let expr = `[0:v]${headPrefix}${d0}[dt0]`;
+  for (let i = 1; i < draws.length; i++) {
+    const outLabel = i === draws.length - 1 ? 'normv' : `dt${i}`;
+    expr += `;[dt${i - 1}]${draws[i]}[${outLabel}]`;
+  }
+  return expr;
 }
 
 /* ─── Normalize one shot into a segment ──────────────────── */
@@ -1361,6 +1509,9 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
     } else {
       const fontEsc = ffmpegFilterPath(font);
       const isSlate = a.overlayStyle === 'slate' || a.overlayStyle === 'slate_bold';
+      // Short overlays: inline `text='…'` + `x=(w-tw)/2`. Do **not** combine `textfile=` with
+      // `x=(main_w-text_w)/2` — some libavfilter builds tokenize `text_w` as the `text` option
+      // alongside `textfile` ("Both text and text file provided").
       const bold = a.overlayStyle === 'bold' || a.overlayStyle === 'slate_bold';
       const fs = Math.max(
         20,
@@ -1377,10 +1528,21 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
       for (const kw of a.keywordCards ?? []) {
         const line = sanitizeOverlayFileText(kw.text, isSlate ? 28 : 56);
         if (!line) continue;
-        const relTf = `ov-${a.segmentIndex}-${idx}.txt`;
+        const textIn = escapeDrawtextInlineText(line);
         idx += 1;
-        writeFileSync(path.join(a.workDir, relTf), line, 'utf8');
-        const tfEsc = useWinWorkdirSpawn ? relTf : ffmpegFilterPath(path.join(a.workDir, relTf));
+        if (stitchLogDrawtextNormalizeEnabled()) {
+          console.info(
+            `[stitcher:drawtext-inline] ${JSON.stringify({
+              segmentIndex: a.segmentIndex,
+              overlayIndex: idx - 1,
+              kind: isSlate ? 'slate' : 'keyword',
+              rawLen: line.length,
+              escapedLen: textIn.length,
+              rawPreview: line.length > 120 ? `${line.slice(0, 120)}…` : line,
+              xExpr: '(w-tw)/2',
+            })}`,
+          );
+        }
         const y = Math.round(a.height * yFrac);
         const t0 = kw.startSeconds.toFixed(3);
         const t1 = kw.endSeconds.toFixed(3);
@@ -1389,24 +1551,34 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
           const ySlate = Math.round(a.height * (bold ? 0.76 : 0.775));
           const boxW = bold ? 10 : 8;
           filters.push(
-            `drawtext=fontfile=${fontEsc}:textfile=${tfEsc}:reload=1:fontsize=${fsS}:fontcolor=#1a1a1a:borderw=1:bordercolor=#e5e7eb@0.92:shadowcolor=black@0.1:shadowx=1:shadowy=1:box=1:boxcolor=white@${bold ? '0.93' : '0.88'}:boxborderw=${boxW}:x=(w-text_w)/2:y=${ySlate}:enable='between(t\\,${t0}\\,${t1})'`,
+            `drawtext=fontfile=${fontEsc}:text='${textIn}':fontsize=${fsS}:fontcolor=#1a1a1a:borderw=1:bordercolor=#e5e7eb@0.92:shadowcolor=black@0.1:shadowx=1:shadowy=1:box=1:boxcolor=white@${bold ? '0.93' : '0.88'}:boxborderw=${boxW}:x=(w-tw)/2:y=${ySlate}:enable='between(t\\,${t0}\\,${t1})'`,
           );
         } else {
           filters.push(
-            `drawtext=fontfile=${fontEsc}:textfile=${tfEsc}:reload=1:fontsize=${fs}:fontcolor=white:borderw=${border}:bordercolor=black@0.88${shadow}:box=1:boxcolor=black@${boxAlpha}:boxborderw=${boxBorder}:x=(w-text_w)/2:y=${y}:enable='between(t\\,${t0}\\,${t1})'`,
+            `drawtext=fontfile=${fontEsc}:text='${textIn}':fontsize=${fs}:fontcolor=white:borderw=${border}:bordercolor=black@0.88${shadow}:box=1:boxcolor=black@${boxAlpha}:boxborderw=${boxBorder}:x=(w-tw)/2:y=${y}:enable='between(t\\,${t0}\\,${t1})'`,
           );
         }
       }
       if (a.persistentCaption?.trim()) {
         const cap = sanitizeOverlayFileText(a.persistentCaption.trim(), 80);
         if (cap) {
-          const relCap = `ov-${a.segmentIndex}-cap.txt`;
-          writeFileSync(path.join(a.workDir, relCap), cap, 'utf8');
-          const tfEsc = useWinWorkdirSpawn ? relCap : ffmpegFilterPath(path.join(a.workDir, relCap));
+          const capIn = escapeDrawtextInlineText(cap);
+          if (stitchLogDrawtextNormalizeEnabled()) {
+            console.info(
+              `[stitcher:drawtext-inline] ${JSON.stringify({
+                segmentIndex: a.segmentIndex,
+                kind: 'persistentCaption',
+                rawLen: cap.length,
+                escapedLen: capIn.length,
+                rawPreview: cap.length > 120 ? `${cap.slice(0, 120)}…` : cap,
+                xExpr: '(w-tw)/2',
+              })}`,
+            );
+          }
           const fs2 = Math.max(17, Math.round(a.height * (bold ? 0.036 : 0.032)));
           const te = Math.max(0.05, a.durationSeconds - 0.04).toFixed(3);
           filters.push(
-            `drawtext=fontfile=${fontEsc}:textfile=${tfEsc}:reload=1:fontsize=${fs2}:fontcolor=white@0.94:borderw=2:bordercolor=black@0.88:shadowcolor=black@0.5:shadowx=2:shadowy=2:box=1:boxcolor=black@0.34:boxborderw=10:x=(w-text_w)/2:y=h*0.86:enable='between(t\\,0\\,${te})'`,
+            `drawtext=fontfile=${fontEsc}:text='${capIn}':fontsize=${fs2}:fontcolor=white@0.94:borderw=2:bordercolor=black@0.88:shadowcolor=black@0.5:shadowx=2:shadowy=2:box=1:boxcolor=black@0.34:boxborderw=10:x=(w-tw)/2:y=h*0.86:enable='between(t\\,0\\,${te})'`,
           );
         }
       }
@@ -1427,6 +1599,7 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
   /** Windows static stills: `-filter_complex` + explicit map avoids some libavfilter + libx264 link bugs with `-vf`. */
   const winStaticFilterComplex =
     process.platform === 'win32' && a.kind === 'image' && !useKenBurnsOnImage;
+  const winFilterComplexGraph = winStaticFilterComplex ? windowsStaticFilterComplexExpr(filters) : null;
 
   const args: string[] = [];
   // Still + no Ken Burns: loop image; duration is enforced with `-frames:v` (not `-t`) below.
@@ -1438,7 +1611,7 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
   args.push('-i', inputArg);
   if (a.kind === 'video') args.push('-t', String(a.durationSeconds));
   if (winStaticFilterComplex) {
-    args.push('-filter_complex', `[0:v]${vfJoined}[normv]`);
+    args.push('-filter_complex', winFilterComplexGraph!);
     args.push('-map', '[normv]');
   } else {
     args.push('-vf', vfJoined);
@@ -1481,7 +1654,8 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
     workDirStat = { exists: false, err: e instanceof Error ? e.message : String(e) };
   }
   const fontProbe = overlayFontPath();
-  const filterComplexFull = winStaticFilterComplex ? `[0:v]${vfJoined}[normv]` : undefined;
+  const drawtextCount = filters.filter((f) => f.startsWith('drawtext=')).length;
+  const filterComplexFull = winFilterComplexGraph ?? undefined;
   const normalizePrePayload = {
     tag: 'normalize-pre-invoke',
     segmentIndex: a.segmentIndex,
@@ -1512,17 +1686,22 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
     staticStillFrames,
     imageOutFrames,
     overlayStyle: a.overlayStyle,
-    keywordCards: a.keywordCards?.map((c) => ({
-      startSeconds: c.startSeconds,
-      endSeconds: c.endSeconds,
-      textLen: c.text.length,
-      textPreview: `${c.text.slice(0, 64)}${c.text.length > 64 ? '…' : ''}`,
-    })),
+    keywordCards: a.keywordCards?.map((c) => {
+      const kt = typeof c.text === 'string' ? c.text : String(c.text ?? '');
+      return {
+        startSeconds: c.startSeconds,
+        endSeconds: c.endSeconds,
+        textLen: kt.length,
+        textPreview: `${kt.slice(0, 64)}${kt.length > 64 ? '…' : ''}`,
+      };
+    }),
     persistentCaptionLen: a.persistentCaption?.trim().length ?? 0,
     fontPathForDrawtext: fontProbe ? path.basename(fontProbe) : null,
     gradeFilterString: grade ?? '(none)',
     filterPass: winStaticFilterComplex ? 'filter_complex' : 'vf',
     filterComplexFull,
+    drawtextCount,
+    winFilterComplexLabeledChain: winStaticFilterComplex && drawtextCount > 1,
     filtersChain: filters,
     vfFilterCount: filters.length,
     vfJoinedLength: vfJoined.length,
@@ -1553,8 +1732,10 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
     );
   }
 
-  // One compact line per shot so a failing run shows ordering (dev always; prod when PERSONAL_DEBUG_STITCH_NORMALIZE=1).
-  if (process.env.NODE_ENV !== 'production' || normalizeDumpAll) {
+  // Compact per-shot line: dev for seg≥1 (seg0 is covered by normalize-dev-seg0); skip when verbose pre-invoke is on.
+  const wantCompactNormalizeLine =
+    (process.env.NODE_ENV !== 'production' || normalizeDumpAll) && !shouldDumpNormalizePre;
+  if (wantCompactNormalizeLine && a.segmentIndex > 0) {
     console.info(
       `[stitcher:normalize-start] seg=${a.segmentIndex} kind=${a.kind} dur=${a.durationSeconds}s pass=${normalizePrePayload.filterPass} winWd=${useWinWorkdirSpawn ? 1 : 0} winFc=${winStaticFilterComplex ? 1 : 0} vfLen=${vfJoined.length} frames=${staticStillFrames || imageOutFrames || 'n/a'} in=${path.basename(a.input)}`,
     );
@@ -1571,9 +1752,43 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
     staticStillFrames: staticStillFrames > 0 ? staticStillFrames : undefined,
     winWorkdirSpawn: useWinWorkdirSpawn ? true : undefined,
     winStaticFilterComplex: winStaticFilterComplex ? true : undefined,
+    drawtextCount: drawtextCount > 0 ? drawtextCount : undefined,
+    winFilterComplexLabeled: winStaticFilterComplex && drawtextCount > 1 ? true : undefined,
     videoDecodeCapSeconds: a.kind === 'video' ? a.durationSeconds : undefined,
     videoTrimEnd: a.kind === 'video' ? Math.max(0.05, a.durationSeconds).toFixed(3) : undefined,
   });
+
+  const drawtextVerbose =
+    stitchLogDrawtextNormalizeEnabled() ||
+    stitchFfmpegDebugTrace() ||
+    normalizeDumpAll ||
+    shouldDumpNormalizePre;
+  if (drawtextCount > 0) {
+    const snippets = filters
+      .filter((f) => f.startsWith('drawtext='))
+      .map((f) => (f.length > 420 ? `${f.slice(0, 420)}…(+${f.length - 420})` : f));
+    if (process.env.NODE_ENV !== 'production' || drawtextVerbose) {
+      console.info(
+        `[stitcher:drawtext-pre] ${JSON.stringify({
+          segmentIndex: a.segmentIndex,
+          kind: a.kind,
+          durationSeconds: a.durationSeconds,
+          useWinWorkdirSpawn,
+          filterPass: winStaticFilterComplex ? 'filter_complex' : 'vf',
+          drawtextCount,
+          fontBasename: fontProbe ? path.basename(fontProbe) : null,
+          snippets,
+        })}`,
+      );
+    }
+    if (drawtextVerbose) {
+      logNormalizeOverlayTextfilesDebug({
+        tag: 'pre-ffmpeg',
+        segmentIndex: a.segmentIndex,
+        workDir: workDirAbs,
+      });
+    }
+  }
 
   try {
     await runFfmpeg(a.ffmpegBin, args, `normalize:${path.basename(a.output)}`, {
@@ -1586,6 +1801,8 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
             kind: a.kind,
             vfJoinedFull: vfJoined,
             filterComplexFull,
+            drawtextCount,
+            winFilterComplexLabeledChain: drawtextCount > 1 && winStaticFilterComplex,
             filterPass: normalizePrePayload.filterPass,
             h264EncodeArgs: vEnc,
           }
@@ -1614,6 +1831,32 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
     const stderrForJson =
       stderrFull.length > stderrCap ? `${stderrFull.slice(0, 24_000)}\n…[truncated middle]…\n${stderrFull.slice(-24_000)}` : stderrFull;
 
+    if (drawtextCount > 0) {
+      logNormalizeOverlayTextfilesDebug({
+        tag: 'on-failure',
+        segmentIndex: a.segmentIndex,
+        workDir: workDirAbs,
+      });
+      const drawSnips = filters
+        .filter((f) => f.startsWith('drawtext='))
+        .map((f) => (f.length > 520 ? `${f.slice(0, 520)}…(+${f.length - 520})` : f));
+      console.warn(
+        `[stitcher:drawtext-on-failure] ${JSON.stringify({
+          segmentIndex: a.segmentIndex,
+          drawSnips,
+          useWinWorkdirSpawn,
+          filterPass: winStaticFilterComplex ? 'filter_complex' : 'vf',
+        })}`,
+      );
+      const hintBoth =
+        stderrFull.includes('Both text and text file') ||
+        stderrFull.includes('text and text file provided');
+      if (hintBoth) {
+        console.warn(
+          '[stitcher:drawtext-hint] Keyword/caption overlays use inline `text=…` (not `textfile`) with `x=(w-tw)/2`. If you still see text+textfile errors, search for `textfile=` in drawtext filters or avoid `text_w` / `text_align` next to `textfile`. Set PERSONAL_LOG_DRAWTEXT_NORMALIZE=1 for `[stitcher:drawtext-inline]` lines.',
+        );
+      }
+    }
     try {
       console.warn(
         '[stitcher:normalize-failed]',
@@ -1639,6 +1882,8 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
             outputResolved: a.output,
             filterPass: winStaticFilterComplex ? 'filter_complex' : 'vf',
             filterComplexFull,
+            drawtextCount,
+            winFilterComplexLabeledChain: winStaticFilterComplex && drawtextCount > 1,
             vfJoinedLength: vfJoined.length,
             vfJoined: tail,
             filtersChain: filters,
@@ -1652,7 +1897,7 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
               staticStillFrames: normalizePrePayload.staticStillFrames,
               imageOutFrames: normalizePrePayload.imageOutFrames,
             },
-            hint: 'PERSONAL_DEBUG_STITCH_NORMALIZE=1 logs every shot pre-invoke. PERSONAL_DEBUG_STITCH_FFMPEG=1 adds FFmpeg verbose stderr during the run.',
+            hint: 'PERSONAL_DEBUG_STITCH_NORMALIZE=1 logs every shot pre-invoke. PERSONAL_DEBUG_STITCH_FFMPEG=1 adds FFmpeg verbose stderr during the run. PERSONAL_LOG_DRAWTEXT_NORMALIZE=1 logs `[stitcher:drawtext-inline]` + legacy ov-*.txt dumps. PERSONAL_LOG_FFMPEG_VERSION=1 logs ffmpeg -version once per stitch.',
           },
           null,
           0,
@@ -2204,7 +2449,7 @@ export interface RunFfmpegOpts {
   onStatsLine?: (line: string) => void;
   /** When set, FFmpeg resolves relative `-i` / `-y` / `textfile=` paths against this directory (Windows stitch fix). */
   cwd?: string;
-  /** When {@link stitchFfmpegDebugTrace} is on, attached to failure logs for this invoke. */
+  /** Passed through on failure when normalize verbose flags are on (see `normalizeToSegment`). */
   debugContext?: Record<string, unknown>;
 }
 

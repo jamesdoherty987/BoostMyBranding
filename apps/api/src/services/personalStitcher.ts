@@ -29,11 +29,14 @@
  * after concat (bad container `Duration`). `mixAudio` caps `apad` to the
  * sum of encoded segment lengths (+slack) and logs when clamping. Debug:
  * `PERSONAL_DEBUG_MIX_AUDIO=1` or `PERSONAL_DEBUG_STITCH_TIMELINE=1`.
+ * `PERSONAL_DEBUG_STITCH_FFMPEG=1` — FFmpeg `-loglevel verbose`, argv, full filter string, stderr tail on failure.
+ * `PERSONAL_DEBUG_STITCH_NORMALIZE=1` — pre-invoke JSON for **every** normalize shot (argv + filters) without verbose FFmpeg.
+ * Failed normalize always logs `[stitcher:normalize-failed]` with argv, filters, and full FFmpeg stderr when available.
  */
 
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync, unlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
@@ -115,6 +118,8 @@ function stitchH264ProfileArgs(): string[] {
 function stitchH264VArgs(opts?: {
   tune?: 'stillimage';
   encodeTier?: StitchEncodePreset;
+  /** Windows: some FFmpeg/libx264 builds fail linking RGB stills when `-profile:v high` is set. */
+  omitProfile?: boolean;
 }): string[] {
   const tier = opts?.encodeTier;
   return [
@@ -123,7 +128,7 @@ function stitchH264VArgs(opts?: {
     ...(opts?.tune ? (['-tune', opts.tune] as const) : []),
     '-pix_fmt',
     'yuv420p',
-    ...stitchH264ProfileArgs(),
+    ...(opts?.omitProfile ? [] : stitchH264ProfileArgs()),
     '-preset',
     stitchH264Preset(tier),
     '-crf',
@@ -143,6 +148,21 @@ function stitchFfmpegStats(): boolean {
   const v = process.env.PERSONAL_STITCH_FFMPEG_STATS?.trim().toLowerCase();
   if (v === '1' || v === 'true') return true;
   return false;
+}
+
+/**
+ * Very verbose FFmpeg stitch diagnostics (argv, cwd, full filter string, stderr on failure).
+ * Enable with `PERSONAL_DEBUG_STITCH_FFMPEG=1` on the API process. Avoid in production (log volume + secrets in paths).
+ */
+function stitchFfmpegDebugTrace(): boolean {
+  const v = process.env.PERSONAL_DEBUG_STITCH_FFMPEG?.trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes' || v === 'on';
+}
+
+/** Per-shot normalize pre-invoke JSON (high volume). Production: only when this env is set. */
+function stitchNormalizeDumpEveryShot(): boolean {
+  const v = process.env.PERSONAL_DEBUG_STITCH_NORMALIZE?.trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes' || v === 'on';
 }
 
 function tlog(msg: string) {
@@ -169,6 +189,35 @@ export class StitcherError extends Error {
     if (options?.cause !== undefined) {
       (this as Error & { cause?: unknown }).cause = options.cause;
     }
+  }
+}
+
+/**
+ * FFmpeg exited non-zero. Carries full stderr so normalize can log copy-paste diagnostics
+ * without requiring `PERSONAL_DEBUG_STITCH_FFMPEG=1`.
+ */
+class FfmpegInvokeError extends Error {
+  readonly exitCode: number | null;
+  readonly ffmpegStderr: string;
+  readonly ffmpegLabel: string;
+  readonly ffmpegArgv: string[];
+  readonly ffmpegCwd: string | undefined;
+
+  constructor(init: {
+    exitCode: number | null;
+    stderr: string;
+    label: string;
+    argv: string[];
+    cwd?: string;
+    summary: string;
+  }) {
+    super(`[ffmpeg ${init.label}] exit ${init.exitCode ?? 'unknown'}: ${init.summary}`);
+    this.name = 'FfmpegInvokeError';
+    this.exitCode = init.exitCode;
+    this.ffmpegStderr = init.stderr;
+    this.ffmpegLabel = init.label;
+    this.ffmpegArgv = init.argv;
+    this.ffmpegCwd = init.cwd;
   }
 }
 
@@ -545,6 +594,12 @@ export async function stitchShots(args: StitchArgs): Promise<StitchResult> {
         logLines: [],
       }),
     );
+    if (stitchFfmpegDebugTrace()) {
+      console.info(
+        `[stitcher:debug-ffmpeg] stitchShots normalize batch postId=${args.postId} nShots=${nShots} canvas=${width}x${height} aspect=${args.aspectRatio ?? '9:16'} colourGrade=${args.colourGrade ?? 'natural'} overlay=${args.keywordOverlayStyle ?? 'off'} kenBurnsOnStills=${args.kenBurnsOnStills !== false}`,
+      );
+      console.info(`[stitcher:debug-ffmpeg] workDir=${ffmpegCliFilesystemPath(workDir)} ffmpeg=${ffmpegBin}`);
+    }
     for (let i = 0; i < localShots.length; i++) {
       const s = localShots[i]!;
       const segPath = path.join(workDir, `seg-${i}.mp4`);
@@ -1154,6 +1209,16 @@ function ffmpegFilterPath(p: string): string {
   return path.resolve(p).replace(/\\/g, '/').replace(/:/g, '\\:');
 }
 
+/**
+ * Paths passed as FFmpeg CLI args (`-i`, `-y`, concat lists, etc.). On Windows, some
+ * FFmpeg/libx264 builds reject backslash-only temp paths with EINVAL when opening outputs.
+ */
+function ffmpegCliFilesystemPath(p: string): string {
+  const abs = path.resolve(p);
+  if (process.platform === 'win32') return abs.replace(/\\/g, '/');
+  return abs;
+}
+
 /* ─── Normalize one shot into a segment ──────────────────── */
 
 interface NormalizeArgs {
@@ -1186,6 +1251,13 @@ interface NormalizeArgs {
 async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
   const filters: string[] = [];
   let imageOutFrames = 0;
+  const useKenBurnsOnImage = a.kind === 'image' && a.kenBurnsOnStills !== false;
+  const workDirAbs = path.resolve(a.workDir);
+  /** Windows: run FFmpeg with `cwd=workDir` and relative IO/textfile paths — avoids drawtext/filter parse bugs with `C:` in paths. */
+  const useWinWorkdirSpawn =
+    process.platform === 'win32' &&
+    path.dirname(path.resolve(a.input)) === workDirAbs &&
+    path.dirname(path.resolve(a.output)) === workDirAbs;
 
   // Ken Burns on stills: we add a zoompan filter with a duration-based
   // step so the whole clip scales 1.00 → 1.12 over the shot duration.
@@ -1220,13 +1292,12 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
           `tpad=stop_mode=clone:stop_duration=6,trim=end=${te},setpts=PTS-STARTPTS`,
       );
     } else {
-      // Static slide (Ken Burns off): loop input + output -t (see args below).
-      // Do not use select=eq(n\,0) here — one decoded frame + fps produced ~1/fps s clips.
-      // Frame rate: use `-framerate` before `-i` (see args below), not `fps=` here — on some
-      // Windows FFmpeg builds, `fps` after `-loop 1` on PNG (demuxer default 25fps) fails with
-      // "Error initializing filters" / EINVAL when opening the segment encoder.
+      // Static slide (Ken Burns off): `-loop 1`, `-framerate` before `-i`, and `-frames:v` below.
+      // Do not use `select=eq(n\,0)` here — one decoded frame + fps produced ~1/fps s clips.
+      // Do not use `fps=` in -vf with looped PNG on some Windows FFmpeg builds (filter init EINVAL).
+      // Use bilinear instead of lanczos here — lanczos + yuv format + duration quirks has also tripped bad builds.
       filters.push(
-        `scale=${a.width}:${a.height}:force_original_aspect_ratio=increase:flags=lanczos`,
+        `scale=${a.width}:${a.height}:force_original_aspect_ratio=increase:flags=bilinear`,
         `crop=${a.width}:${a.height}`,
       );
     }
@@ -1252,6 +1323,13 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
     );
   }
 
+  const grade = gradeFilter(a.colourGrade);
+  // Still images decode as RGB; convert before colour filters (e.g. colortemperature) and libx264.
+  // Some Windows FFmpeg builds fail "Error initializing filters" when RGB is fed straight into x264.
+  if (a.kind === 'image') {
+    filters.push('format=yuv420p');
+  }
+
   // Speed ramp (video only). On stills, `setpts` after zoompan breaks the
   // fixed frame budget (`-frames:v`) vs storyboard duration — skip here.
   if (a.kind === 'video') {
@@ -1259,8 +1337,6 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
     if (a.speedRamp === 'speed_up') filters.push('setpts=0.65*PTS');
   }
 
-  // Colour grade.
-  const grade = gradeFilter(a.colourGrade);
   if (grade) filters.push(grade);
 
   if (a.useGrain) filters.push('noise=alls=8:allf=t+u');
@@ -1301,9 +1377,10 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
       for (const kw of a.keywordCards ?? []) {
         const line = sanitizeOverlayFileText(kw.text, isSlate ? 28 : 56);
         if (!line) continue;
-        const tf = path.join(a.workDir, `ov-${a.segmentIndex}-${idx++}.txt`);
-        writeFileSync(tf, line, 'utf8');
-        const tfEsc = ffmpegFilterPath(tf);
+        const relTf = `ov-${a.segmentIndex}-${idx}.txt`;
+        idx += 1;
+        writeFileSync(path.join(a.workDir, relTf), line, 'utf8');
+        const tfEsc = useWinWorkdirSpawn ? relTf : ffmpegFilterPath(path.join(a.workDir, relTf));
         const y = Math.round(a.height * yFrac);
         const t0 = kw.startSeconds.toFixed(3);
         const t1 = kw.endSeconds.toFixed(3);
@@ -1323,9 +1400,9 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
       if (a.persistentCaption?.trim()) {
         const cap = sanitizeOverlayFileText(a.persistentCaption.trim(), 80);
         if (cap) {
-          const tf = path.join(a.workDir, `ov-${a.segmentIndex}-cap.txt`);
-          writeFileSync(tf, cap, 'utf8');
-          const tfEsc = ffmpegFilterPath(tf);
+          const relCap = `ov-${a.segmentIndex}-cap.txt`;
+          writeFileSync(path.join(a.workDir, relCap), cap, 'utf8');
+          const tfEsc = useWinWorkdirSpawn ? relCap : ffmpegFilterPath(path.join(a.workDir, relCap));
           const fs2 = Math.max(17, Math.round(a.height * (bold ? 0.036 : 0.032)));
           const te = Math.max(0.05, a.durationSeconds - 0.04).toFixed(3);
           filters.push(
@@ -1336,35 +1413,152 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
     }
   }
 
-  // RGB stills (PNG) through scale/crop + overlays must end in yuv420p before libx264; avoids
-  // fragile filtergraph / encoder init on Windows when `-pix_fmt` alone is applied after `-vf`.
-  filters.push('format=yuv420p');
+  const staticStillFrames =
+    a.kind === 'image' && !useKenBurnsOnImage
+      ? Math.max(1, Math.round(a.durationSeconds * a.fps))
+      : 0;
 
-  const useKenBurnsOnImage = a.kind === 'image' && a.kenBurnsOnStills !== false;
+  const inputPath = ffmpegCliFilesystemPath(a.input);
+  const outputPath = ffmpegCliFilesystemPath(a.output);
+  const inputArg = useWinWorkdirSpawn ? path.basename(a.input) : inputPath;
+  const outputArg = useWinWorkdirSpawn ? path.basename(a.output) : outputPath;
+
+  const vfJoined = filters.join(',');
+  /** Windows static stills: `-filter_complex` + explicit map avoids some libavfilter + libx264 link bugs with `-vf`. */
+  const winStaticFilterComplex =
+    process.platform === 'win32' && a.kind === 'image' && !useKenBurnsOnImage;
 
   const args: string[] = [];
-  // Still + no Ken Burns: loop the image so -t / trim can extend real time.
+  // Still + no Ken Burns: loop image; duration is enforced with `-frames:v` (not `-t`) below.
   if (a.kind === 'image' && !useKenBurnsOnImage) {
     args.push('-loop', '1');
     // Input frame rate for the looped single image (pairs with omitted `fps=` in -vf).
     args.push('-framerate', String(a.fps));
   }
-  args.push('-i', a.input);
+  args.push('-i', inputArg);
   if (a.kind === 'video') args.push('-t', String(a.durationSeconds));
-  args.push('-vf', filters.join(','));
-  args.push(...stitchH264VArgs({
-    tune: a.kind === 'image' ? 'stillimage' : undefined,
+  if (winStaticFilterComplex) {
+    args.push('-filter_complex', `[0:v]${vfJoined}[normv]`);
+    args.push('-map', '[normv]');
+  } else {
+    args.push('-vf', vfJoined);
+  }
+  const vEnc = stitchH264VArgs({
+    tune: useKenBurnsOnImage ? 'stillimage' : undefined,
     encodeTier: a.encodeTier,
-  }));
+    omitProfile: process.platform === 'win32',
+  });
+  args.push(...vEnc);
   args.push('-an'); // strip audio — we mix separately
-  args.push('-r', String(a.fps));
+  if (a.kind === 'video' || useKenBurnsOnImage) {
+    args.push('-r', String(a.fps));
+  }
   if (useKenBurnsOnImage && imageOutFrames > 0) {
     args.push('-frames:v', String(imageOutFrames));
-  } else if (a.kind === 'image' && !useKenBurnsOnImage) {
-    args.push('-t', String(Math.max(0.05, a.durationSeconds)));
+  } else if (staticStillFrames > 0) {
+    // Prefer exact frame count over `-t` with `-loop 1` (avoids duration/graph quirks on Windows).
+    args.push('-frames:v', String(staticStillFrames));
   }
-  args.push('-movflags', '+faststart');
-  args.push('-y', a.output);
+  // Intermediate segments: skip `+faststart` (second pass / moov rewrite); some Windows FFmpeg builds
+  // error when combining faststart + short temp segment paths.
+  args.push('-y', outputArg);
+
+  const ffmpegDebug = stitchFfmpegDebugTrace();
+  const normalizeDumpAll = stitchNormalizeDumpEveryShot();
+  const shouldDumpNormalizePre = ffmpegDebug || normalizeDumpAll;
+  let inputStat: Record<string, unknown> = {};
+  try {
+    const st = statSync(a.input);
+    inputStat = { exists: true, size: st.size, mtimeMs: st.mtimeMs };
+  } catch (e) {
+    inputStat = { exists: false, err: e instanceof Error ? e.message : String(e) };
+  }
+  let workDirStat: Record<string, unknown> = {};
+  try {
+    const st = statSync(workDirAbs);
+    workDirStat = { exists: true, isDirectory: st.isDirectory(), mode: st.mode };
+  } catch (e) {
+    workDirStat = { exists: false, err: e instanceof Error ? e.message : String(e) };
+  }
+  const fontProbe = overlayFontPath();
+  const filterComplexFull = winStaticFilterComplex ? `[0:v]${vfJoined}[normv]` : undefined;
+  const normalizePrePayload = {
+    tag: 'normalize-pre-invoke',
+    segmentIndex: a.segmentIndex,
+    platform: process.platform,
+    node: process.version,
+    cwdPlanned: useWinWorkdirSpawn ? workDirAbs : null,
+    useWinWorkdirSpawn,
+    inputResolved: a.input,
+    outputResolved: a.output,
+    inputArg,
+    outputArg,
+    inputStat,
+    workDirStat,
+    pathLens: {
+      inputResolved: a.input.length,
+      outputResolved: a.output.length,
+      workDirAbs: workDirAbs.length,
+      vfJoined: vfJoined.length,
+      ffmpegBin: a.ffmpegBin.length,
+    },
+    targetWxH: { w: a.width, h: a.height },
+    fps: a.fps,
+    colourGrade: a.colourGrade,
+    encodeTier: a.encodeTier,
+    useGrain: a.useGrain,
+    letterbox: a.letterbox,
+    kenBurnsOnImage: useKenBurnsOnImage,
+    staticStillFrames,
+    imageOutFrames,
+    overlayStyle: a.overlayStyle,
+    keywordCards: a.keywordCards?.map((c) => ({
+      startSeconds: c.startSeconds,
+      endSeconds: c.endSeconds,
+      textLen: c.text.length,
+      textPreview: `${c.text.slice(0, 64)}${c.text.length > 64 ? '…' : ''}`,
+    })),
+    persistentCaptionLen: a.persistentCaption?.trim().length ?? 0,
+    fontPathForDrawtext: fontProbe ? path.basename(fontProbe) : null,
+    gradeFilterString: grade ?? '(none)',
+    filterPass: winStaticFilterComplex ? 'filter_complex' : 'vf',
+    filterComplexFull,
+    filtersChain: filters,
+    vfFilterCount: filters.length,
+    vfJoinedLength: vfJoined.length,
+    vfJoinedFull: vfJoined,
+    argv: [a.ffmpegBin, ...args],
+    h264EncodeArgs: vEnc,
+    winStaticFilterComplex,
+    omitH264HighProfile: process.platform === 'win32',
+  };
+
+  if (shouldDumpNormalizePre) {
+    console.info(
+      `[stitcher:debug-ffmpeg] normalize pre-invoke seg=${a.segmentIndex} kind=${a.kind} dur=${a.durationSeconds}s\n` +
+        JSON.stringify(normalizePrePayload, null, 2),
+    );
+  } else if (process.env.NODE_ENV !== 'production' && a.segmentIndex === 0) {
+    console.info(
+      '[stitcher:normalize-dev-seg0]',
+      JSON.stringify(
+        {
+          ...normalizePrePayload,
+          vfJoinedFull: `${vfJoined.slice(0, 900)}${vfJoined.length > 900 ? `…(+${vfJoined.length - 900} chars)` : ''}`,
+          hint: 'Every shot: set PERSONAL_DEBUG_STITCH_NORMALIZE=1. FFmpeg stderr lines: PERSONAL_DEBUG_STITCH_FFMPEG=1.',
+        },
+        null,
+        0,
+      ),
+    );
+  }
+
+  // One compact line per shot so a failing run shows ordering (dev always; prod when PERSONAL_DEBUG_STITCH_NORMALIZE=1).
+  if (process.env.NODE_ENV !== 'production' || normalizeDumpAll) {
+    console.info(
+      `[stitcher:normalize-start] seg=${a.segmentIndex} kind=${a.kind} dur=${a.durationSeconds}s pass=${normalizePrePayload.filterPass} winWd=${useWinWorkdirSpawn ? 1 : 0} winFc=${winStaticFilterComplex ? 1 : 0} vfLen=${vfJoined.length} frames=${staticStillFrames || imageOutFrames || 'n/a'} in=${path.basename(a.input)}`,
+    );
+  }
 
   logVisualPacing('ffmpeg-normalize', `seg${a.segmentIndex}`, {
     kind: a.kind,
@@ -1374,13 +1568,106 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
     kenBurns: useKenBurnsOnImage,
     framesVCap: useKenBurnsOnImage && imageOutFrames > 0 ? imageOutFrames : undefined,
     staticImageSeconds: a.kind === 'image' && !useKenBurnsOnImage ? Math.max(0.05, a.durationSeconds) : undefined,
+    staticStillFrames: staticStillFrames > 0 ? staticStillFrames : undefined,
+    winWorkdirSpawn: useWinWorkdirSpawn ? true : undefined,
+    winStaticFilterComplex: winStaticFilterComplex ? true : undefined,
     videoDecodeCapSeconds: a.kind === 'video' ? a.durationSeconds : undefined,
     videoTrimEnd: a.kind === 'video' ? Math.max(0.05, a.durationSeconds).toFixed(3) : undefined,
   });
 
-  await runFfmpeg(a.ffmpegBin, args, `normalize:${path.basename(a.output)}`, {
-    onStatsLine: a.onFfmpegStatsLine,
-  });
+  try {
+    await runFfmpeg(a.ffmpegBin, args, `normalize:${path.basename(a.output)}`, {
+      onStatsLine: a.onFfmpegStatsLine,
+      cwd: useWinWorkdirSpawn ? workDirAbs : undefined,
+      debugContext: shouldDumpNormalizePre
+        ? {
+            phase: 'normalize',
+            segmentIndex: a.segmentIndex,
+            kind: a.kind,
+            vfJoinedFull: vfJoined,
+            filterComplexFull,
+            filterPass: normalizePrePayload.filterPass,
+            h264EncodeArgs: vEnc,
+          }
+        : undefined,
+    });
+  } catch (err) {
+    const ff = err instanceof FfmpegInvokeError ? err : null;
+    const tail = vfJoined.length > 12_000 ? `${vfJoined.slice(0, 12_000)}…[truncated ${vfJoined.length - 12_000} chars]` : vfJoined;
+    let workdirFiles: { ok: boolean; count?: number; sample?: string[]; err?: string } = { ok: false };
+    try {
+      const names = readdirSync(workDirAbs);
+      workdirFiles = { ok: true, count: names.length, sample: names.slice(0, 100) };
+    } catch (e) {
+      workdirFiles = { ok: false, err: e instanceof Error ? e.message : String(e) };
+    }
+    let outDirStat: Record<string, unknown> = {};
+    try {
+      const outDir = path.dirname(path.resolve(a.output));
+      const st = statSync(outDir);
+      outDirStat = { path: outDir, exists: true, isDirectory: st.isDirectory() };
+    } catch (e) {
+      outDirStat = { err: e instanceof Error ? e.message : String(e) };
+    }
+    const stderrCap = 52_000;
+    const stderrFull = ff?.ffmpegStderr ?? '';
+    const stderrForJson =
+      stderrFull.length > stderrCap ? `${stderrFull.slice(0, 24_000)}\n…[truncated middle]…\n${stderrFull.slice(-24_000)}` : stderrFull;
+
+    try {
+      console.warn(
+        '[stitcher:normalize-failed]',
+        JSON.stringify(
+          {
+            segmentIndex: a.segmentIndex,
+            kind: a.kind,
+            durationSeconds: a.durationSeconds,
+            winWorkdirSpawn: useWinWorkdirSpawn,
+            winStaticFilterComplex,
+            omitH264HighProfile: process.platform === 'win32',
+            colourGrade: a.colourGrade,
+            overlayStyle: a.overlayStyle,
+            message: err instanceof Error ? err.message : String(err),
+            ffmpegExitCode: ff?.exitCode ?? null,
+            ffmpegLabel: ff?.ffmpegLabel,
+            ffmpegArgv: ff?.ffmpegArgv ?? [a.ffmpegBin, ...args],
+            ffmpegCwd: ff?.ffmpegCwd ?? (useWinWorkdirSpawn ? workDirAbs : undefined),
+            cwd: useWinWorkdirSpawn ? workDirAbs : undefined,
+            inputArg,
+            outputArg,
+            inputResolved: a.input,
+            outputResolved: a.output,
+            filterPass: winStaticFilterComplex ? 'filter_complex' : 'vf',
+            filterComplexFull,
+            vfJoinedLength: vfJoined.length,
+            vfJoined: tail,
+            filtersChain: filters,
+            argv: [a.ffmpegBin, ...args],
+            stderrChars: stderrFull.length,
+            stderrFull: stderrForJson,
+            workdirFiles,
+            outDirStat,
+            normalizePrePayloadSnapshot: {
+              pathLens: normalizePrePayload.pathLens,
+              staticStillFrames: normalizePrePayload.staticStillFrames,
+              imageOutFrames: normalizePrePayload.imageOutFrames,
+            },
+            hint: 'PERSONAL_DEBUG_STITCH_NORMALIZE=1 logs every shot pre-invoke. PERSONAL_DEBUG_STITCH_FFMPEG=1 adds FFmpeg verbose stderr during the run.',
+          },
+          null,
+          0,
+        ),
+      );
+    } catch {
+      console.warn('[stitcher:normalize-failed] (could not JSON-serialize failure context)', err);
+    }
+    if (ff && ff.ffmpegStderr.trim()) {
+      console.warn(
+        `[stitcher:normalize-failed-stderr-raw] seg=${a.segmentIndex} chars=${ff.ffmpegStderr.length}\n${ff.ffmpegStderr.slice(-14_000)}`,
+      );
+    }
+    throw err;
+  }
 }
 
 /* ─── Concat with transitions ────────────────────────────── */
@@ -1880,7 +2167,8 @@ function gradeFilter(name: string): string | undefined {
     case 'teal_orange':
       return 'curves=preset=vintage,eq=saturation=1.12';
     case 'film':
-      return 'curves=master=\'0/0 0.25/0.2 0.75/0.82 1/1\',eq=saturation=0.95';
+      // Avoid embedded single quotes in the filter string — fragile on some Windows FFmpeg parses.
+      return 'curves=preset=medium_contrast,eq=saturation=0.95';
     case 'bw':
       return 'hue=s=0';
     case 'high_contrast':
@@ -1914,6 +2202,10 @@ export interface RunFfmpegOpts {
   timeoutMs?: number;
   /** Throttled `frame=…` progress lines (requires `-loglevel info` internally). */
   onStatsLine?: (line: string) => void;
+  /** When set, FFmpeg resolves relative `-i` / `-y` / `textfile=` paths against this directory (Windows stitch fix). */
+  cwd?: string;
+  /** When {@link stitchFfmpegDebugTrace} is on, attached to failure logs for this invoke. */
+  debugContext?: Record<string, unknown>;
 }
 
 function runFfmpeg(
@@ -1927,10 +2219,25 @@ function runFfmpeg(
   const statsToCaller = Boolean(opts?.onStatsLine);
   const statsToConsole = stitchFfmpegStats();
   const wantStatsPipe = statsToCaller || statsToConsole;
-  const logLevel = wantStatsPipe ? 'info' : 'error';
+  const wantDebugTrace = stitchFfmpegDebugTrace();
+  const logLevel = wantDebugTrace ? 'verbose' : wantStatsPipe ? 'info' : 'error';
 
   return new Promise<void>((resolve, reject) => {
-    const p = spawn(bin, ['-hide_banner', '-loglevel', logLevel, ...args]);
+    if (wantDebugTrace) {
+      const fullArgv = [bin, '-hide_banner', `-loglevel=${logLevel}`, ...args];
+      console.info(
+        `[stitcher:debug-ffmpeg] spawn label=${label} cwd=${opts?.cwd ?? '(process default)'}\n` +
+          `  argv_json=${JSON.stringify(fullArgv)}\n` +
+          (opts?.debugContext
+            ? `  context_json=${JSON.stringify(opts.debugContext, null, 0).slice(0, 12000)}\n`
+            : ''),
+      );
+    }
+
+    const p = spawn(bin, ['-hide_banner', '-loglevel', logLevel, ...args], {
+      ...(opts?.cwd ? { cwd: opts.cwd } : {}),
+      windowsHide: true,
+    });
     let stderr = '';
     let settled = false;
     let lastStatsLine = '';
@@ -1964,6 +2271,11 @@ function runFfmpeg(
             } catch {
               /* ignore */
             }
+            if (wantDebugTrace) {
+              console.error(
+                `[stitcher:debug-ffmpeg] TIMEOUT label=${label} cwd=${opts?.cwd ?? ''}\nstderr_tail=\n${stderr.slice(-12_000)}`,
+              );
+            }
             reject(
               new Error(
                 `[ffmpeg ${label}] killed: exceeded ${timeoutMs}ms — ${summarizeFfmpegStderr(stderr, 600)}`,
@@ -1975,6 +2287,17 @@ function runFfmpeg(
     p.stderr.on('data', (b) => {
       const chunk = b.toString();
       stderr += chunk;
+      if (wantDebugTrace) {
+        for (const raw of chunk.split('\n')) {
+          const t = raw.trim();
+          if (!t) continue;
+          if (
+            /\b(filter|error|invalid|failed|unknown|deprecated|libx264|drawtext|scale|crop|format)\b/i.test(t)
+          ) {
+            console.info(`[stitcher:debug-ffmpeg] stderr[${label}] ${t.slice(0, 2000)}`);
+          }
+        }
+      }
       if (!wantStatsPipe) return;
       for (const raw of chunk.split('\n')) {
         const t = raw.trim();
@@ -1989,6 +2312,12 @@ function runFfmpeg(
       settled = true;
       if (timer) clearTimeout(timer);
       if (statsTimer) clearInterval(statsTimer);
+      if (wantDebugTrace) {
+        console.error(
+          `[stitcher:debug-ffmpeg] spawn_process_error label=${label} cwd=${opts?.cwd ?? ''} err=${(e as Error).message}\n` +
+            `  argv_json=${JSON.stringify([bin, '-hide_banner', `-loglevel=${logLevel}`, ...args])}`,
+        );
+      }
       reject(e);
     });
 
@@ -2000,10 +2329,44 @@ function runFfmpeg(
       flushStats();
       if (code === 0) {
         tlog(`ffmpeg:${label} ok ${(performance.now() - wall0).toFixed(0)}ms`);
+        if (wantDebugTrace) {
+          console.info(
+            `[stitcher:debug-ffmpeg] ok label=${label} ms=${(performance.now() - wall0).toFixed(0)} stderr_bytes=${stderr.length}`,
+          );
+        }
         return resolve();
       }
+      if (wantDebugTrace) {
+        const tail = stderr.length > 24_000 ? stderr.slice(-24_000) : stderr;
+        console.error(
+          `[stitcher:debug-ffmpeg] FAIL label=${label} exit=${code ?? 'unknown'} ms=${(performance.now() - wall0).toFixed(0)}\n` +
+            `  argv_json=${JSON.stringify([bin, '-hide_banner', `-loglevel=${logLevel}`, ...args])}\n` +
+            `  cwd=${opts?.cwd ?? '(process default)'}\n` +
+            (opts?.debugContext
+              ? `  context_json=${JSON.stringify(opts.debugContext, null, 2).slice(0, 16000)}\n`
+              : '') +
+            `  stderr_full_or_tail=\n${tail}`,
+        );
+        try {
+          if (opts?.cwd && existsSync(opts.cwd)) {
+            const names = readdirSync(opts.cwd);
+            console.error(
+              `[stitcher:debug-ffmpeg] workdir_list cwd=${opts.cwd} count=${names.length} sample=${JSON.stringify(names.slice(0, 40))}`,
+            );
+          }
+        } catch {
+          /* ignore */
+        }
+      }
       reject(
-        new Error(`[ffmpeg ${label}] exit ${code ?? 'unknown'}: ${summarizeFfmpegStderr(stderr)}`),
+        new FfmpegInvokeError({
+          exitCode: typeof code === 'number' ? code : null,
+          stderr,
+          label,
+          argv: [bin, '-hide_banner', '-loglevel', logLevel, ...args],
+          cwd: opts?.cwd,
+          summary: summarizeFfmpegStderr(stderr),
+        }),
       );
     });
   });
@@ -2019,4 +2382,5 @@ export const _internals = {
   gradeFilter,
   dimsFor,
   xfadeMode,
+  stitchFfmpegDebugTrace,
 };

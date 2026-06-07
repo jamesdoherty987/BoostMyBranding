@@ -16,6 +16,7 @@
  *   POST   /api/v1/personal/accounts/:id/posts/:postId/regenerate-thumbnail
  *   GET    /api/v1/personal/accounts/:id/posts
  *   DELETE /api/v1/personal/accounts/:id/posts/failed
+ *   DELETE /api/v1/personal/accounts/:id/posts/:postId
  *   GET    /api/v1/personal/features
  */
 
@@ -41,6 +42,7 @@ import {
   updateAccount,
   deleteAccount,
   deleteFailedPosts,
+  deletePersonalPost,
   listPosts,
   cancelPersonalPostGeneration,
   createReservedQueuedPersonalPost,
@@ -730,6 +732,28 @@ personalRouter.delete('/accounts/:id/posts/failed', requireAuth, async (req, res
         .json({ error: { message: 'Not found', code: 'NOT_FOUND' } });
     }
     res.json({ data: { deleted: n } });
+  } catch (e) {
+    next(e);
+  }
+});
+
+personalRouter.delete('/accounts/:id/posts/:postId', requireAuth, async (req, res, next) => {
+  try {
+    const user = (req as any).user as { id: string };
+    const accountId = String(req.params.id);
+    const postId = String(req.params.postId);
+    const deleted = await deletePersonalPost(user.id, accountId, postId);
+    if (deleted === null) {
+      return res
+        .status(404)
+        .json({ error: { message: 'Not found', code: 'NOT_FOUND' } });
+    }
+    if (!deleted) {
+      return res
+        .status(404)
+        .json({ error: { message: 'Post not found', code: 'NOT_FOUND' } });
+    }
+    res.json({ data: { ok: true } });
   } catch (e) {
     next(e);
   }

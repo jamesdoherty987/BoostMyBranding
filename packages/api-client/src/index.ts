@@ -1945,6 +1945,13 @@ export class BoostApi {
     );
   }
 
+  deletePersonalPost(accountId: string, postId: string) {
+    return this.request<{ ok: true }>(
+      `/api/v1/personal/accounts/${accountId}/posts/${postId}`,
+      { method: 'DELETE' },
+    );
+  }
+
   regeneratePersonalPostThumbnail(accountId: string, postId: string) {
     return this.request<{ thumbnailUrl: string }>(
       `/api/v1/personal/accounts/${accountId}/posts/${postId}/regenerate-thumbnail`,

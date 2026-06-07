@@ -489,6 +489,25 @@ export async function deleteFailedPosts(
 }
 
 /**
+ * Permanently deletes one post for this account.
+ * Verifies the account belongs to `userId`. Returns `null` if the account is not found, `false` if the post row did not exist.
+ */
+export async function deletePersonalPost(
+  userId: string,
+  accountId: string,
+  postId: string,
+): Promise<boolean | null> {
+  const account = await getAccount(userId, accountId);
+  if (!account) return null;
+  const db = getDb();
+  const removed = await db
+    .delete(personalPosts)
+    .where(and(eq(personalPosts.accountId, accountId), eq(personalPosts.id, postId)))
+    .returning({ id: personalPosts.id });
+  return removed.length > 0;
+}
+
+/**
  * Inserts a `queued` personal post row immediately so the dashboard shows the
  * job while {@link enqueuePersonalGenerateForAccount} waits behind another run.
  */

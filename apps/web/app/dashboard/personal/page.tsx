@@ -1756,6 +1756,7 @@ function PostCard({
     '—';
   const [playing, setPlaying] = useState(false);
   const [thumbBusy, setThumbBusy] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
   useEffect(() => {
     setPlaying(false);
@@ -1804,6 +1805,30 @@ function PostCard({
       toast.error('Could not regenerate thumbnail', (e as Error).message);
     } finally {
       setThumbBusy(false);
+    }
+  }
+
+  async function deleteThisPost() {
+    if (
+      !(await confirmDialog({
+        title: 'Delete this video?',
+        description:
+          'This permanently removes the post from this channel. If it was published elsewhere, that does not unpublish the social post. This cannot be undone.',
+        confirmLabel: 'Delete',
+        danger: true,
+      }))
+    ) {
+      return;
+    }
+    setDeleting(true);
+    try {
+      await api.deletePersonalPost(accountId, post.id);
+      toast.success('Video removed');
+      await Promise.resolve(onPostsChanged());
+    } catch (e) {
+      toast.error('Could not delete', (e as Error).message);
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -1964,6 +1989,17 @@ function PostCard({
               Regenerate thumbnail
             </Button>
           ) : null}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-7 gap-1 border-rose-200 px-2 text-[11px] text-rose-700 hover:bg-rose-50"
+            disabled={deleting}
+            onClick={() => void deleteThisPost()}
+          >
+            {deleting ? <Spinner className="h-3 w-3" /> : <Trash2 className="h-3 w-3" />}
+            Delete
+          </Button>
           <div className="flex flex-wrap gap-1">
             {post.voiceoverUrl ? (
               <span className="inline-flex items-center gap-1 rounded-md bg-purple-50 px-1.5 py-0.5 text-[10px] text-purple-700">

@@ -39,6 +39,11 @@ export function dedupeTitleLines(titles: string[] | undefined): string[] {
   return out;
 }
 
+/** ASCII ":" or fullwidth "：" after NFKC — catches common Unicode colon tricks. */
+export function textIncludesColonLike(s: string): boolean {
+  return /[\u003A\uFF1A]/.test(s.normalize('NFKC'));
+}
+
 function titleWordCount(title: string): number {
   return title.trim().split(/\s+/).filter(Boolean).length;
 }
@@ -50,8 +55,9 @@ function medianSorted(sorted: number[]): number {
 }
 
 /**
- * Light guardrails when example titles exist: empty, topic echo, or exact reuse
- * of a saved example. Punctuation and length are left to the model + prompts.
+ * Light guardrails when example titles exist: empty, topic echo, exact reuse
+ * of a saved example. Punctuation that **matches the examples** is enforced
+ * separately in {@link validateChannelHeadline}.
  */
 export function validateDirectorTitleAgainstExamples(
   title: string | undefined,
@@ -83,45 +89,17 @@ export function validateDirectorTitleAgainstExamples(
   return null;
 }
 
-function normHeadline(s: string): string {
-  return s
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, ' ')
-    .replace(/[""`''’]/g, '');
-}
-
-/** Rough "same headline" check vs a past title (long words only). */
-function headlineTooSimilarToPast(candidate: string, past: string): boolean {
-  const c = normHeadline(candidate);
-  const p = normHeadline(past);
-  if (!c || !p) return false;
-  if (c === p) return true;
-  if (c.length >= 14 && p.length >= 14 && (c.includes(p) || p.includes(c))) return true;
-  const words = (s: string) =>
-    new Set(
-      s
-        .replace(/[^a-z0-9\s]/g, ' ')
-        .split(/\s+/)
-        .filter((w) => w.length > 3),
-    );
-  const A = words(c);
-  const B = words(p);
-  if (A.size === 0 || B.size === 0) return false;
-  let n = 0;
-  for (const w of A) if (B.has(w)) n++;
-  return n / Math.min(A.size, B.size) >= 0.45;
-}
-
 /**
- * Headline checks for the title generator: base guards + avoid near-duplicates
- * of already-published channel titles.
+ * Headline checks for the title generator: base guards vs examples/topic,
+ * colon packaging when examples warrant it, and "?" ending when examples
+ * strongly use questions. Past published titles are **not** validated here —
+ * the title LLM prompt lists them and instructs the model not to copy; no
+ * post-generation similarity scoring.
  */
 export function validateChannelHeadline(
   title: string | undefined,
   topic: string,
   examples: string[],
-  recentVideoTitles?: string[],
 ): string | null {
   const ex = examples.map((e) => e.trim()).filter(Boolean);
   if (!ex.length) return null;
@@ -131,17 +109,26 @@ export function validateChannelHeadline(
 
   const t = (title ?? '').trim();
 
-  const recent = dedupeTitleLines(recentVideoTitles);
-  for (const past of recent) {
-    if (headlineTooSimilarToPast(t, past)) {
-      return `Too similar to an already-published title on this channel — rewrite with a different angle and different keywords (published: "${past.slice(0, 90)}${past.length > 90 ? '…' : ''}").`;
-    }
+  /** ASCII `:` or fullwidth `：` then whitespace — "Headline: rest" packaging. */
+  const titleHasColonSubtitleDelimiter = (line: string) =>
+    /(?:\u003A|\uFF1A)\s/.test(line.normalize('NFKC'));
+
+  /** A single stray example with `: ` must not unlock colon titles for the whole channel. */
+  const colonExamples = ex.filter((e) => titleHasColonSubtitleDelimiter(e)).length;
+  const colonRatio = colonExamples / ex.length;
+  if (!(colonRatio > 0.5) && titleHasColonSubtitleDelimiter(t)) {
+    return 'Most of your example titles do not use ": " headline packaging (colon + space) — match your list; do not add documentary / episode-style "Label: hook" titles.';
+  }
+
+  const qCount = ex.filter((e) => /\?\s*$/.test(e)).length;
+  if (ex.length >= 2 && qCount / ex.length >= 0.65 && !/\?\s*$/.test(t)) {
+    return 'Most of your example titles end with "?" — end this title with "?" like the examples.';
   }
 
   return null;
 }
 
-/** Observational digest from example titles — inspiration, not a checklist. */
+/** Concrete constraints derived from example titles (injected under STEP 0). */
 export function formatExampleTitlePatternDigest(examples: string[]): string {
   const ex = examples.map((e) => e.trim()).filter(Boolean);
   if (!ex.length) return '';
@@ -168,12 +155,14 @@ export function formatExampleTitlePatternDigest(examples: string[]): string {
 
   const lines: string[] = [
     '',
-    'What your saved examples tend to do (use your judgment — match the *feel*, invent new words):',
-    `- Rough length: about ${minW}–${maxW} words in the samples (median ~${median.toFixed(1)}).`,
-    `- Questions vs statements: about ${qPct}% of the samples end with "?".`,
+    'MEASURED CONSTRAINTS FROM EXAMPLE TITLES (aim to sit in the same band as these — same *feel*, new words for this topic):',
+    `- Length: your samples run about ${minW}–${maxW} words (median ~${median.toFixed(1)}). Aim for a similar length unless one example clearly breaks the pattern.`,
+    `- Questions vs statements: ${qPct}% of the samples end with "?". ${qPct >= 65 ? 'Prefer a "?" ending so the new line feels like the rest of the list.' : 'Match the mix in the samples rather than defaulting to a different style.'}`,
   ];
   if (top.length) {
-    lines.push(`- Common opening rhythms in the samples: ${top.map(([k, v]) => `"${k}" (${v}×)`).join(', ')}.`);
+    lines.push(
+      `- Opening rhythm: the samples often open like: ${top.map(([k, v]) => `"${k}" (${v}×)`).join(', ')}. Let the new title feel like it belongs in that same opening *family* when it fits the topic — no rigid template, just the same instinct as the examples.`,
+    );
   }
   return lines.join('\n');
 }
@@ -194,15 +183,15 @@ export function buildTitleFirstWorkflowPrompt(
   const lines: string[] = [
     '',
     '══════════════════════════════════════════════════════════════════',
-    'STEP 0 — JSON `title` (when example titles exist below)',
+    'STEP 0 — JSON `title` (strict — when example titles exist below)',
     '══════════════════════════════════════════════════════════════════',
     '',
-    'The operator saved **example video titles** in STYLE REFERENCES. Treat them as the headline voice for this channel: length, punctuation, curiosity, specificity — learn the pattern, do not copy lines.',
+    'The operator saved **example video titles**. They are the **only** contract for headline **format and register** (how the line is built and how it sounds). THEME voice, tagline, or "documentary narrator" instructions below apply to narration and shots — **not** as an excuse to pick a different headline species (e.g. "The X: Why Y" if the examples never do that).',
     '',
     'Before hook or beats:',
-    '1. Read every example title and notice what they share (not the facts — those are samples only).',
-    '2. Invent **one** new `title` for **TOPIC FOR THIS VIDEO** that could sit beside the examples in a feed — same spirit, fresh wording for this topic only.',
-    '3. Aim for the same strength and specificity as the examples; avoid bland SEO filler.',
+    '1. Read every example title. Note shared format: length band, punctuation, question vs statement, proper nouns vs generic words, curiosity level — not the historical facts (those are samples only).',
+    '2. Write **one** new `title` for **TOPIC FOR THIS VIDEO** that is the **next line in the same numbered list** as those examples — same format and content register, new words only.',
+    '3. If your `title` could be mistaken for a different channel or a TV episode title, start over until it matches the example list.',
   ];
   if (guidance) {
     lines.push('', 'OPERATOR — WHAT THEY WANT IN A TITLE (follow unless it conflicts with examples):', guidance);
@@ -219,9 +208,9 @@ export function buildTitleFirstWorkflowPrompt(
     );
   }
   lines.push(
-    '5. Only after you have that `title` in mind, write hook + beats so they **deliver what the title promises**.',
+    '5. Only after that `title` matches the example list in format and register, write hook + beats so they **deliver what the title promises**.',
     '',
-    'Avoid a generic `title` that ignores the example list — the examples are the north star for headline style.',
+    'Invalid: a `title` that follows THEME/marketing habits instead of the example-title list. Valid: indistinguishable in *species* from the examples, new wording for this topic only.',
   );
   lines.push(formatExampleTitlePatternDigest(examples));
   if (recent.length > 0) {
@@ -234,20 +223,19 @@ export function buildTitleFirstWorkflowPrompt(
   return lines.join('\n');
 }
 
-/** Example titles + script lines + optional full scripts for style (never verbatim copy). */
+/** Example titles + optional full scripts for style (never verbatim copy). */
 export function buildStyleExamplesPrompt(styleBible?: PersonalAccountStyleBible): string {
   if (!styleBible) return '';
   const titles = styleBible.exampleVideoTitles?.filter(Boolean) ?? [];
-  const snippets = styleBible.exampleScriptSnippets?.filter(Boolean) ?? [];
   const fullScripts = styleBible.referenceFullScripts?.filter(Boolean) ?? [];
   const titleGuide = styleBible.videoTitleGuidance?.trim();
-  if (!titles.length && !snippets.length && !fullScripts.length && !titleGuide) return '';
+  if (!titles.length && !fullScripts.length && !titleGuide) return '';
   const lines: string[] = [
     '',
     'STYLE REFERENCES (required: shape your video title, hook, beats, and caption to match this energy — do not ignore):',
     '',
     titles.length
-      ? 'When example video titles appear below, the JSON `title` field is **as binding as** the anti-slop rules: it must visibly belong in the same series as those examples.'
+      ? 'When example video titles appear below, the JSON `title` is **strictly** bound to them: **same format and same content register** (how direct, how curious, how “documentary” vs punchy) as those lines — not merely “inspired by”. Theme/tagline voice does not override this for the title string.'
       : titleGuide
         ? 'The operator added **title preferences** below — use them for the JSON `title` when you have no example titles on file.'
         : 'Use the references below to match voice and structure.',
@@ -262,10 +250,10 @@ export function buildStyleExamplesPrompt(styleBible?: PersonalAccountStyleBible)
     for (const t of titles.slice(0, 20)) lines.push(`  • "${t}"`);
     lines.push(
       '',
-      'TITLE PATTERN (when examples exist):',
-      '- Your JSON `title` for THIS topic should feel like the **next video in the same playlist** as the examples above.',
-      '- Mirror how they use length, punctuation (including `:` or `?` if that is how the samples read), caps, and specificity — by imitation, not by rules from the system.',
-      '- Prefer punchy, specific lines over generic SEO if that is what the samples show.',
+      'TITLE PATTERN (when examples exist — mandatory):',
+      '- The JSON `title` must read as the **next line in the same list** as the examples: same headline **format** (length band, punctuation habits including `:` only if samples use it, `?` vs statement) and same **register** (tone/density of names and numbers).',
+      '- Do **not** import title shapes from THEME, generic Shorts tropes, or prestige-TV naming unless the examples already look that way.',
+      '- New facts and nouns only for this topic — never reuse or lightly edit an example line.',
     );
   }
   if (titleGuide) {
@@ -276,10 +264,6 @@ export function buildStyleExamplesPrompt(styleBible?: PersonalAccountStyleBible)
         : 'OPERATOR — TITLE PREFERENCES (no example titles on file — use for the JSON `title`):',
       titleGuide,
     );
-  }
-  if (snippets.length) {
-    lines.push('', 'Example short lines / hook cadence (do not reuse wording):');
-    for (const s of snippets.slice(0, 20)) lines.push(`  • ${s}`);
   }
   if (fullScripts.length) {
     lines.push(
@@ -301,42 +285,31 @@ export function buildStyleExamplesPrompt(styleBible?: PersonalAccountStyleBible)
   lines.push(
     '',
     'FOLLOW-THROUGH (mandatory): The JSON `title`, `hook`, every shot `voiceover` / `onScreen`, and `caption` must read like the **same creator** as the style bible + references.',
-    '- **Title:** If example titles exist, the new `title` must mirror their **visible pattern** (not paraphrase an old title — invent a new one for THIS topic that would sit beside them in a feed). If only operator title preferences exist, follow those for `title`.',
-    '- **Script / storyboard:** If reference full scripts exist, match **how** they build curiosity, land facts, and pace lines — without reusing phrases. If only snippets exist, match hook line energy the same way.',
+    '- **Title:** If example titles exist, the new `title` must match their **format and register** strictly (same species of headline; new words for this topic only). Theme narration style does not change that rule. If only operator title preferences exist, follow those for `title`.',
+    '- **Script / storyboard:** If reference full scripts exist, match **how** they build curiosity, land facts, and pace lines — without reusing phrases.',
     '- Do not output generic hooks or titles when the references show punchy, specific, or numbered patterns.',
   );
   return lines.join('\n');
 }
 
 /**
- * Short clause for per-shot image/video prompts so Flux/Kling/etc. see brand
- * motifs + copy rhythm (not only the storyboard planner).
+ * Short clause for per-shot image/video prompts so Flux/Kling/etc. see brand hints
+ * (never paste example titles as literal on-image text — image models render quoted strings).
  */
 export function buildVisualBrandHintsForShots(styleBible?: PersonalAccountStyleBible): string | undefined {
   if (!styleBible) return undefined;
-  const parts: string[] = [];
-  const titles = styleBible.exampleVideoTitles?.filter(Boolean).slice(0, 6) ?? [];
-  if (titles.length) {
-    parts.push(`Title energy (do not paint these words on the image): ${titles.map((t) => `"${t}"`).join(', ')}`);
-  }
-  const samples = styleBible.copySamples?.filter(Boolean).slice(0, 4) ?? [];
-  if (samples.length) {
+  const parts: string[] = [
+    'Do not render channel titles, JSON titles, example video headlines, hook samples, or script snippets as typography in the image — diffusion models often literalize quoted strings from briefs. Convey the brand only through palette, composition, lighting, and subject matter.',
+  ];
+  if (styleBible.typography?.trim()) {
     parts.push(
-      `Copy rhythm for this brand: ${samples.map((s) => s.replace(/\s+/g, ' ').trim().slice(0, 100)).join(' · ')}`,
+      `Overall type hierarchy / label feel (never spell sample titles): ${styleBible.typography.trim()}`,
     );
   }
-  const hookSnippets = styleBible.exampleScriptSnippets?.filter(Boolean).slice(0, 4) ?? [];
-  if (hookSnippets.length) {
-    parts.push(
-      `Hook line cadence (do not render as on-image text): ${hookSnippets.map((s) => s.replace(/\s+/g, ' ').trim().slice(0, 90)).join(' · ')}`,
-    );
-  }
-  const motifs = styleBible.motifs?.filter(Boolean).slice(0, 6) ?? [];
-  if (motifs.length) parts.push(`Visual motifs: ${motifs.join('; ')}`);
-  if (styleBible.typography?.trim()) parts.push(`On-image text feel: ${styleBible.typography.trim()}`);
   const dos = styleBible.dos?.filter(Boolean).slice(0, 6) ?? [];
-  if (dos.length) parts.push(`Always: ${dos.join('; ')}`);
-  if (!parts.length) return undefined;
+  if (dos.length) {
+    parts.push(`Always: ${dos.join('; ')}`);
+  }
   return parts.join(' ');
 }
 
@@ -371,11 +344,81 @@ export function buildMediaPreferencePrompt(
   ].join('\n');
 }
 
-/** Hint average on-screen seconds per shot / beat. */
+/** Hint average on-screen seconds per shot / beat — tight band so dashboard “Avg clip” is respected. */
 export function buildAverageShotPrompt(seconds?: number): string {
   if (seconds == null || !Number.isFinite(seconds)) return '';
-  const s = Math.min(10, Math.max(2, seconds));
-  return `\n\nSHOT PACING (account): Aim for about ${s} seconds per shot on average (±1s). Adjust how many shots you place per beat so total runtime still matches the target duration.`;
+  const s = Math.min(12, Math.max(1.5, seconds));
+  return `\n\nSHOT PACING (account): Target **~${s.toFixed(2)}s** per shot on average — keep most \`durationSeconds\` in **${(s * 0.85).toFixed(1)}–${(s * 1.15).toFixed(1)}s** unless that shot's VO clearly needs more air. **Vary** lengths; never paste one duration on every shot. Split into more shots when narration is dense — do not stretch one visual to carry unrelated lines.`;
+}
+
+/**
+ * Minimum / maximum shot counts for short-form director prompts from target runtime
+ * and average clip preference (keeps image count in line with VO length).
+ */
+export function directorShotCountRange(args: {
+  targetDurationSeconds: number;
+  averageShotSeconds?: number;
+  cutPace?: 'relaxed' | 'normal' | 'rapid';
+}): { min: number; max: number } {
+  const tgt = Math.max(15, args.targetDurationSeconds);
+  const ac =
+    args.averageShotSeconds != null &&
+    Number.isFinite(args.averageShotSeconds) &&
+    args.averageShotSeconds > 0
+      ? Math.min(10, Math.max(1.6, args.averageShotSeconds))
+      : 3;
+  const pace = args.cutPace ?? 'normal';
+  const spanLo = pace === 'rapid' ? ac * 0.82 : pace === 'relaxed' ? ac * 1.12 : ac * 0.92;
+  const spanHi = pace === 'rapid' ? ac * 1.2 : pace === 'relaxed' ? ac * 1.55 : ac * 1.42;
+  /** When avg clip is low, require more shots so VO does not balloon each beat past the pacing hint. */
+  const minFromTightPace =
+    ac <= 2
+      ? Math.ceil(tgt / (ac * 0.9))
+      : ac <= 2.75
+        ? Math.ceil(tgt / (ac * 1.0))
+        : 0;
+  const min = Math.max(
+    pace === 'rapid' ? 7 : pace === 'relaxed' ? 4 : 5,
+    Math.ceil(tgt / spanHi),
+    minFromTightPace,
+    /** Slightly more cuts than spanHi alone so VO rarely outruns planned stills. */
+    Math.ceil(tgt / (ac * 1.28)),
+  );
+  const max = Math.min(
+    52,
+    Math.max(min + 2, Math.floor(tgt / spanLo)),
+  );
+  return { min, max: Math.max(min, max) };
+}
+
+/** Ask the model for enough distinct shots/beats for the target runtime (still images vs VO timing are aligned in post). */
+export function buildMinShotsForRuntimePrompt(
+  targetDurationSeconds?: number,
+  averageClipSeconds?: number,
+  opts?: { longform?: boolean; cutPace?: 'relaxed' | 'normal' | 'rapid' },
+): string {
+  if (targetDurationSeconds == null || !Number.isFinite(targetDurationSeconds)) return '';
+  if (opts?.longform) {
+    const tgt = Math.max(5, targetDurationSeconds);
+    const ac =
+      averageClipSeconds != null && Number.isFinite(averageClipSeconds)
+        ? Math.min(10, Math.max(1.8, averageClipSeconds))
+        : 5.5;
+    const minShots = Math.max(3, Math.ceil(tgt / (ac * 0.92)));
+    const softCap = 72;
+    const capHint =
+      minShots > softCap
+        ? ` If that implies more than ~${softCap} shots, use slightly longer beats instead of micro-cuts, but never fewer than ~${Math.ceil(tgt / (ac * 1.35))} shots for this runtime.`
+        : '';
+    return `\n\nSHOT COUNT (runtime): Target ~${Math.round(tgt)}s total. Plan at least **${minShots}** shots/beats at roughly ${ac.toFixed(1)}s average on-screen each so the edit can match narration without holding one image too long.${capHint}`;
+  }
+  const { min } = directorShotCountRange({
+    targetDurationSeconds: targetDurationSeconds,
+    averageShotSeconds: averageClipSeconds,
+    cutPace: opts?.cutPace ?? 'normal',
+  });
+  const tgt = Math.max(5, targetDurationSeconds);
+  return `\n\nSHOT COUNT (runtime): Target ~${Math.round(tgt)}s total. Plan at least **${min}** distinct shots (more is fine up to the director max) so each VO line can get its own visual — the pipeline measures real speech and will not keep every clip identical in length. Avoid one still carrying multiple unrelated lines; the last shot must not absorb the entire outro unless the script there is a single short line.`;
 }
 
 /** Legacy script path — short line for generateScript prompt. */

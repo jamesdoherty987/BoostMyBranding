@@ -97,7 +97,7 @@ function ReviewsGrid({
             )}
           </div>
           <blockquote className="mt-4 text-base text-slate-800">
-            <span aria-hidden>&ldquo;</span>
+            <span aria-hidden>“</span>
             <InlineEditable
               path={`reviews.${i}.text`}
               value={r.text}
@@ -105,7 +105,7 @@ function ReviewsGrid({
               multiline
               placeholder="Review text…"
             />
-            <span aria-hidden>&rdquo;</span>
+            <span aria-hidden>”</span>
           </blockquote>
           <figcaption className="mt-4 text-sm font-semibold text-slate-500">
             <span aria-hidden>&mdash; </span>

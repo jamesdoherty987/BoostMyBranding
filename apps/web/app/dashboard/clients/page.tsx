@@ -508,7 +508,7 @@ function CreateClientModal({
                     Email the invite to {form.email}
                   </p>
                   <p className="mt-0.5 text-[11px] text-slate-500">
-                    They&apos;ll get a friendly email with a one-click setup link.
+                    They'll get a friendly email with a one-click setup link.
                   </p>
                 </div>
               </button>
@@ -524,7 +524,7 @@ function CreateClientModal({
                       Or copy the invite link
                     </p>
                     <p className="mt-0.5 text-[11px] text-slate-500">
-                      Send it via WhatsApp, text, or wherever they&apos;ll see it.
+                      Send it via WhatsApp, text, or wherever they'll see it.
                     </p>
                   </div>
                 </div>
@@ -559,7 +559,7 @@ function CreateClientModal({
                 ) : (
                   <div className="mt-3 flex items-center gap-2">
                     <p className="flex-1 text-[11px] text-slate-500">
-                      Link couldn&apos;t be generated automatically.
+                      Link couldn't be generated automatically.
                     </p>
                     <Button
                       type="button"
@@ -588,7 +588,7 @@ function CreateClientModal({
                 onClick={onClose}
                 className="text-xs text-slate-500 hover:text-slate-700"
               >
-                Skip — I&apos;ll invite them later
+                Skip — I'll invite them later
               </button>
               <Button
                 onClick={() => createdClientId && onCreated(createdClientId)}

@@ -454,7 +454,7 @@ export default function ReviewQueuePage() {
                     />
                     <Button size="sm" className="w-full" onClick={() => decide('edit', editedCaption)}>
                       <Check className="h-3.5 w-3.5" />
-                      Save edit &amp; approve
+                      Save edit & approve
                     </Button>
                   </div>
                 ) : (

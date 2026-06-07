@@ -22,7 +22,7 @@ export default function PrivacyPage() {
           <section>
             <h2 className="text-lg font-semibold text-slate-900">1. Who we are</h2>
             <p className="mt-2">
-              BoostMyBranding (&quot;we&quot;, &quot;us&quot;, &quot;our&quot;) provides social
+              BoostMyBranding ("we", "us", "our") provides social
               media management and website services for local businesses. This policy explains
               how we collect, use, and protect your personal information when you use our
               website, client portal, or services.

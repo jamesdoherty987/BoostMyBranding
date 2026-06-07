@@ -235,7 +235,7 @@ export const SkeletonOne = () => {
         >
           <p className="bg-transparent text-[8px]">git add .</p>
           <p className="bg-transparent text-[8px]">
-            git commit -m &quot;update&quot;
+            git commit -m "update"
           </p>
           <p className="bg-transparent text-[8px]">git push</p>
         </Container>

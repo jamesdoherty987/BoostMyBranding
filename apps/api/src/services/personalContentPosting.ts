@@ -14,11 +14,11 @@ export function hasResolvableContentStudioWorkspace(account: PersonalAccountRow)
 
 /**
  * True when we should call ContentStudio after a successful render.
- * - `scheduleToContentStudio` on the generate request: one-off "generate & post"
- *   (still requires API key + a workspace id on env or this account).
- * - Otherwise: auto-schedule is on AND (auto-approve OR a pinned ContentStudio
- *   account id). Requiring approve alone blocked posting for users who had
- *   linked a social account but left auto-approve off.
+ * - `scheduleToContentStudio` on the generate request: one-off "Generate & schedule post"
+ *   (still requires API key + a resolvable workspace).
+ * - Otherwise: `account.autoSchedule` must be true (Posting tab: "Send to Content Studio"),
+ *   then (auto-approve OR a pinned ContentStudio account id) so linked social
+ *   accounts can post even when review stays on.
  */
 export function shouldSchedulePersonalToContentStudio(
   args: {

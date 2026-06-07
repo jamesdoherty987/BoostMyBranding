@@ -24,7 +24,7 @@ export default function PortalError({
           <AlertTriangle className="h-6 w-6" />
         </div>
         <h1 className="mt-4 text-lg font-semibold text-slate-900">Something went wrong.</h1>
-        <p className="mt-1 text-sm text-slate-600">We couldn&apos;t load this screen.</p>
+        <p className="mt-1 text-sm text-slate-600">We couldn't load this screen.</p>
         <div className="mt-5 flex flex-col gap-2">
           <Button onClick={reset}>
             <RotateCcw className="h-4 w-4" />

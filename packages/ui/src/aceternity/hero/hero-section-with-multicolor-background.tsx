@@ -20,7 +20,7 @@ export function HeroSectionWithMultiColorBackground() {
           href="#"
           className="flex w-fit items-center gap-2 rounded-full bg-white px-2 py-1 text-sm text-neutral-700 shadow-sm ring-1 shadow-black/10 ring-black/10 active:scale-98 dark:bg-neutral-800 dark:text-neutral-300 dark:ring-white/10"
         >
-          We&apos;ve raised $69M seed funding <Arrow className="size-4" />
+          We've raised $69M seed funding <Arrow className="size-4" />
         </a>
         <h1 className="mt-4 max-w-3xl text-4xl font-medium tracking-tight text-neutral-700 md:text-7xl dark:text-neutral-300">
           Get warm leads for your business in minutes.
@@ -202,7 +202,7 @@ const Navbar = () => {
                   <div className="flex h-full flex-col justify-between">
                     <div>
                       <h3 className="text-sm font-semibold text-white">
-                        What&apos;s new
+                        What's new
                       </h3>
                       <p className="mt-1 text-xs text-neutral-400">
                         Check out our latest features and improvements.

@@ -134,6 +134,13 @@
       "when": 1777640094393,
       "tag": "0018_personal_accounts_contentstudio_account_id",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1777640094394,
+      "tag": "0019_personal_accounts_auto_schedule_default",
+      "breakpoints": true
     }
   ]
 }

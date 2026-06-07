@@ -7,14 +7,12 @@
  * on an account. Users pick:
  *
  *   1. Target duration (60–480 seconds).
- *   2. Animation style preset (cartoon / stick-figure / storybook / …).
- *   3. Max AI-video shots (the remainder become cheaper AI stills with
+ *   2. Max AI-video shots (the remainder become cheaper AI stills with
  *      Ken Burns — keeps the cost of an 8-minute video manageable).
  *
- * Reference / inspiration images are attached through the existing Media
- * Library tab — the pipeline already feeds anything tagged as
- * `style_reference`, `inspiration`, or `avatar_reference` to every AI
- * shot, so no extra plumbing here.
+ * **Visual style** comes only from Media library items tagged **Inspiration**
+ * or **Style reference** (required for long-form). There is no separate
+ * “animation style” preset — those references drive every AI shot.
  */
 
 import { useMemo, useState } from 'react';
@@ -35,58 +33,6 @@ import type {
   PersonalThemeSummary,
 } from '@boost/api-client';
 import { api } from '@/lib/dashboard/api';
-
-type AnimationStyle = NonNullable<PersonalGeneratorConfig['longformAnimationStyle']>;
-
-const ANIMATION_STYLES: Array<{
-  id: AnimationStyle;
-  label: string;
-  description: string;
-  emoji: string;
-}> = [
-  {
-    id: 'storybook',
-    label: 'Storybook',
-    description: 'Painterly, Ghibli-meets-Grimm hand-painted feel.',
-    emoji: '📖',
-  },
-  {
-    id: 'cartoon',
-    label: 'Flat 2D cartoon',
-    description: 'Kurzgesagt-style vectors with bold outlines.',
-    emoji: '🎨',
-  },
-  {
-    id: 'stick_figure',
-    label: 'Stick figure',
-    description: 'Whiteboard / napkin sketches with one accent colour.',
-    emoji: '✏️',
-  },
-  {
-    id: 'claymation',
-    label: 'Claymation',
-    description: 'Stop-motion clay — Aardman / Wallace & Gromit vibe.',
-    emoji: '🧱',
-  },
-  {
-    id: 'pixel_art',
-    label: 'Pixel art',
-    description: 'Retro 16-bit scenes, chunky pixels, dithering.',
-    emoji: '👾',
-  },
-  {
-    id: 'watercolour',
-    label: 'Watercolour',
-    description: 'Soft painted illustration, children’s book feel.',
-    emoji: '🎨',
-  },
-  {
-    id: 'custom',
-    label: 'Custom',
-    description: 'No preset — follow theme visuals + inspiration refs only.',
-    emoji: '✨',
-  },
-];
 
 const DURATION_PRESETS: Array<{ seconds: number; label: string }> = [
   { seconds: 60, label: '1 min' },
@@ -109,11 +55,14 @@ export function LongformPanel({
   account: PersonalAccount;
   theme: PersonalThemeSummary | undefined;
   onChanged: () => void;
-  onPostsChanged?: () => void;
+  onPostsChanged?: () => void | Promise<void>;
   onSwitchTab?: (tab: 'media' | 'characters' | 'config') => void;
 }) {
   const { data: characters } = useSWR('personal:characters', () =>
     api.listCharacters(),
+  );
+  const { data: mediaList } = useSWR(['personal:media-longform', account.id], () =>
+    api.listPersonalMedia(account.id, {}),
   );
 
   const genConfig = account.generatorConfig ?? {};
@@ -125,9 +74,6 @@ export function LongformPanel({
   );
   const [targetSeconds, setTargetSeconds] = useState<number>(
     clamp(genConfig.longformTargetSeconds ?? theme?.targetDurationSeconds ?? 240, 60, 480),
-  );
-  const [style, setStyle] = useState<AnimationStyle>(
-    genConfig.longformAnimationStyle ?? defaultStyleFor(theme?.id),
   );
   const [maxAiVideo, setMaxAiVideo] = useState<number>(
     genConfig.longformMaxAiVideoShots ?? defaultAiVideoShots(genConfig.qualityTier),
@@ -172,9 +118,15 @@ export function LongformPanel({
     };
   }, [targetSeconds, maxAiVideo]);
 
-  const exampleTitleCount = (account.styleBible?.exampleVideoTitles ?? []).filter((t) =>
-    String(t).trim(),
+  const exampleTitleCount = (account.styleBible?.exampleVideoTitles ?? []).filter(
+    (t) => String(t).trim().length > 0,
   ).length;
+
+  const inspirationRefCount = useMemo(() => {
+    return (mediaList ?? []).filter(
+      (m) => m.role === 'inspiration' || m.role === 'style_reference',
+    ).length;
+  }, [mediaList]);
 
   const characterRefCount = useCharacterRefCount(
     characters ?? [],
@@ -189,7 +141,8 @@ export function LongformPanel({
     return {
       longformEnabled: enabled,
       longformTargetSeconds: targetSeconds,
-      longformAnimationStyle: style,
+      /** Server long-form path always uses `custom` — look from inspiration / style_reference only. */
+      longformAnimationStyle: 'custom',
       longformMaxAiVideoShots: maxAiVideo,
     };
   }
@@ -210,19 +163,41 @@ export function LongformPanel({
   }
 
   async function generate() {
-    // Make sure the on-disk settings reflect what's on screen — otherwise
-    // the pipeline reads the previous generator_config and produces a
-    // video with the wrong duration/style.
     setBusy(true);
     try {
+      const fresh = await api.getPersonalAccount(account.id);
+      const exampleCt = (fresh.styleBible?.exampleVideoTitles ?? []).filter(
+        (t) => String(t).trim().length > 0,
+      ).length;
+      if ((fresh.formatKind ?? 'video') === 'video' && exampleCt < 1) {
+        toast.error(
+          'Example video titles required',
+          'Add at least one under Style & config (and save) before generating — same rule as the API.',
+        );
+        return;
+      }
+      const media = await api.listPersonalMedia(account.id, {});
+      const inspCount = media.filter(
+        (m) => m.role === 'inspiration' || m.role === 'style_reference',
+      ).length;
+      if (inspCount < 1) {
+        toast.error(
+          'Inspiration or style reference required',
+          'Long-form uses your Media library for the look. Upload at least one image (or video still) with role Inspiration or Style reference, then try again.',
+        );
+        return;
+      }
+      // Make sure the on-disk settings reflect what's on screen — otherwise
+      // the pipeline reads the previous generator_config and produces a
+      // video with the wrong duration/style.
       await api.updatePersonalAccount(account.id, {
         generatorConfig: longformGeneratorPatch(),
       });
       onChanged();
       await api.generatePersonalPost(account.id, {});
-      onPostsChanged?.();
-      setTimeout(() => onPostsChanged?.(), 2000);
-      setTimeout(() => onPostsChanged?.(), 8000);
+      await Promise.resolve(onPostsChanged?.());
+      setTimeout(() => void Promise.resolve(onPostsChanged?.()), 2000);
+      setTimeout(() => void Promise.resolve(onPostsChanged?.()), 8000);
       toast.success(
         'Long-form generation started',
         `This takes ~${estimate.renderMinutes} min. Open Overview to watch progress — your ${formatMinutes(targetSeconds)} video will appear in Recent posts.`,
@@ -248,10 +223,9 @@ export function LongformPanel({
                 Long-form animated video
               </h3>
               <p className="mt-0.5 text-xs text-slate-500">
-                Chapter-structured, 1&ndash;8 minute animated narrations. The
-                director plans 4&ndash;10 chapters with 3&ndash;5 shots each,
-                generates every frame in a consistent animated style, and
-                stitches them with voiceover.
+                Chapter-structured, 1&ndash;8 minute narrations. The director matches the{' '}
+                <strong>visual look of your inspiration and style-reference media</strong> on
+                every AI frame — upload those under Media before generating.
               </p>
             </div>
             <label className="flex shrink-0 cursor-pointer items-center gap-2">
@@ -298,10 +272,9 @@ export function LongformPanel({
               </div>
               {exampleTitleCount === 0 ? (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                  <strong>No example video titles saved.</strong> Long-form still runs, but the
-                  headline will not be pattern-matched to your channel. Add examples under{' '}
-                  <strong>Style &amp; config → Example video titles</strong> and click{' '}
-                  <strong>Save configuration</strong> before generating.
+                  <strong>No example video titles saved.</strong> Add examples under{' '}
+                  <strong>Style & config → Example video titles</strong> and click{' '}
+                  <strong>Save configuration</strong> before generating (required for video).
                   {onSwitchTab ? (
                     <>
                       {' '}
@@ -310,7 +283,7 @@ export function LongformPanel({
                         onClick={() => onSwitchTab('config')}
                         className="font-semibold text-violet-800 underline-offset-2 hover:underline"
                       >
-                        Open Style &amp; config →
+                        Open Style & config →
                       </button>
                     </>
                   ) : null}
@@ -327,12 +300,48 @@ export function LongformPanel({
                       onClick={() => onSwitchTab('config')}
                       className="font-semibold text-violet-700 underline-offset-2 hover:underline"
                     >
-                      Style &amp; config
+                      Style & config
                     </button>
                   ) : (
                     'Style & config'
                   )}
                   .
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="p-6">
+              <div className="mb-2 flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-fuchsia-500" />
+                <h4 className="text-sm font-bold text-slate-900">Visual references (required)</h4>
+              </div>
+              {inspirationRefCount === 0 ? (
+                <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-900">
+                  <strong>No inspiration or style-reference media.</strong> Long-form needs at least
+                  one library item with role <strong>Inspiration</strong> or{' '}
+                  <strong>Style reference</strong> so every shot matches your channel's art
+                  direction. The API will reject generation without them.
+                  {onSwitchTab ? (
+                    <>
+                      {' '}
+                      <button
+                        type="button"
+                        onClick={() => onSwitchTab('media')}
+                        className="font-semibold text-rose-800 underline-offset-2 hover:underline"
+                      >
+                        Open Media →
+                      </button>
+                    </>
+                  ) : null}
+                </div>
+              ) : (
+                <p className="text-xs text-slate-600">
+                  <strong>{inspirationRefCount}</strong> inspiration / style-reference
+                  {inspirationRefCount === 1 ? ' item' : ' items'} — the director and image models use
+                  these for colour, line weight, and composition. There is no separate "animation
+                  style" preset.
                 </p>
               )}
             </CardContent>
@@ -381,43 +390,6 @@ export function LongformPanel({
             </CardContent>
           </Card>
 
-          {/* ── Animation style ─────────────────────────────── */}
-          <Card>
-            <CardContent className="p-6">
-              <h4 className="mb-1 text-sm font-bold text-slate-900">
-                Animation style
-              </h4>
-              <p className="mb-4 text-xs text-slate-500">
-                The visual language used across every shot. Every AI image
-                and video will be generated in this medium so the whole
-                video feels like one animated piece.
-              </p>
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {ANIMATION_STYLES.map((s) => (
-                  <button
-                    key={s.id}
-                    onClick={() => setStyle(s.id)}
-                    className={`rounded-xl border p-3 text-left transition ${
-                      style === s.id
-                        ? 'border-violet-500 bg-violet-50'
-                        : 'border-slate-200 bg-white hover:bg-slate-50'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="text-lg">{s.emoji}</span>
-                      <span className="text-sm font-semibold text-slate-900">
-                        {s.label}
-                      </span>
-                    </div>
-                    <p className="mt-1 text-[11px] text-slate-500">
-                      {s.description}
-                    </p>
-                  </button>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-
           {/* ── AI video cap ────────────────────────────────── */}
           <Card>
             <CardContent className="p-6">
@@ -430,10 +402,10 @@ export function LongformPanel({
                 </span>
               </div>
               <p className="mb-3 text-xs text-slate-500">
-                AI-video clips are richer but ~10× more expensive than AI
-                stills. The rest of the shots become stills with animated
-                Ken Burns moves — they still read as your chosen style
-                because of the art direction.
+                AI-video clips are richer but ~10× more expensive than AI stills. The rest become
+                stills with Ken Burns — they still follow your{' '}
+                <strong>inspiration / style-reference</strong> look because those refs are baked
+                into every prompt.
               </p>
               <input
                 type="range"
@@ -462,10 +434,8 @@ export function LongformPanel({
                 Upload drawings of your hero under{' '}
                 <strong>Media → role: inspiration</strong> or{' '}
                 <strong>avatar reference</strong>, or attach a{' '}
-                <strong>character</strong> in the Style tab. The director
-                passes those images into every AI generation so your
-                character stays the same across all {estimate.totalShots}+
-                shots.
+                <strong>character</strong> in the Style tab. Those assets are passed into AI
+                generations alongside your <strong>style-reference</strong> stills.
               </p>
               <div className="flex flex-wrap items-center gap-2 text-xs">
                 <Badge tone={account.characterId ? 'success' : 'warning'}>
@@ -540,9 +510,17 @@ export function LongformPanel({
         {enabled ? (
           <Button
             variant="secondary"
-            onClick={generate}
-            disabled={busy || account.status === 'archived'}
-            title={account.status === 'archived' ? 'Archived channels cannot generate new videos.' : undefined}
+            onClick={() => void generate()}
+            disabled={busy || account.status === 'archived' || inspirationRefCount < 1}
+            title={
+              account.status === 'archived'
+                ? 'Archived channels cannot generate new videos.'
+                : inspirationRefCount < 1
+                  ? 'Add at least one Media item with role Inspiration or Style reference.'
+                  : exampleTitleCount < 1
+                    ? 'Add example video titles under Style & config (and save). You can still try once they exist on the server.'
+                    : undefined
+            }
           >
             <Sparkles className="h-4 w-4" />
             Generate {formatMinutes(targetSeconds)} video now
@@ -579,15 +557,6 @@ function formatMinutes(seconds: number): string {
   if (m === 0) return `${s}s`;
   if (s === 0) return `${m} min`;
   return `${m}:${String(s).padStart(2, '0')}`;
-}
-
-function defaultStyleFor(themeId: string | undefined): AnimationStyle {
-  if (themeId === 'ancient-origins' || themeId === 'storybook-myth') {
-    return 'storybook';
-  }
-  if (themeId === 'science-cartoon') return 'cartoon';
-  if (themeId === 'stick-figure-explainer') return 'stick_figure';
-  return 'cartoon';
 }
 
 function defaultAiVideoShots(tier: PersonalGeneratorConfig['qualityTier']): number {

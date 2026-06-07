@@ -13,6 +13,7 @@
  *   DELETE /api/v1/personal/accounts/:id
  *   POST   /api/v1/personal/accounts/:id/generate
  *   POST   /api/v1/personal/accounts/:id/posts/:postId/cancel
+ *   POST   /api/v1/personal/accounts/:id/posts/:postId/regenerate-thumbnail
  *   GET    /api/v1/personal/accounts/:id/posts
  *   DELETE /api/v1/personal/accounts/:id/posts/failed
  *   GET    /api/v1/personal/features
@@ -42,8 +43,13 @@ import {
   deleteFailedPosts,
   listPosts,
   cancelPersonalPostGeneration,
+  createReservedQueuedPersonalPost,
+  markPersonalPostQueuedFailedIfStillQueued,
+  regeneratePersonalPostThumbnail,
 } from '../services/personalAccounts.js';
+import type { PersonalAccountStyleBible } from '@boost/database';
 import { generateForAccount } from '../services/personalPipeline.js';
+import { assertPersonalVideoExampleTitlesOrThrow, isExampleTitlesRequiredError } from '../services/personalTitlePolicy.js';
 import { enqueuePersonalGenerateForAccount } from '../services/personalGenerateQueue.js';
 import { scraperFeatures } from '../services/personalScraper.js';
 import { voiceFeatures } from '../services/personalVoice.js';
@@ -236,6 +242,7 @@ personalRouter.get('/features', requireAuth, (_req, res) => {
       claude: features.claude,
       contentStudio: features.contentStudio,
       contentStudioDefaultWorkspace: features.contentStudioDefaultWorkspace,
+      contentStudioAppUrl: features.contentStudioAppUrl,
       fal: features.fal,
       scrapers: {
         pexels: scraperFeatures.pexels,
@@ -317,13 +324,9 @@ const createAccountBodySchema = z.object({
       donts: z.array(z.string().max(200)).max(40).optional(),
       palette: z.array(z.string().max(20)).max(12).optional(),
       typography: z.string().max(500).optional(),
-      motifs: z.array(z.string().max(200)).max(20).optional(),
-      copySamples: z.array(z.string().max(1000)).max(20).optional(),
       exampleVideoTitles: z.array(z.string().max(200)).max(25).optional(),
       videoTitleGuidance: z.string().max(1500).optional(),
-      exampleScriptSnippets: z.array(z.string().max(2000)).max(40).optional(),
       referenceFullScripts: z.array(z.string().max(25000)).max(5).optional(),
-      bannedPhrases: z.array(z.string().max(200)).max(60).optional(),
     })
     .passthrough()
     .optional(),
@@ -346,7 +349,7 @@ const createAccountBodySchema = z.object({
       aspectRatio: z.enum(['9:16', '1:1', '16:9', '4:5']).optional(),
       clipMinSeconds: z.number().min(1).max(20).optional(),
       clipMaxSeconds: z.number().min(1).max(30).optional(),
-      averageClipSeconds: z.number().min(1.5).max(12).optional(),
+      averageClipSeconds: z.number().min(1).max(12).optional(),
       mediaPreference: z
         .enum(['mixed', 'stills_only', 'motion_preferred', 'video_only'])
         .optional(),
@@ -357,6 +360,7 @@ const createAccountBodySchema = z.object({
       musicDuckUnderVoice: z.number().min(0.05).max(0.55).optional(),
       musicSoloVolume: z.number().min(0.1).max(0.85).optional(),
       musicBedVolume: z.number().min(0.05).max(0.5).optional(),
+      musicBackgroundLevel: z.number().int().min(1).max(10).optional(),
       trueStoriesOnly: z.boolean().optional(),
       extraContentRules: z.string().max(4000).optional(),
       minQualityScore: z.number().min(0).max(100).optional(),
@@ -386,7 +390,11 @@ const createAccountBodySchema = z.object({
         ])
         .optional(),
       longformMaxAiVideoShots: z.number().int().min(0).max(30).optional(),
+      longformIntroEnabled: z.boolean().optional(),
+      longformIntroSeconds: z.number().min(1.5).max(5).optional(),
       stitchEncodePreset: z.enum(['fast', 'balanced', 'high']).optional(),
+      /** Opening white slate with title, channel, topic, and scene stats (director stitch). */
+      namesNumbersTitleCard: z.boolean().optional(),
     })
     .passthrough()
     .optional(),
@@ -436,6 +444,9 @@ function normalizeGeneratorConfigPatch(gen: Record<string, unknown> | undefined)
   if (gen.longformEnabled === true && typeof gen.longformTargetSeconds === 'number') {
     const t = gen.longformTargetSeconds;
     gen.longformTargetSeconds = Math.min(480, Math.max(60, t));
+  }
+  if (typeof gen.longformIntroSeconds === 'number') {
+    gen.longformIntroSeconds = Math.min(5, Math.max(1.5, gen.longformIntroSeconds));
   }
 }
 
@@ -546,20 +557,53 @@ personalRouter.post('/accounts/:id/generate', requireAuth, async (req, res, next
         },
       });
     }
+    try {
+      assertPersonalVideoExampleTitlesOrThrow(
+        account.formatKind,
+        account.styleBible as PersonalAccountStyleBible | null,
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (isExampleTitlesRequiredError(msg)) {
+        return res.status(400).json({
+          error: {
+            code: 'EXAMPLE_TITLES_REQUIRED',
+            message: msg.replace(/^EXAMPLE_TITLES_REQUIRED:\s*/, ''),
+          },
+        });
+      }
+      throw e;
+    }
     const body = generateSchema.parse(req.body ?? {});
-    // Do not await the full pipeline — it can take minutes. Kick it off
-    // and return immediately so the UI can poll. Per-account queue keeps
-    // overlapping encodes from thrashing CPU (sequential for this account).
-    const promise = enqueuePersonalGenerateForAccount(account.id, () =>
-      generateForAccount({
+    let reservedPostId: string | undefined;
+    if (!body.dryRun) {
+      const reserved = await createReservedQueuedPersonalPost({
+        userId: user.id,
         accountId: account.id,
-        topic: body.topic,
-        autoSchedule: body.autoSchedule,
-        scheduleToContentStudio: body.scheduleToContentStudio,
-        scheduledAt: body.scheduledAt,
-        dryRun: body.dryRun,
-      }),
-    );
+      });
+      reservedPostId = reserved.id;
+    }
+    const promise = enqueuePersonalGenerateForAccount(account.id, async () => {
+      try {
+        return await generateForAccount({
+          accountId: account.id,
+          topic: body.topic,
+          autoSchedule: body.autoSchedule,
+          scheduleToContentStudio: body.scheduleToContentStudio,
+          scheduledAt: body.scheduledAt,
+          dryRun: body.dryRun,
+          reservedPostId,
+        });
+      } catch (e) {
+        if (reservedPostId) {
+          await markPersonalPostQueuedFailedIfStillQueued(
+            reservedPostId,
+            e instanceof Error ? e.message : String(e),
+          );
+        }
+        throw e;
+      }
+    });
     // Pre-wait a short bit so we can catch synchronous failures (like
     // "no theme") before returning — but don't block on the render.
     const race = await Promise.race([
@@ -569,7 +613,13 @@ personalRouter.post('/accounts/:id/generate', requireAuth, async (req, res, next
       ),
     ]);
     if (race && 'ok' in race && race.ok) {
-      res.json({ data: { ...race.result, kicked: true } });
+      res.json({
+        data: {
+          ...race.result,
+          kicked: true,
+          postId: race.result.postId || reservedPostId,
+        },
+      });
       return;
     }
     // Still running — swallow the rejection so we don't crash the
@@ -577,7 +627,7 @@ personalRouter.post('/accounts/:id/generate', requireAuth, async (req, res, next
     promise.catch((e) =>
       console.warn('[personal.generate] background failure:', (e as Error).message),
     );
-    res.json({ data: { kicked: true, pending: true } });
+    res.json({ data: { kicked: true, pending: true, postId: reservedPostId } });
   } catch (e) {
     next(e);
   }
@@ -605,6 +655,42 @@ personalRouter.post('/accounts/:id/posts/:postId/cancel', requireAuth, async (re
     next(e);
   }
 });
+
+personalRouter.post(
+  '/accounts/:id/posts/:postId/regenerate-thumbnail',
+  requireAuth,
+  async (req, res, next) => {
+    try {
+      const user = (req as any).user as { id: string };
+      const accountId = String(req.params.id);
+      const postId = String(req.params.postId);
+      const out = await regeneratePersonalPostThumbnail(user.id, accountId, postId);
+      if (!out.ok) {
+        if (out.error === 'not_found') {
+          return res.status(404).json({ error: { message: 'Not found', code: 'NOT_FOUND' } });
+        }
+        if (out.error === 'no_video') {
+          return res.status(400).json({
+            error: {
+              message: 'This post has no finished video URL yet — generate or wait until ready.',
+              code: 'NO_VIDEO',
+            },
+          });
+        }
+        return res.status(503).json({
+          error: {
+            message:
+              'Could not build a thumbnail (AI image, ffmpeg, or fonts). Check API logs, set PERSONAL_OVERLAY_FONT if needed, ensure ffmpeg is installed, then try again.',
+            code: 'THUMBNAIL_FAILED',
+          },
+        });
+      }
+      res.json({ data: { thumbnailUrl: out.thumbnailUrl } });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
 
 /* ─── Posts ─────────────────────────────────────────────────────── */
 

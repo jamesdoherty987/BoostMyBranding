@@ -22,7 +22,7 @@ export function TwoColumnWithImage() {
           Make your dashboard 10x more optimized.
         </h1>
         <p className="relative z-10 mt-2 max-w-3xl text-left text-neutral-600 md:mt-6 md:text-xl dark:text-neutral-400">
-          With our expert dashboard solutions, you&apos;ll have no trouble
+          With our expert dashboard solutions, you'll have no trouble
           tracking your leads, campaigns, and more.
         </p>
         <FeaturedImages

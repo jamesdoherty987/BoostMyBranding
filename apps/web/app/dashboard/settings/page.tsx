@@ -67,7 +67,7 @@ export default function SettingsPage() {
           <CardContent className="p-6">
             <h2 className="text-sm font-semibold text-slate-900">Integrations</h2>
             <p className="mt-1 text-xs text-slate-500">
-              This is not an OAuth &quot;Connect&quot; flow — restart the API after changing env vars. For ContentStudio posting, social accounts
+              This is not an OAuth "Connect" flow — restart the API after changing env vars. For ContentStudio posting, social accounts
               must still be linked inside the ContentStudio product; the API key only lets this app create schedules there.
             </p>
             <ul className="mt-4 space-y-3">

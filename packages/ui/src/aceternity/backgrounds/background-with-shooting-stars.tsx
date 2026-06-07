@@ -65,11 +65,11 @@ const Content = () => {
   return (
     <div className="relative z-10">
       <h1 className="mx-auto max-w-2xl text-center text-3xl font-bold text-balance text-black md:text-5xl dark:text-white">
-        Web apps that make you feel like you&apos;re in the future
+        Web apps that make you feel like you're in the future
       </h1>
       <p className="mx-auto mt-4 max-w-2xl text-center text-base text-balance text-neutral-800 dark:text-neutral-200">
         We are a team of developers who are passionate about creating web apps
-        that make you feel like you&apos;re in the future.
+        that make you feel like you're in the future.
       </p>
       <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
         <button className="w-40 rounded-lg bg-gradient-to-b from-neutral-950 to-neutral-800 px-4 py-2 text-sm text-white">

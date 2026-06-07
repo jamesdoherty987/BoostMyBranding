@@ -36,6 +36,7 @@ import {
   Textarea,
   Spinner,
   toast,
+  confirmDialog,
 } from '@boost/ui';
 import type { PersonalCharacter } from '@boost/api-client';
 import { api } from '@/lib/dashboard/api';
@@ -266,7 +267,16 @@ function CharacterDetail({
   }
 
   async function remove() {
-    if (!confirm(`Delete character "${character.name}"? This cannot be undone.`)) return;
+    if (
+      !(await confirmDialog({
+        title: `Delete “${character.name}”?`,
+        description: 'This permanently removes the character. This cannot be undone.',
+        confirmLabel: 'Delete character',
+        danger: true,
+      }))
+    ) {
+      return;
+    }
     setBusy(true);
     try {
       await api.deleteCharacter(character.id);

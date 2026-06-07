@@ -134,7 +134,7 @@ export function BlogWithSearchMagazine() {
             </h1>
             <p className="mt-3 text-base text-neutral-600 dark:text-neutral-400">
               Long-form notes on product, engineering, and design. Search the
-              archive or start with this week&apos;s cover story.
+              archive or start with this week's cover story.
             </p>
           </div>
         </header>

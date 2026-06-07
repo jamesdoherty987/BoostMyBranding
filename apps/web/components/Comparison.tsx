@@ -148,7 +148,7 @@ export function Comparison() {
                   <Star key={idx} className="h-3 w-3 fill-current md:h-3.5 md:w-3.5" />
                 ))}
               </div>
-              <p className="mt-2 text-xs text-slate-800 md:mt-3 md:text-sm">&ldquo;{q.text}&rdquo;</p>
+              <p className="mt-2 text-xs text-slate-800 md:mt-3 md:text-sm">“{q.text}”</p>
               <footer className="mt-2 text-[11px] md:mt-3 md:text-xs">
                 <span className="font-semibold text-slate-900">{q.name}</span>
                 <span className="text-slate-500"> · {q.role}</span>

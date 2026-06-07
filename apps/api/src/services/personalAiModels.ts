@@ -35,6 +35,7 @@ import { fal, ApiError, ValidationError } from '@fal-ai/client';
 import { env, features } from '../env.js';
 import { uploadFile } from './r2.js';
 import { withFalConcurrency } from './falConcurrency.js';
+import { withTimeout } from './retry.js';
 
 /** Fal's subscribe() throws ApiError / ValidationError with a JSON body — surface it in logs. */
 function formatFalClientError(err: unknown): string {
@@ -63,6 +64,19 @@ function formatFalClientError(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/**
+ * True when fal.ai says the account cannot run jobs (locked / no balance).
+ * In that case we should fail fast instead of attempting every storyboard shot.
+ */
+export function isFalFatalAccountError(message: string): boolean {
+  const m = message.toLowerCase();
+  return (
+    m.includes('exhausted balance') ||
+    m.includes('user is locked') ||
+    (m.includes('fal-ai') && m.includes('403') && m.includes('forbidden'))
+  );
+}
+
 async function falSubscribe(
   endpoint: string,
   options: { input?: Record<string, unknown>; logs?: boolean },
@@ -71,6 +85,21 @@ async function falSubscribe(
     return await withFalConcurrency(() => fal.subscribe(endpoint, options as never));
   } catch (e) {
     throw new Error(`${endpoint}: ${formatFalClientError(e)}`);
+  }
+}
+
+/** `fetch` with AbortController — avoids hung TCP when refs or CDNs stall. */
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  ms: number,
+): Promise<Response> {
+  const ctrl = new AbortController();
+  const id = setTimeout(() => ctrl.abort(), ms);
+  try {
+    return await fetch(url, { ...init, signal: ctrl.signal });
+  } finally {
+    clearTimeout(id);
   }
 }
 
@@ -151,7 +180,8 @@ export function listAiModels(): AiModel[] {
       displayName: 'Nano Banana (Gemini 2.5 Flash Image)',
       provider: 'google',
       kind: 'image',
-      qualityTier: 'max',
+      /** `balanced` so {@link pickDefaultModel}('image','balanced') prefers Gemini when GEMINI_API_KEY is set (still images do not require a Fal balance). */
+      qualityTier: 'balanced',
       supportsReference: true,
       maxReferenceImages: 6,
       supportedAspectRatios: ['9:16', '1:1', '16:9', '4:5'],
@@ -387,6 +417,43 @@ export function pickDefaultModel(
   return undefined;
 }
 
+/**
+ * Long-form animation style → preferred image model chain (same as director pipeline).
+ */
+export function pickImageModelForLongform(
+  style:
+    | 'storybook'
+    | 'cartoon'
+    | 'stick_figure'
+    | 'claymation'
+    | 'pixel_art'
+    | 'watercolour'
+    | 'custom'
+    | undefined,
+  tier: 'max' | 'balanced' | 'budget',
+): string | undefined {
+  if (!style || style === 'custom') {
+    return pickDefaultModel('image', tier)?.id;
+  }
+
+  const priority: Record<string, string[]> = {
+    stick_figure: ['nano-banana', 'recraft-v3', 'ideogram-v3', 'flux-dev'],
+    cartoon: ['nano-banana', 'recraft-v3', 'ideogram-v3', 'flux-pro-ultra'],
+    pixel_art: ['nano-banana', 'recraft-v3', 'ideogram-v3', 'flux-dev'],
+    storybook: ['nano-banana', 'flux-pro-ultra', 'seedream-v4', 'ideogram-v3'],
+    watercolour: ['nano-banana', 'flux-pro-ultra', 'seedream-v4', 'recraft-v3'],
+    claymation: ['flux-pro-ultra', 'nano-banana', 'seedream-v4'],
+  };
+
+  const preferred = priority[style] ?? [];
+  const available = listAiModels();
+  for (const id of preferred) {
+    const m = available.find((x) => x.id === id && x.available && x.kind === 'image');
+    if (m) return m.id;
+  }
+  return pickDefaultModel('image', tier)?.id;
+}
+
 /* ═══════════════════════════════════════════════════════════════════ */
 /* Generation functions                                                 */
 /* ═══════════════════════════════════════════════════════════════════ */
@@ -433,6 +500,23 @@ export async function generateAiImage(
 
 /* ─── fal.ai image ─────────────────────────────────────────── */
 
+/** fal `body.prompt` / `negative_prompt` max length per model (API rejects longer strings). */
+const FAL_IMAGE_PROMPT_MAX: Record<string, number> = {
+  'recraft-v3': 1000,
+  'ideogram-v3': 2000,
+  'seedream-v4': 2000,
+  'higgsfield-soul': 2000,
+  'flux-pro-ultra': 8000,
+  'flux-dev': 8000,
+};
+
+function clampFalImageText(modelId: string, s: string | undefined): string | undefined {
+  if (s == null || !s.trim()) return undefined;
+  const max = FAL_IMAGE_PROMPT_MAX[modelId] ?? 8000;
+  const t = s.trim();
+  return t.length <= max ? t : t.slice(0, max);
+}
+
 async function generateFalImage(
   model: AiModel,
   args: GenerateImageArgs,
@@ -463,21 +547,27 @@ async function generateFalImage(
     requested === '4:5' && !model.supportedAspectRatios.includes('4:5')
       ? '9:16'
       : requested;
+  const prompt = clampFalImageText(model.id, args.prompt) ?? '';
+  if (!prompt) throw new Error(`${model.displayName}: empty prompt after clamp`);
+
   const input: Record<string, unknown> = {
-    prompt: args.prompt,
+    prompt,
     aspect_ratio: falAspect,
   };
   if (useRef) {
     input.image_url = args.referenceImageUrls![0];
   }
-  if (args.negativePrompt) input.negative_prompt = args.negativePrompt;
+  const neg = clampFalImageText(model.id, args.negativePrompt);
+  if (neg) input.negative_prompt = neg;
 
   const result = await falSubscribe(endpoint, { input, logs: false });
   const url = (result.data as any)?.images?.[0]?.url as string | undefined;
   if (!url) throw new Error(`${model.displayName} returned no image`);
 
   // Persist to R2 for long-term stability (fal URLs expire).
-  const buffer = Buffer.from(await (await fetch(url)).arrayBuffer());
+  const buffer = Buffer.from(
+    await (await fetchWithTimeout(url, {}, 90_000)).arrayBuffer(),
+  );
   const up = await uploadFile(
     args.scopePath,
     buffer,
@@ -494,6 +584,10 @@ async function generateFalImage(
 
 /* ─── Nano Banana (Gemini 2.5 Flash Image) ───────────────── */
 
+const GEMINI_IMAGE_HTTP_TIMEOUT_MS = 120_000;
+const GEMINI_REF_IMAGE_FETCH_TIMEOUT_MS = 25_000;
+const r2UploadTimeoutMs = () => env.PERSONAL_R2_UPLOAD_TIMEOUT_MS ?? 120_000;
+
 async function generateNanoBananaImage(
   model: AiModel,
   args: GenerateImageArgs,
@@ -508,7 +602,11 @@ async function generateNanoBananaImage(
     model.maxReferenceImages,
   )) {
     try {
-      const r = await fetch(ref);
+      const r = await fetchWithTimeout(
+        ref,
+        {},
+        GEMINI_REF_IMAGE_FETCH_TIMEOUT_MS,
+      );
       const buf = Buffer.from(await r.arrayBuffer());
       parts.push({
         inlineData: {
@@ -516,12 +614,16 @@ async function generateNanoBananaImage(
           data: buf.toString('base64'),
         },
       });
-    } catch {
-      // Skip a failed ref fetch — generation continues with what we have.
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      const isAbort = e instanceof Error && (e.name === 'AbortError' || msg.includes('aborted'));
+      console.warn(
+        `[nano-banana] skipped ref image (${ref.slice(0, 80)}…): ${isAbort ? 'timeout' : msg.slice(0, 120)}`,
+      );
     }
   }
 
-  const res = await fetch(
+  const res = await fetchWithTimeout(
     `https://generativelanguage.googleapis.com/v1beta/models/${geminiImageModelId()}:generateContent`,
     {
       method: 'POST',
@@ -534,6 +636,7 @@ async function generateNanoBananaImage(
         generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
       }),
     },
+    GEMINI_IMAGE_HTTP_TIMEOUT_MS,
   );
   if (!res.ok) {
     const body = await res.text();
@@ -546,11 +649,15 @@ async function generateNanoBananaImage(
   if (!imgData?.data) throw new Error('Gemini returned no image');
 
   const buffer = Buffer.from(imgData.data, 'base64');
-  const up = await uploadFile(
-    args.scopePath,
-    buffer,
-    `nano-banana-${Date.now()}.png`,
-    imgData.mimeType ?? 'image/png',
+  const up = await withTimeout(
+    r2UploadTimeoutMs(),
+    'personal_r2_upload_nano_banana',
+    uploadFile(
+      args.scopePath,
+      buffer,
+      `nano-banana-${Date.now()}.png`,
+      imgData.mimeType ?? 'image/png',
+    ),
   );
   return {
     url: up.url,
@@ -770,7 +877,9 @@ async function generateFalVideo(
   const url = (result.data as any)?.video?.url as string | undefined;
   if (!url) throw new Error(`${model.displayName} returned no video`);
 
-  const buffer = Buffer.from(await (await fetch(url)).arrayBuffer());
+  const buffer = Buffer.from(
+    await (await fetchWithTimeout(url, {}, 120_000)).arrayBuffer(),
+  );
   const up = await uploadFile(
     args.scopePath,
     buffer,

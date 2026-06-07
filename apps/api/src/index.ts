@@ -243,7 +243,10 @@ server.on('error', (err: NodeJS.ErrnoException) => {
       `\n❌ Port ${env.API_PORT} is already in use — another API process is still running (often from repo-root \`pnpm dev\` / \`pnpm dev:stack\`).`,
     );
     console.error(
-      `   Stop that terminal with Ctrl+C, or set API_PORT in .env to a free port. Your browser can still work if you only need the existing server.\n`,
+      `   Stop that terminal with Ctrl+C, or set API_PORT in .env to a free port. Your browser can still work if you only need the existing server.`,
+    );
+    console.error(
+      `   Avoid running two APIs on the same DB: in-flight personal posts can fail on the next clean boot with a "restarted during sourcing" message.\n`,
     );
   } else {
     console.error('[api] listen error:', err);

@@ -763,8 +763,12 @@ export const personalAccounts = pgTable(
     postSpacingMinutes: integer('post_spacing_minutes').default(240).notNull(),
     /** When true, newly-generated posts skip the review queue. */
     autoApprove: boolean('auto_approve').default(true).notNull(),
-    /** When false, generation still runs but scheduling is skipped. */
-    autoSchedule: boolean('auto_schedule').default(true).notNull(),
+    /**
+     * When true, finished videos are queued in Content Studio (~1h) after generate
+     * (manual or autopilot), if the API key + workspace resolve. Turn off to keep
+     * videos in-app until you enable it on the Posting tab or use “Generate & schedule post”.
+     */
+    autoSchedule: boolean('auto_schedule').default(false).notNull(),
     /**
      * When true, the API scheduler may call `generateForAccount` when
      * `next_run_at` is due. When false, new videos only start from Generate.
@@ -784,7 +788,7 @@ export const personalAccounts = pgTable(
     totalPosts: integer('total_posts').default(0).notNull(),
 
     /* ── Style bible + generator config (JSONB blobs) ─────── */
-    /** User-written "this is the vibe" guide, palette, motifs, banned phrases. */
+    /** User-written style guide (vibe, dos/donts, title examples, reference scripts). */
     styleBible: jsonb('style_bible').$type<PersonalAccountStyleBible>(),
     /** Provider selection, on/off switches, quality tier. */
     generatorConfig: jsonb('generator_config').$type<PersonalGeneratorConfig>(),
@@ -876,7 +880,7 @@ export const personalPosts = pgTable(
     renderProgress: integer('render_progress'),
     /** Short human-readable encode phase for the dashboard (e.g. "Encoding shot 3/12…"). */
     renderProgressLabel: text('render_progress_label'),
-    /** Recent encode log lines (timestamp + message) for "not stuck" UI; capped in the API. */
+    /** Encode / generation debug lines (timestamp + message); used for stitch progress and media sourcing. */
     renderActivityLog: jsonb('render_activity_log').$type<PersonalPostRenderActivityEntry[]>(),
     errorMessage: text('error_message'),
     /** Generation cost in cents (sum of Claude + TTS + scraper + render). */
@@ -1141,10 +1145,6 @@ export interface PersonalAccountStyleBible {
   palette?: string[];
   /** Typography / text styling hint. */
   typography?: string;
-  /** Visual motifs to repeat ("always wide shot", "always handheld"). */
-  motifs?: string[];
-  /** Writing samples — Claude mimics these. */
-  copySamples?: string[];
   /** Example video titles — inspire pacing and specificity; do not copy verbatim. */
   exampleVideoTitles?: string[];
   /**
@@ -1152,15 +1152,11 @@ export interface PersonalAccountStyleBible {
    * Shown only when generating the locked video title — not general script rules.
    */
   videoTitleGuidance?: string;
-  /** Example script lines / hooks — inspire tone and rhythm only. */
-  exampleScriptSnippets?: string[];
   /**
    * Full reference scripts (one string per script). Injected for structure,
    * pacing, and tone — the model must not copy wording or claims verbatim.
    */
   referenceFullScripts?: string[];
-  /** Banned clichés — strings the script must not contain. */
-  bannedPhrases?: string[];
 }
 
 export interface PersonalGeneratorConfig {
@@ -1199,8 +1195,11 @@ export interface PersonalGeneratorConfig {
   /** Maximum duration for AI-generated video clips (seconds). */
   clipMaxSeconds?: number;
   /**
-   * Target average seconds per beat (script path) or per shot (director prompt hint).
-   * Clamped when applied (roughly 2–10s). Optional; defaults follow theme.
+   * Target seconds per beat (legacy script) or per director shot. With voiceover,
+   * per-shot lengths sum to measured narration time — so the **realized average** is
+   * `voiceSeconds / shotCount`; this value caps each shot (~12% over) and drives how
+   * many cuts the director plans so that average can stay near your target when the
+   * model returns enough shots.
    */
   averageClipSeconds?: number;
   /**
@@ -1220,6 +1219,12 @@ export interface PersonalGeneratorConfig {
   keywordPopStyle?: 'off' | 'subtle' | 'bold';
   /** When true, the director must add `imageCaption` on many ai_image shots for spoken dates, names, places, and key stats (≤4 words each). */
   allowSparseImageText?: boolean;
+  /**
+   * When true, director mode: **timed lower-third slate cards** (short white panel, dark type)
+   * for important **names / dates / figures** spoken in narration — snappy, not full-screen, no opening title reel.
+   * Use Keyword pop-ups (subtle/bold) to tune card size. Legacy checkpoints may still list an opening slate; new renders do not prepend it.
+   */
+  namesNumbersTitleCard?: boolean;
   /** TTS playback speed (0.85–1.2). OpenAI + ElevenLabs where supported. */
   ttsSpeed?: number;
   /**
@@ -1230,6 +1235,11 @@ export interface PersonalGeneratorConfig {
   musicSoloVolume?: number;
   /** Remotion template background music gain 0–1 (optional). */
   musicBedVolume?: number;
+  /**
+   * Single 1–10 slider in the dashboard: background music presence (1 = very subtle).
+   * When set, server derives FFmpeg duck/solo + Remotion bed gains unless legacy fields override.
+   */
+  musicBackgroundLevel?: number;
   /** If true, scripts and director narration must stay grounded in verifiable facts. */
   trueStoriesOnly?: boolean;
   /** Freeform rules (multi-line) appended to script + director prompts. */
@@ -1323,6 +1333,12 @@ export interface PersonalGeneratorConfig {
    * fall back to AI-image + Ken Burns, which is ~10× cheaper.
    */
   longformMaxAiVideoShots?: number;
+  /**
+   * Long-form only: brief cold open — first shot held, narration starts after this many seconds.
+   */
+  longformIntroEnabled?: boolean;
+  /** Lead-in length in seconds before voiceover (typically 1.5–5). */
+  longformIntroSeconds?: number;
 
   /**
    * FFmpeg encode quality when `PERSONAL_STITCH_PRESET` / `PERSONAL_STITCH_CRF`

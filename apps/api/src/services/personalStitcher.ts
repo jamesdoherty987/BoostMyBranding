@@ -24,6 +24,11 @@
  * many sequential FFmpeg passes — the dominant cost is CPU, not I/O.
  * Tune `PERSONAL_STITCH_PRESET` / `PERSONAL_STITCH_CRF` in `.env` for
  * speed vs quality.
+ *
+ * Frozen last-frame + VO continues: usually **audio longer than real video**
+ * after concat (bad container `Duration`). `mixAudio` caps `apad` to the
+ * sum of encoded segment lengths (+slack) and logs when clamping. Debug:
+ * `PERSONAL_DEBUG_MIX_AUDIO=1` or `PERSONAL_DEBUG_STITCH_TIMELINE=1`.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -32,6 +37,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync, unlinkSyn
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
+import { logVisualPacing, visualPacingDebugEnabled, logStitchTimeline, stitchTimelineDebugEnabled } from './personalDebugVisualPacing.js';
 import { localUploadDir, uploadFile } from './r2.js';
 import { resolveFfmpegBin } from '../lib/ffmpegBin.js';
 import type {
@@ -203,17 +209,25 @@ export interface StitchKeywordCard {
 export function normalizeKeywordCardsForShot(
   cards: Array<{ text: string; tStart?: number; tEnd?: number }> | undefined,
   durationSeconds: number,
+  opts?: { snappySlate?: boolean },
 ): StitchKeywordCard[] | undefined {
   if (!cards?.length) return undefined;
+  const snappy = opts?.snappySlate === true;
   const d = Math.max(0.45, durationSeconds);
   const out: StitchKeywordCard[] = [];
-  for (const c of cards.slice(0, 4)) {
+  const maxCards = snappy ? 2 : 4;
+  const maxLen = snappy ? 28 : 56;
+  const minSpan = snappy ? 0.34 : 0.22;
+  const defaultSpan = snappy ? Math.min(0.72, d * 0.2) : Math.min(1.35, d * 0.34);
+  const maxSpan = snappy ? 0.88 : Math.min(2.2, d * 0.92);
+  for (const c of cards.slice(0, maxCards)) {
     const text = c.text.trim();
-    if (!text || text.length > 56) continue;
-    let start = typeof c.tStart === 'number' && Number.isFinite(c.tStart) ? c.tStart : d * 0.22;
-    let end = typeof c.tEnd === 'number' && Number.isFinite(c.tEnd) ? c.tEnd : start + Math.min(1.35, d * 0.34);
-    start = Math.max(0, Math.min(d - 0.28, start));
-    end = Math.max(start + 0.22, Math.min(d - 0.02, end));
+    if (!text || text.length > maxLen) continue;
+    let start = typeof c.tStart === 'number' && Number.isFinite(c.tStart) ? c.tStart : d * (snappy ? 0.18 : 0.22);
+    let end = typeof c.tEnd === 'number' && Number.isFinite(c.tEnd) ? c.tEnd : start + defaultSpan;
+    start = Math.max(0, Math.min(d - minSpan - 0.02, start));
+    end = Math.max(start + minSpan, Math.min(d - 0.02, end));
+    if (end - start > maxSpan) end = start + maxSpan;
     out.push({ text, startSeconds: start, endSeconds: end });
   }
   return out.length ? out : undefined;
@@ -248,6 +262,11 @@ export interface StitchAudioInput {
   musicDuckLowVolume?: number;
   /** Music volume when there is no VO (solo bed). Default 0.55. */
   musicSoloVolume?: number;
+  /**
+   * Delay voiceover start by this many seconds (silence at head of VO track).
+   * Used for long-form cold open: first shot holds while music plays, then narration begins.
+   */
+  voiceoverLeadInSeconds?: number;
 }
 
 export interface StitchArgs {
@@ -276,18 +295,46 @@ export interface StitchArgs {
    */
   targetDurationSeconds?: number;
   /**
+   * Hard cap on each shot's seconds when stretching/shrinking to
+   * {@link targetDurationSeconds}. Defaults to 18. Set from account
+   * `averageClipSeconds` (e.g. 2 → ~2.24s cap) so VO sync does not inflate every clip.
+   */
+  perShotSecondsMax?: number;
+  /**
    * Called as FFmpeg work advances (encode segments, concat, audio).
    * Used to drive dashboard progress while status is `rendering`.
    */
   onRenderProgress?: (p: StitchRenderProgress) => void | Promise<void>;
   /**
    * Lower-third keyword pops + sparse captions. `off` skips FFmpeg drawtext.
+   * `slate` / `slate_bold` = white panel + dark text (names & numbers title-card family).
    */
-  keywordOverlayStyle?: 'off' | 'subtle' | 'bold';
+  keywordOverlayStyle?: 'off' | 'subtle' | 'bold' | 'slate' | 'slate_bold';
   /**
    * When false, still images are static (no Ken Burns). Default true.
    */
   kenBurnsOnStills?: boolean;
+  /**
+   * Optional opening slate: white full frame + centered dark text lines
+   * (e.g. title, channel, topic, shot stats). Prepended before body shots; the
+   * pipeline should extend {@link StitchAudioInput.voiceoverLeadInSeconds} by this
+   * duration so narration starts when the first body shot begins.
+   */
+  namesNumbersTitleCard?: {
+    lines: string[];
+    durationSeconds?: number;
+  };
+}
+
+/** Caps each shot when scaling to VO length; derives from dashboard "Avg seconds per clip" (~12% headroom). */
+export function perShotSecondsMaxFromAverageClip(
+  averageClipSeconds: number | undefined,
+  opts?: { longform?: boolean },
+): number | undefined {
+  if (averageClipSeconds == null || !Number.isFinite(averageClipSeconds)) return undefined;
+  if (averageClipSeconds < 1) return undefined;
+  const absMax = opts?.longform ? 14 : 12;
+  return Math.min(absMax, Math.max(1, averageClipSeconds * 1.06));
 }
 
 export interface StitchResult {
@@ -296,6 +343,90 @@ export interface StitchResult {
   shotCount: number;
   /** 'ffmpeg' | 'mock' — the mock path returns a single-asset URL when ffmpeg isn't available. */
   renderer: 'ffmpeg' | 'mock';
+}
+
+/** Lines for the white “names & numbers” opening slate (director stitch). */
+export function buildNamesNumbersTitleCardLines(args: {
+  videoTitle: string;
+  channelName: string;
+  platform: string;
+  topic: string;
+  shotCount: number;
+  durationApproxSeconds: number;
+}): string[] {
+  const lines: string[] = [];
+  const title = (args.videoTitle ?? '').trim();
+  if (title) lines.push(title);
+  const ch = (args.channelName ?? '').trim();
+  if (ch) lines.push(ch);
+  const plat = (args.platform ?? '').trim().replace(/_/g, ' ');
+  if (plat) lines.push(plat.slice(0, 52));
+  const top = (args.topic ?? '').trim().slice(0, 140);
+  if (top) lines.push(top);
+  const sc = Math.max(0, Math.round(args.shotCount));
+  const d = Math.max(0, Math.round(args.durationApproxSeconds));
+  lines.push(`${sc} scene${sc === 1 ? '' : 's'} · ~${d}s`);
+  return lines.slice(0, 8);
+}
+
+export function defaultNamesNumbersTitleCardDurationSeconds(lineCount: number): number {
+  const n = Math.max(1, Math.min(10, lineCount));
+  return Math.min(5, Math.max(1.35, 0.82 + 0.38 * n));
+}
+
+async function encodeNamesNumbersTitleCardMp4(p: {
+  ffmpegBin: string;
+  outputPath: string;
+  width: number;
+  height: number;
+  fps: number;
+  seconds: number;
+  lines: string[];
+  workDir: string;
+  encodeTier?: StitchEncodePreset;
+  textFilesOut: string[];
+}): Promise<void> {
+  const font = overlayFontPath();
+  if (!font) {
+    throw new StitcherError('validate', 'No system font found for names/numbers title card (set PERSONAL_OVERLAY_FONT)');
+  }
+  const fs = Math.max(26, Math.min(54, Math.floor(p.width / 19)));
+  const vfParts: string[] = [];
+  let y = Math.round(p.height * 0.17);
+  for (let li = 0; li < p.lines.length; li++) {
+    const line = p.lines[li]!;
+    const tf = path.join(p.workDir, `titlecard-line-${li}-${randomUUID().slice(0, 8)}.txt`);
+    writeFileSync(tf, sanitizeOverlayFileText(line, 240), 'utf8');
+    p.textFilesOut.push(tf);
+    const fontEsc = ffmpegFilterPath(font);
+    const tfEsc = ffmpegFilterPath(tf);
+    vfParts.push(
+      `drawtext=fontfile=${fontEsc}:textfile=${tfEsc}:reload=0:fontsize=${fs}:fontcolor=#141414:x=(w-text_w)/2:y=${y}:box=0`,
+    );
+    y += Math.round(fs * 1.42);
+    if (y > p.height * 0.9) break;
+  }
+  if (!vfParts.length) {
+    throw new StitcherError('validate', 'Names/numbers title card: no drawable lines');
+  }
+  const d = Math.max(0.55, p.seconds).toFixed(3);
+  const vf = vfParts.join(',');
+  const args = [
+    '-f',
+    'lavfi',
+    '-i',
+    `color=c=white:s=${p.width}x${p.height}:r=${p.fps}:d=${d}`,
+    '-vf',
+    vf,
+    '-t',
+    d,
+    ...stitchH264VArgs({ tune: 'stillimage', encodeTier: p.encodeTier }),
+    '-movflags',
+    '+faststart',
+    '-y',
+    p.outputPath,
+  ];
+  await runFfmpeg(p.ffmpegBin, args, 'names-numbers-title-card');
 }
 
 /* ═══════════════════════════════════════════════════════════════════ */
@@ -311,9 +442,23 @@ export async function stitchShots(args: StitchArgs): Promise<StitchResult> {
     // Graceful fallback: upload the first shot's asset as a placeholder.
     // The pipeline logs this as a warning so operators can install ffmpeg.
     console.warn('[stitcher] ffmpeg not found — returning first-shot passthrough');
+    const mockBody = args.shots.reduce((a, s) => a + s.durationSeconds, 0);
+    let mockDur = mockBody;
+    const nnMock = args.namesNumbersTitleCard;
+    if (nnMock?.lines?.length) {
+      const lines = nnMock.lines.map((l) => String(l ?? '').trim()).filter(Boolean);
+      if (lines.length) {
+        mockDur +=
+          typeof nnMock.durationSeconds === 'number' &&
+          Number.isFinite(nnMock.durationSeconds) &&
+          nnMock.durationSeconds > 0.25
+            ? nnMock.durationSeconds
+            : defaultNamesNumbersTitleCardDurationSeconds(lines.length);
+      }
+    }
     return {
       videoUrl: args.shots[0]?.url ?? '',
-      durationSeconds: args.shots.reduce((a, s) => a + s.durationSeconds, 0),
+      durationSeconds: mockDur,
       shotCount: args.shots.length,
       renderer: 'mock',
     };
@@ -344,8 +489,22 @@ export async function stitchShots(args: StitchArgs): Promise<StitchResult> {
     const workingShots = scaleShotsToTarget(
       args.shots,
       args.targetDurationSeconds,
+      args.perShotSecondsMax,
     );
     const plannedSum = workingShots.reduce((a, s) => a + s.durationSeconds, 0);
+    logVisualPacing('stitcher', 'stitchShots pacing', {
+      postId: args.postId,
+      n: args.shots.length,
+      targetDurationSeconds: args.targetDurationSeconds ?? null,
+      perShotSecondsMax: args.perShotSecondsMax ?? null,
+      rawDurations: args.shots.map((s) => Math.round(s.durationSeconds * 1000) / 1000),
+      rawSum: Math.round(args.shots.reduce((a, s) => a + s.durationSeconds, 0) * 1000) / 1000,
+      workingDurations: workingShots.map((s) => Math.round(s.durationSeconds * 1000) / 1000),
+      workingSum: Math.round(plannedSum * 1000) / 1000,
+      scaledVsRaw: args.shots.map((s, i) =>
+        Math.round((workingShots[i]!.durationSeconds - s.durationSeconds) * 1000) / 1000,
+      ),
+    });
     const { width, height } = dimsFor(args.aspectRatio ?? '9:16');
     const encodeTier = args.encodePreset;
 
@@ -377,10 +536,6 @@ export async function stitchShots(args: StitchArgs): Promise<StitchResult> {
     const fps = 30;
 
     const segmentPaths: string[] = [];
-    const plannedOutputSeconds = workingShots.reduce(
-      (a, s) => a + s.durationSeconds,
-      0,
-    );
     const nShots = localShots.length;
 
     await Promise.resolve(
@@ -472,6 +627,16 @@ export async function stitchShots(args: StitchArgs): Promise<StitchResult> {
       }
 
       segmentPaths.push(segPath);
+      if (visualPacingDebugEnabled()) {
+        const probed = await probeDurationSeconds(ffmpegBin, segPath);
+        logVisualPacing('stitcher-probe', `encoded seg ${i + 1}/${nShots}`, {
+          plannedSeconds: Math.round(s.durationSeconds * 1000) / 1000,
+          probedSeconds: Math.round(probed * 1000) / 1000,
+          drift: Math.round((probed - s.durationSeconds) * 1000) / 1000,
+          kind: s.kind,
+        });
+      }
+
       const pct = Math.min(88, Math.round(8 + (78 * (i + 1)) / Math.max(1, nShots)));
       try {
         await Promise.resolve(
@@ -486,17 +651,57 @@ export async function stitchShots(args: StitchArgs): Promise<StitchResult> {
       }
     }
 
-    // 3. Concat with transitions. We use xfade for cross_dissolve / dip /
-    //    fade-style; hard_cut is achieved with the concat demuxer.
+    const bodyPlannedSum = workingShots.reduce((a, s) => a + s.durationSeconds, 0);
+    const bodySegmentDurations = workingShots.map((s) => s.durationSeconds);
+
+    let titleCardSeconds = 0;
+    const nnCard = args.namesNumbersTitleCard;
+    if (nnCard?.lines?.length) {
+      const rawLines = nnCard.lines.map((l) => String(l ?? '').trim()).filter(Boolean);
+      if (rawLines.length > 0) {
+        titleCardSeconds =
+          typeof nnCard.durationSeconds === 'number' &&
+          Number.isFinite(nnCard.durationSeconds) &&
+          nnCard.durationSeconds > 0.25
+            ? nnCard.durationSeconds
+            : defaultNamesNumbersTitleCardDurationSeconds(rawLines.length);
+        const titleSeg = path.join(workDir, 'titlecard-open.mp4');
+        cleanups.push(titleSeg);
+        const textFilesOut: string[] = [];
+        await encodeNamesNumbersTitleCardMp4({
+          ffmpegBin,
+          outputPath: titleSeg,
+          width,
+          height,
+          fps,
+          seconds: titleCardSeconds,
+          lines: rawLines,
+          workDir,
+          encodeTier,
+          textFilesOut,
+        });
+        for (const tf of textFilesOut) cleanups.push(tf);
+        segmentPaths.unshift(titleSeg);
+      }
+    }
+
+    const plannedOutputSeconds = titleCardSeconds + bodyPlannedSum;
+    const plannedSegmentSeconds =
+      titleCardSeconds > 0 ? [titleCardSeconds, ...bodySegmentDurations] : bodySegmentDurations;
+
+    // 3. Concat segments. (xfade / dissolves are disabled — see skipXfade below.)
     const concatPath = path.join(workDir, 'concat.mp4');
     cleanups.push(concatPath);
-    // A single filter_complex with many xfade links + long runtime is
-    // pathologically slow (hours) and looks "stuck". Prefer the concat
-    // demuxer for large timelines — hard cuts instead of dissolves.
-    const skipXfade =
-      segmentPaths.length > 12 || plannedOutputSeconds > 180;
-    const transitions = workingShots.slice(0, -1).map((s) => s.transitionOut);
-    const needsAnyXfade = transitions.some((t) => requiresXfade(t));
+    // xfade filter graphs are fragile (offset math vs probed durations) and have
+    // collapsed timelines to a single frozen frame in production. Always use the
+    // concat demuxer (hard cuts) for reliability — storyboard dissolve hints are ignored here.
+    const skipXfade = true;
+    const transitions: ShotTransition[] =
+      segmentPaths.length <= 1
+        ? []
+        : titleCardSeconds > 0
+          ? (['hard_cut', ...workingShots.slice(0, -1).map((s) => s.transitionOut)] as ShotTransition[])
+          : workingShots.slice(0, -1).map((s) => s.transitionOut);
     try {
       await Promise.resolve(
         args.onRenderProgress?.({
@@ -519,8 +724,28 @@ export async function stitchShots(args: StitchArgs): Promise<StitchResult> {
         height,
         skipXfade,
         plannedOutputSeconds,
+        plannedSegmentSeconds,
         encodePreset: encodeTier,
       });
+      const probedConcat = await probeDurationSeconds(ffmpegBin, concatPath).catch(() => NaN);
+      logStitchTimeline('stitcher', 'concat done', {
+        plannedOutputSeconds,
+        probedConcatSeconds: Number.isFinite(probedConcat) ? Math.round(probedConcat * 1000) / 1000 : null,
+        probeVsPlan:
+          Number.isFinite(probedConcat) && plannedOutputSeconds > 0
+            ? Math.round((probedConcat - plannedOutputSeconds) * 1000) / 1000
+            : null,
+        segments: segmentPaths.length,
+      });
+      if (
+        Number.isFinite(probedConcat) &&
+        plannedOutputSeconds > 0.2 &&
+        probedConcat > plannedOutputSeconds + 0.45
+      ) {
+        console.warn(
+          `[stitcher] concat probe ${probedConcat.toFixed(2)}s > planned ${plannedOutputSeconds.toFixed(2)}s — mix-audio will cap apad to planned (+slack) so audio cannot outrun real frames.`,
+        );
+      }
     } catch (e) {
       if (e instanceof StitcherError) throw e;
       const m = e instanceof Error ? e.message : String(e);
@@ -570,7 +795,14 @@ export async function stitchShots(args: StitchArgs): Promise<StitchResult> {
           musicPath: muLocal,
           output: finalPath,
           musicDuckLowVolume: args.audio.musicDuckLowVolume ?? 0.22,
-          musicSoloVolume: args.audio.musicSoloVolume ?? 0.55,
+          musicSoloVolume: args.audio.musicSoloVolume ?? 0.14,
+          canonicalVideoDurationSeconds: plannedOutputSeconds,
+          voiceoverLeadInMs:
+            typeof args.audio.voiceoverLeadInSeconds === 'number' &&
+            Number.isFinite(args.audio.voiceoverLeadInSeconds) &&
+            args.audio.voiceoverLeadInSeconds > 0
+              ? args.audio.voiceoverLeadInSeconds * 1000
+              : undefined,
         });
       } catch (e) {
         if (e instanceof StitcherError) throw e;
@@ -605,6 +837,27 @@ export async function stitchShots(args: StitchArgs): Promise<StitchResult> {
         `Missing output after encode: ${path.basename(finalPath)} (concat/mix may have failed silently)`,
       );
     }
+
+    const plannedWorkingSum = titleCardSeconds + workingShots.reduce((a, s) => a + s.durationSeconds, 0);
+    if (stitchTimelineDebugEnabled()) {
+      try {
+        const finalProbe = await probeDurationSeconds(ffmpegBin, finalPath);
+        logStitchTimeline('stitcher', 'final file before upload', {
+          postId: args.postId,
+          plannedWorkingSum: Math.round(plannedWorkingSum * 1000) / 1000,
+          probedFileSeconds: Math.round(finalProbe * 1000) / 1000,
+          delta: Math.round((finalProbe - plannedWorkingSum) * 1000) / 1000,
+        });
+        if (Number.isFinite(finalProbe) && Math.abs(finalProbe - plannedWorkingSum) > 0.95) {
+          console.warn(
+            `[stitcher] final MP4 probed ${finalProbe.toFixed(2)}s vs planned working sum ${plannedWorkingSum.toFixed(2)}s (Δ ${(finalProbe - plannedWorkingSum).toFixed(2)}s).`,
+          );
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+
     let buffer: Buffer;
     try {
       buffer = readFileSync(finalPath);
@@ -636,7 +889,7 @@ export async function stitchShots(args: StitchArgs): Promise<StitchResult> {
       throw new StitcherError('upload', `R2 upload failed: ${m}`, { cause: e });
     }
 
-    const totalDuration = workingShots.reduce((a, s) => a + s.durationSeconds, 0);
+    const totalDuration = plannedWorkingSum;
     return {
       videoUrl: upload.url,
       durationSeconds: totalDuration,
@@ -676,46 +929,97 @@ function dimsFor(ar: '9:16' | '1:1' | '16:9' | '4:5'): { width: number; height: 
  * Scale every shot's duration so the full video hits `target` seconds.
  * Only runs when target is set and differs from the current sum by more
  * than 2%. Per-shot floor of 1s so no shot becomes a single frame.
- * Per-shot ceiling of 18s so one shot doesn't become a 45-second stare.
+ * Per-shot ceiling defaults to 18s unless {@link StitchArgs.perShotSecondsMax} is set.
  *
- * Rounds every shot to the nearest 0.1s and fixes the rounding drift
- * by adjusting the longest shot so the sum is exactly `target`.
+ * Rounds every shot to the nearest 0.1s and fixes rounding drift by spreading
+ * the remainder across the longest shots (with headroom under the per-shot cap).
+ *
+ * @param perShotMax  Upper bound per shot in seconds (default 18).
  */
 function scaleShotsToTarget<T extends { durationSeconds: number }>(
   shots: T[],
   target: number | undefined,
+  perShotMax = 18,
 ): T[] {
   if (!target || shots.length === 0) return shots;
   const current = shots.reduce((a, s) => a + s.durationSeconds, 0);
   if (current <= 0) return shots;
-  if (Math.abs(current - target) / target < 0.02) return shots;
+  if (Math.abs(current - target) / target < 0.02) {
+    logVisualPacing('stitcher-scale', 'skip (within 2% of target)', {
+      current,
+      target,
+      perShotMax,
+      durations: shots.map((s) => s.durationSeconds),
+    });
+    return shots;
+  }
+
+  logVisualPacing('stitcher-scale', 'apply uniform scale', {
+    current,
+    target,
+    ratio: Math.round((target / current) * 10000) / 10000,
+    perShotMax,
+    before: shots.map((s) => s.durationSeconds),
+  });
+
+  const cap =
+    Number.isFinite(perShotMax) && perShotMax > 0 ? Math.min(60, Math.max(1, perShotMax)) : 18;
 
   const ratio = target / current;
   const scaled = shots.map((s) => ({
     ...s,
     durationSeconds: Math.max(
       1,
-      Math.min(18, Math.round(s.durationSeconds * ratio * 10) / 10),
+      Math.min(cap, Math.round(s.durationSeconds * ratio * 10) / 10),
     ),
   }));
   // Correct rounding drift by nudging the longest shot.
   const scaledSum = scaled.reduce((a, s) => a + s.durationSeconds, 0);
-  const delta = target - scaledSum;
+  let delta = target - scaledSum;
   if (Math.abs(delta) > 0.05) {
-    let longestIdx = 0;
-    for (let i = 1; i < scaled.length; i++) {
-      if (scaled[i]!.durationSeconds > scaled[longestIdx]!.durationSeconds) {
-        longestIdx = i;
+    const capLocal = cap;
+    const floorLocal = 1;
+    const order = scaled.map((_, i) => i).sort((a, b) => scaled[b]!.durationSeconds - scaled[a]!.durationSeconds);
+    let guard = 0;
+    while (Math.abs(delta) > 0.05 && guard++ < scaled.length * 6) {
+      let progressed = false;
+      for (const idx of order) {
+        if (Math.abs(delta) < 0.04) break;
+        if (delta > 0) {
+          const room = capLocal - scaled[idx]!.durationSeconds;
+          if (room < 0.02) continue;
+          const add = Math.min(room, delta * 0.45);
+          scaled[idx] = {
+            ...scaled[idx]!,
+            durationSeconds: Math.min(
+              capLocal,
+              Math.round((scaled[idx]!.durationSeconds + add) * 10) / 10,
+            ),
+          };
+        } else {
+          const room = scaled[idx]!.durationSeconds - floorLocal;
+          if (room < 0.02) continue;
+          const sub = Math.min(room, Math.abs(delta) * 0.45);
+          scaled[idx] = {
+            ...scaled[idx]!,
+            durationSeconds: Math.max(
+              floorLocal,
+              Math.round((scaled[idx]!.durationSeconds - sub) * 10) / 10,
+            ),
+          };
+        }
+        const newSum = scaled.reduce((a, s) => a + s.durationSeconds, 0);
+        delta = target - newSum;
+        progressed = true;
       }
+      if (!progressed) break;
     }
-    scaled[longestIdx] = {
-      ...scaled[longestIdx]!,
-      durationSeconds: Math.max(
-        1,
-        Math.min(18, Math.round((scaled[longestIdx]!.durationSeconds + delta) * 10) / 10),
-      ),
-    };
   }
+  logVisualPacing('stitcher-scale', 'after scale + drift nudge', {
+    sum: scaled.reduce((a, s) => a + s.durationSeconds, 0),
+    target,
+    after: scaled.map((s) => s.durationSeconds),
+  });
   return scaled;
 }
 
@@ -869,7 +1173,7 @@ interface NormalizeArgs {
   letterbox: boolean;
   workDir: string;
   segmentIndex: number;
-  overlayStyle?: 'off' | 'subtle' | 'bold';
+  overlayStyle?: 'off' | 'subtle' | 'bold' | 'slate' | 'slate_bold';
   keywordCards?: StitchKeywordCard[];
   persistentCaption?: string;
   encodeTier?: StitchEncodePreset;
@@ -895,22 +1199,30 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
   // equals the shot length in frames. `-frames:v` caps output if needed.
   if (a.kind === 'image') {
     imageOutFrames = Math.max(1, Math.round(a.durationSeconds * a.fps));
-    const useKb = a.kenBurnsOnStills !== false;
-    if (useKb) {
+    const useKenBurns = a.kenBurnsOnStills !== false;
+    if (useKenBurns) {
       const zoomStep = 0.0008;
       const safeFocalX = Math.max(0.15, Math.min(0.85, a.focalX));
       const safeFocalY = Math.max(0.15, Math.min(0.85, a.focalY));
       const xExpr = `'iw*${safeFocalX}-(iw/zoom/2)'`;
       const yExpr = `'ih*${safeFocalY}-(ih/zoom/2)'`;
+      const w2 = a.width * 2;
+      const h2 = a.height * 2;
+      // Centre-crop to the working canvas (same fill behaviour as video clips) so
+      // portrait stills fill 9:16 instead of letterboxing with black bars.
+      const te = Math.max(0.05, a.durationSeconds).toFixed(3);
       filters.push(
         'select=eq(n\\,0),setpts=PTS-STARTPTS',
-        `scale=${a.width * 2}:${a.height * 2}:flags=lanczos,` +
+        `scale=${w2}:${h2}:force_original_aspect_ratio=increase:flags=lanczos,` +
+          `crop=${w2}:${h2},` +
           `zoompan=z='min(zoom+${zoomStep},1.12)':x=${xExpr}:y=${yExpr}:` +
-          `d=${imageOutFrames}:s=${a.width}x${a.height}:fps=${a.fps}`,
+          `d=${imageOutFrames}:s=${a.width}x${a.height}:fps=${a.fps},` +
+          `tpad=stop_mode=clone:stop_duration=6,trim=end=${te},setpts=PTS-STARTPTS`,
       );
     } else {
+      // Static slide (Ken Burns off): loop input + output -t (see args below).
+      // Do not use select=eq(n\,0) here — one decoded frame + fps produced ~1/fps s clips.
       filters.push(
-        'select=eq(n\\,0),setpts=PTS-STARTPTS',
         `scale=${a.width}:${a.height}:force_original_aspect_ratio=increase:flags=lanczos`,
         `crop=${a.width}:${a.height}`,
         `fps=${a.fps}`,
@@ -933,7 +1245,7 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
       `crop=${a.width}:${a.height}`,
       `fps=${a.fps}`,
       `tpad=stop_mode=clone:stop_duration=30`,
-      `trim=end=${a.durationSeconds}`,
+      `trim=end=${Math.max(0.05, a.durationSeconds).toFixed(3)}`,
       `setpts=PTS-STARTPTS`,
     );
   }
@@ -970,7 +1282,8 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
       );
     } else {
       const fontEsc = ffmpegFilterPath(font);
-      const bold = a.overlayStyle === 'bold';
+      const isSlate = a.overlayStyle === 'slate' || a.overlayStyle === 'slate_bold';
+      const bold = a.overlayStyle === 'bold' || a.overlayStyle === 'slate_bold';
       const fs = Math.max(
         20,
         Math.round(a.height * (bold ? 0.062 : 0.048)),
@@ -984,7 +1297,7 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
         : ':shadowcolor=black@0.55:shadowx=2:shadowy=2';
       let idx = 0;
       for (const kw of a.keywordCards ?? []) {
-        const line = sanitizeOverlayFileText(kw.text, 56);
+        const line = sanitizeOverlayFileText(kw.text, isSlate ? 28 : 56);
         if (!line) continue;
         const tf = path.join(a.workDir, `ov-${a.segmentIndex}-${idx++}.txt`);
         writeFileSync(tf, line, 'utf8');
@@ -992,9 +1305,18 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
         const y = Math.round(a.height * yFrac);
         const t0 = kw.startSeconds.toFixed(3);
         const t1 = kw.endSeconds.toFixed(3);
-        filters.push(
-          `drawtext=fontfile=${fontEsc}:textfile=${tfEsc}:reload=1:fontsize=${fs}:fontcolor=white:borderw=${border}:bordercolor=black@0.88${shadow}:box=1:boxcolor=black@${boxAlpha}:boxborderw=${boxBorder}:x=(w-text_w)/2:y=${y}:enable='between(t\\,${t0}\\,${t1})'`,
-        );
+        if (isSlate) {
+          const fsS = Math.max(16, Math.round(a.height * (bold ? 0.038 : 0.033)));
+          const ySlate = Math.round(a.height * (bold ? 0.76 : 0.775));
+          const boxW = bold ? 10 : 8;
+          filters.push(
+            `drawtext=fontfile=${fontEsc}:textfile=${tfEsc}:reload=1:fontsize=${fsS}:fontcolor=#1a1a1a:borderw=1:bordercolor=#e5e7eb@0.92:shadowcolor=black@0.1:shadowx=1:shadowy=1:box=1:boxcolor=white@${bold ? '0.93' : '0.88'}:boxborderw=${boxW}:x=(w-text_w)/2:y=${ySlate}:enable='between(t\\,${t0}\\,${t1})'`,
+          );
+        } else {
+          filters.push(
+            `drawtext=fontfile=${fontEsc}:textfile=${tfEsc}:reload=1:fontsize=${fs}:fontcolor=white:borderw=${border}:bordercolor=black@0.88${shadow}:box=1:boxcolor=black@${boxAlpha}:boxborderw=${boxBorder}:x=(w-text_w)/2:y=${y}:enable='between(t\\,${t0}\\,${t1})'`,
+          );
+        }
       }
       if (a.persistentCaption?.trim()) {
         const cap = sanitizeOverlayFileText(a.persistentCaption.trim(), 80);
@@ -1012,7 +1334,13 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
     }
   }
 
+  const useKenBurnsOnImage = a.kind === 'image' && a.kenBurnsOnStills !== false;
+
   const args: string[] = [];
+  // Still + no Ken Burns: loop the image so -t / trim can extend real time.
+  if (a.kind === 'image' && !useKenBurnsOnImage) {
+    args.push('-loop', '1');
+  }
   args.push('-i', a.input);
   if (a.kind === 'video') args.push('-t', String(a.durationSeconds));
   args.push('-vf', filters.join(','));
@@ -1022,11 +1350,25 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
   }));
   args.push('-an'); // strip audio — we mix separately
   args.push('-r', String(a.fps));
-  if (a.kind === 'image' && imageOutFrames > 0) {
+  if (useKenBurnsOnImage && imageOutFrames > 0) {
     args.push('-frames:v', String(imageOutFrames));
+  } else if (a.kind === 'image' && !useKenBurnsOnImage) {
+    args.push('-t', String(Math.max(0.05, a.durationSeconds)));
   }
   args.push('-movflags', '+faststart');
   args.push('-y', a.output);
+
+  logVisualPacing('ffmpeg-normalize', `seg${a.segmentIndex}`, {
+    kind: a.kind,
+    durationSeconds: a.durationSeconds,
+    fps: a.fps,
+    imageOutFrames: a.kind === 'image' ? imageOutFrames : undefined,
+    kenBurns: useKenBurnsOnImage,
+    framesVCap: useKenBurnsOnImage && imageOutFrames > 0 ? imageOutFrames : undefined,
+    staticImageSeconds: a.kind === 'image' && !useKenBurnsOnImage ? Math.max(0.05, a.durationSeconds) : undefined,
+    videoDecodeCapSeconds: a.kind === 'video' ? a.durationSeconds : undefined,
+    videoTrimEnd: a.kind === 'video' ? Math.max(0.05, a.durationSeconds).toFixed(3) : undefined,
+  });
 
   await runFfmpeg(a.ffmpegBin, args, `normalize:${path.basename(a.output)}`, {
     onStatsLine: a.onFfmpegStatsLine,
@@ -1047,6 +1389,14 @@ interface ConcatArgs {
   skipXfade?: boolean;
   /** Planned length (seconds); used when logging skipXfade. */
   plannedOutputSeconds?: number;
+  /**
+   * Per-segment target duration (seconds), same order as `segmentPaths`.
+   * Used to correct xfade timing when `ffmpeg -i` probes a bogus short
+   * container Duration (common on some Windows/libx264 outputs) — offsets
+   * were derived from probe only and could go negative, collapsing the
+   * whole timeline to a flash.
+   */
+  plannedSegmentSeconds?: number[];
   encodePreset?: StitchEncodePreset;
 }
 
@@ -1088,19 +1438,46 @@ async function concatSegments(a: ConcatArgs): Promise<void> {
   }
 
   // xfade chain — build a graph where each segment xfades into the next.
-  // Segment durations are inferred from the files via probe.
+  // Prefer probed file length, but merge with planned shot durations: some
+  // encoded segments report Duration≈0 in `ffmpeg -i` while the bitstream
+  // is full length; using only that breaks offset math below.
   const probeBatch0 = performance.now();
-  const durations = await Promise.all(
+  const probed = await Promise.all(
     a.segmentPaths.map((p) => probeDurationSeconds(a.ffmpegBin, p)),
   );
+  const plannedRaw = a.plannedSegmentSeconds;
+  const planned =
+    plannedRaw && plannedRaw.length === a.segmentPaths.length
+      ? plannedRaw
+      : undefined;
+  if (
+    plannedRaw &&
+    plannedRaw.length > 0 &&
+    plannedRaw.length !== a.segmentPaths.length
+  ) {
+    console.warn(
+      `[stitcher] xfade: plannedSegmentSeconds length ${plannedRaw.length} !== ${a.segmentPaths.length} segments — using probe-only merge`,
+    );
+  }
+  const durations = probed.map((probe, i) => {
+    const p = planned?.[i];
+    if (typeof p === 'number' && Number.isFinite(p) && p > 0.1) {
+      if (!Number.isFinite(probe) || probe < p * 0.45) return p;
+    }
+    return probe;
+  });
   tlog(
     `xfade: probed ${a.segmentPaths.length} segment durations wall=${(performance.now() - probeBatch0).toFixed(0)}ms`,
   );
 
-  // Shrink the xfade overlap if any segment is too short for a 0.3s
-  // transition. An 0.3s fade on a 1s clip would eat 30% of the shot.
+  // Fade length must stay strictly below every segment we leave; the old
+  // `max(0.15, …)` floor could exceed a short (or mis-probed) segment so
+  // `runningOffset` went negative and FFmpeg produced a near-empty video.
   const minDur = Math.min(...durations);
-  const xfadeDur = Math.max(0.15, Math.min(0.5, minDur * 0.4));
+  if (!Number.isFinite(minDur) || minDur <= 0) {
+    throw new Error(`xfade: invalid segment durations after probe/plan merge (min=${String(minDur)})`);
+  }
+  const xfadeDur = Math.min(0.5, minDur - 0.001, Math.max(0.02, minDur * 0.35));
 
   const inputArgs: string[] = [];
   for (const p of a.segmentPaths) inputArgs.push('-i', p);
@@ -1234,24 +1611,45 @@ interface MixArgs {
   output: string;
   musicDuckLowVolume: number;
   musicSoloVolume: number;
+  /** Prepend silence to VO (ms) so narration starts after a cold open. */
+  voiceoverLeadInMs?: number;
+  /**
+   * Sum of per-shot `durationSeconds` we encoded into segments (before concat).
+   * When `ffmpeg -i` over-reports concat MP4 `Duration` (common), `apad=whole_len=…`
+   * would otherwise stretch audio past real video frames → frozen last image while VO continues.
+   */
+  canonicalVideoDurationSeconds?: number;
 }
 
 async function mixAudio(a: MixArgs): Promise<void> {
   // Input layout: [0]=video, then VO (if any), then music (if any).
   //
-  // Two behaviours we need:
+  // 1. Music loops (-stream_loop) so short beds can cover long videos.
   //
-  // 1. Music must LOOP to cover the whole video. A 3-minute pixabay track
-  //    over a 6-minute video goes silent halfway through without this.
-  //    FFmpeg's -stream_loop -1 on the music input handles this cheaply.
+  // 2. Output length must follow the **video** timeline. We used to pass
+  //    `-shortest`, which truncates the whole mux to the shortest stream.
+  //    A truncated or corrupt voiceover (milliseconds long) while the
+  //    video is minutes long therefore produced a near-zero-length MP4.
+  //    After building the mixed audio at `[apre]`, we **atrim** to the
+  //    authoritative end (canonical + slack when known), then resample to
+  //    48 kHz and `apad=whole_len=…` so the track matches the encoded
+  //    segment sum even when `amix=duration=longest` would keep full VO.
   //
-  // 2. Audio must END when the video ends — not when the first of the
-  //    two audio inputs ends. We map video+mixed-audio and pass -shortest
-  //    so amix continues until video's audio-less stream ends.
+  // 3. Concat demuxer MP4s often report **inflated** `Duration` in `ffmpeg -i`
+  //    while the bitstream ends earlier. Padding audio to that probe freezes
+  //    the last video frame while VO continues. When `canonicalVideoDurationSeconds`
+  //    is set (sum of encoded segment lengths), we **never** pad past canonical+slack.
   //
-  // We also explicitly duck the music whenever VO is present. amix on
-  // its own just sums the two signals and clips — it's not what we
-  // want. We take the ducked music + raw VO through amix.
+  // 4. If video duration cannot be probed, fall back to `-shortest`.
+  const baseName = path.basename(a.videoInput);
+  logStitchTimeline('mix-audio', 'start', {
+    videoInput: baseName,
+    hasVo: Boolean(a.voiceoverPath),
+    hasMusic: Boolean(a.musicPath),
+    canonicalVideoDurationSeconds: a.canonicalVideoDurationSeconds ?? null,
+    leadMs: a.voiceoverLeadInMs ?? 0,
+  });
+
   const args: string[] = ['-i', a.videoInput];
   const inputs: Array<'vo' | 'music'> = [];
   if (a.voiceoverPath) {
@@ -1275,40 +1673,190 @@ async function mixAudio(a: MixArgs): Promise<void> {
     return;
   }
 
-  const voIdx = inputs.indexOf('vo');
-  const muIdx = inputs.indexOf('music');
-  // Inputs are 1-indexed in filter labels because [0] is the video.
-  const voLabel = voIdx !== -1 ? `[${voIdx + 1}:a]` : undefined;
-  const muLabel = muIdx !== -1 ? `[${muIdx + 1}:a]` : undefined;
-
-  const filterParts: string[] = [];
-  if (voLabel && muLabel) {
-    // Duck music under VO; normalize prevents sum clipping; limiter catches peaks.
-    filterParts.push(`${muLabel}volume=${a.musicDuckLowVolume}[mu]`);
-    filterParts.push(
-      `${voLabel}[mu]amix=inputs=2:duration=longest:dropout_transition=0:normalize=1[a0]`,
-    );
-    filterParts.push(`[a0]alimiter=limit=0.98[a]`);
-  } else if (voLabel) {
-    filterParts.push(`${voLabel}volume=1,alimiter=limit=0.99[a]`);
-  } else if (muLabel) {
-    filterParts.push(
-      `${muLabel}volume=${a.musicSoloVolume},afade=t=in:st=0:d=0.03,alimiter=limit=0.99[a]`,
+  let probedVideoSec = 0;
+  try {
+    probedVideoSec = await probeDurationSeconds(a.ffmpegBin, a.videoInput);
+  } catch (e) {
+    console.warn(
+      '[stitcher] mix-audio: could not probe video duration; using -shortest (risky if VO is very short):',
+      (e as Error).message,
     );
   }
 
-  args.push('-filter_complex', filterParts.join(';'));
-  args.push('-map', '0:v:0', '-map', '[a]');
-  args.push('-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-ar', '48000');
-  // -shortest against the video (mapped from [0]) stops us extending
-  // the file past the last frame of video. Combined with the
-  // -stream_loop on music + duration=longest on amix, the audio track
-  // runs the full video length and then ends cleanly.
-  args.push('-shortest');
+  const canonical =
+    typeof a.canonicalVideoDurationSeconds === 'number' &&
+    Number.isFinite(a.canonicalVideoDurationSeconds) &&
+    a.canonicalVideoDurationSeconds > 0.15
+      ? a.canonicalVideoDurationSeconds
+      : undefined;
+
+  let voProbeSec: number | null = null;
+  let muProbeSec: number | null = null;
+  if (a.voiceoverPath) {
+    try {
+      voProbeSec = await probeDurationSeconds(a.ffmpegBin, a.voiceoverPath);
+    } catch {
+      voProbeSec = null;
+    }
+  }
+  if (a.musicPath) {
+    try {
+      muProbeSec = await probeDurationSeconds(a.ffmpegBin, a.musicPath);
+    } catch {
+      muProbeSec = null;
+    }
+  }
+
+  logStitchTimeline('mix-audio', 'probes (raw)', {
+    probedVideoSec: Number.isFinite(probedVideoSec) ? Math.round(probedVideoSec * 1000) / 1000 : null,
+    voProbeSec: voProbeSec != null ? Math.round(voProbeSec * 1000) / 1000 : null,
+    muProbeSec: muProbeSec != null ? Math.round(muProbeSec * 1000) / 1000 : null,
+    canonical,
+  });
+
+  let videoDurSec = probedVideoSec;
+  if ((!Number.isFinite(videoDurSec) || videoDurSec <= 0.05) && canonical != null) {
+    logStitchTimeline('mix-audio', 'video probe unusable — using canonical', {
+      probedVideoSec,
+      canonical,
+    });
+    videoDurSec = canonical;
+  }
+
+  /** Hard ceiling: apad must not exceed encoded timeline + mux slack (~7 frames @ 30fps). */
+  const APAD_SLACK_SEC = 0.25;
+  if (canonical != null && Number.isFinite(videoDurSec) && videoDurSec > 0.05) {
+    const ceiling = canonical + APAD_SLACK_SEC;
+    if (videoDurSec > ceiling) {
+      console.warn(
+        `[stitcher] mix-audio: clamping apad basis ${videoDurSec.toFixed(3)}s → ${ceiling.toFixed(3)}s ` +
+          `(canonical encoded video=${canonical.toFixed(3)}s + ${APAD_SLACK_SEC}s). Prevents frozen last frame when concat metadata over-reports duration.`,
+      );
+      logStitchTimeline('mix-audio', 'apad basis clamped', {
+        before: Math.round(videoDurSec * 1000) / 1000,
+        after: Math.round(ceiling * 1000) / 1000,
+        canonical,
+      });
+      videoDurSec = ceiling;
+    }
+  }
+
+  /**
+   * Authoritative end for **audio** (atrim + apad): when we know encoded video length
+   * (`canonical`), prefer it over concat probe — probe can be slightly high/low; VO is
+   * often much longer and must be hard-trimmed or the mux extends to VO (frozen frame).
+   */
+  let audioMasterSec = videoDurSec;
+  if (canonical != null && canonical > 0.15) {
+    const fromCanonical = canonical + Math.min(APAD_SLACK_SEC, 0.15);
+    audioMasterSec = fromCanonical;
+    logStitchTimeline('mix-audio', 'audio master duration (canonical-first)', {
+      probedVideoSec: Number.isFinite(probedVideoSec) ? Math.round(probedVideoSec * 1000) / 1000 : null,
+      canonical,
+      audioMasterSec: Math.round(audioMasterSec * 1000) / 1000,
+      voProbeSec: voProbeSec != null ? Math.round(voProbeSec * 1000) / 1000 : null,
+    });
+  }
+
+  const outRate = 48_000;
+  const wholeSamples =
+    Number.isFinite(audioMasterSec) && audioMasterSec > 0.05
+      ? Math.min(outRate * 60 * 120, Math.ceil(audioMasterSec * outRate) + 2048)
+      : 0;
+
+  logStitchTimeline('mix-audio', 'apad plan', {
+    videoDurSecForPad: Number.isFinite(videoDurSec) ? Math.round(videoDurSec * 1000) / 1000 : null,
+    audioMasterSec: Number.isFinite(audioMasterSec) ? Math.round(audioMasterSec * 1000) / 1000 : null,
+    wholeSamples,
+    wholeLenSeconds: wholeSamples > 0 ? Math.round((wholeSamples / outRate) * 1000) / 1000 : null,
+    useShortestFallback: wholeSamples <= 0,
+  });
+
+  const voIdx = inputs.indexOf('vo');
+  const muIdx = inputs.indexOf('music');
+  // Inputs are 1-indexed in filter labels because [0] is the video.
+  const voLabelRaw = voIdx !== -1 ? `[${voIdx + 1}:a]` : undefined;
+  const muLabel = muIdx !== -1 ? `[${muIdx + 1}:a]` : undefined;
+  const leadMs =
+    typeof a.voiceoverLeadInMs === 'number' && Number.isFinite(a.voiceoverLeadInMs) && a.voiceoverLeadInMs > 0
+      ? Math.min(12_000, Math.max(1, Math.round(a.voiceoverLeadInMs)))
+      : 0;
+
+  const filterParts: string[] = [];
+  if (voLabelRaw && muLabel) {
+    filterParts.push(`${muLabel}volume=${a.musicDuckLowVolume}[mu]`);
+    if (leadMs > 0) {
+      filterParts.push(`${voLabelRaw}adelay=${leadMs}:all=1[vodelay]`);
+      filterParts.push(
+        `[vodelay][mu]amix=inputs=2:duration=longest:dropout_transition=0:normalize=1[a0]`,
+      );
+    } else {
+      filterParts.push(
+        `${voLabelRaw}[mu]amix=inputs=2:duration=longest:dropout_transition=0:normalize=1[a0]`,
+      );
+    }
+    filterParts.push(`[a0]alimiter=limit=0.98[apre]`);
+  } else if (voLabelRaw) {
+    if (leadMs > 0) {
+      filterParts.push(`${voLabelRaw}adelay=${leadMs}:all=1[vodelay]`);
+      filterParts.push(`[vodelay]volume=1,alimiter=limit=0.99[apre]`);
+    } else {
+      filterParts.push(`${voLabelRaw}volume=1,alimiter=limit=0.99[apre]`);
+    }
+  } else if (muLabel) {
+    filterParts.push(
+      `${muLabel}volume=${a.musicSoloVolume},afade=t=in:st=0:d=0.03,alimiter=limit=0.99[apre]`,
+    );
+  }
+
+  if (wholeSamples > 0) {
+    const endTrim = Math.max(0.08, Number(audioMasterSec)).toFixed(4);
+    logStitchTimeline('mix-audio', 'atrim+apad chain', {
+      endTrimSec: endTrim,
+      wholeSamples,
+      audioMasterSec: Math.round(audioMasterSec * 1000) / 1000,
+      canonical: canonical ?? null,
+    });
+    filterParts.push(
+      `[apre]atrim=end=${endTrim},asetpts=PTS-STARTPTS,aresample=${outRate},apad=whole_len=${wholeSamples}[aout]`,
+    );
+    args.push('-filter_complex', filterParts.join(';'));
+    args.push('-map', '0:v:0', '-map', '[aout]');
+  } else {
+    args.push('-filter_complex', filterParts.join(';'));
+    args.push('-map', '0:v:0', '-map', '[apre]');
+    args.push('-shortest');
+  }
+  args.push('-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-ar', String(outRate));
   args.push('-movflags', '+faststart');
   args.push('-y', a.output);
 
   await runFfmpeg(a.ffmpegBin, args, 'mix-audio');
+
+  let outProbe = NaN;
+  try {
+    outProbe = await probeDurationSeconds(a.ffmpegBin, a.output);
+  } catch {
+    /* ignore */
+  }
+  logStitchTimeline('mix-audio', 'output probe', {
+    output: path.basename(a.output),
+    probedSeconds: Number.isFinite(outProbe) ? Math.round(outProbe * 1000) / 1000 : null,
+    expectedAudioMasterSec:
+      Number.isFinite(audioMasterSec) && audioMasterSec > 0.05 ? Math.round(audioMasterSec * 1000) / 1000 : null,
+    probedVideoSecForLog: Number.isFinite(videoDurSec) && videoDurSec > 0.05 ? Math.round(videoDurSec * 1000) / 1000 : null,
+    canonical,
+  });
+  if (
+    Number.isFinite(outProbe) &&
+    Number.isFinite(audioMasterSec) &&
+    audioMasterSec > 0.05 &&
+    Math.abs(outProbe - audioMasterSec) > 0.85
+  ) {
+    console.warn(
+      `[stitcher] mix-audio: final mux duration ${outProbe.toFixed(2)}s vs audio master ${audioMasterSec.toFixed(2)}s (diff ${(outProbe - audioMasterSec).toFixed(2)}s). Set PERSONAL_DEBUG_MIX_AUDIO=1 for full trace.`,
+    );
+  }
 }
 
 /* ─── Colour grade presets ───────────────────────────────── */

@@ -68,7 +68,7 @@ export default function InstallPage() {
           </div>
           <h2 className="mt-4 text-xl font-bold text-slate-900">Already installed</h2>
           <p className="mt-2 max-w-xs text-sm text-slate-600">
-            You&apos;re using the app right now. It&apos;ll show up on your home screen like any other app.
+            You're using the app right now. It'll show up on your home screen like any other app.
           </p>
         </div>
       </Shell>
@@ -248,7 +248,7 @@ function DesktopInstructions() {
       </div>
       <p className="mt-2 text-sm text-slate-600">
         In Chrome or Edge, look for the install icon in the address bar (a monitor with a
-        down arrow), or use the browser menu → &quot;Install BoostMyBranding&quot;.
+        down arrow), or use the browser menu → "Install BoostMyBranding".
       </p>
     </section>
   );
@@ -260,7 +260,7 @@ function GenericInstructions() {
       <h3 className="text-sm font-semibold text-slate-900">How to install</h3>
       <p className="mt-2 text-sm text-slate-600">
         Open this page in Safari (iPhone) or Chrome (Android/Desktop), then use the
-        browser&apos;s &quot;Add to Home Screen&quot; or &quot;Install&quot; option.
+        browser's "Add to Home Screen" or "Install" option.
       </p>
     </section>
   );

@@ -554,7 +554,7 @@ export function InspirationMode({
                   <h2 className="text-sm font-semibold text-slate-900">Inspiration</h2>
                 </div>
                 <p className="mt-1 text-xs text-slate-500">
-                  Upload references or pick from {businessName ?? 'the client'}&apos;s library.
+                  Upload references or pick from {businessName ?? 'the client'}'s library.
                   Style, mood, and composition will guide the output. Up to 14 items.
                 </p>
               </div>
@@ -656,7 +656,7 @@ export function InspirationMode({
                 >
                   {library.length === 0 ? (
                     <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
-                      No media in this client&apos;s library yet. Upload from{' '}
+                      No media in this client's library yet. Upload from{' '}
                       <Link href="/dashboard/media" className="underline">
                         Media
                       </Link>{' '}
@@ -901,7 +901,7 @@ export function InspirationMode({
                   <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-[11px] text-amber-800">
                     <AlertCircle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
                     <span>
-                      {selectedImageModel.displayName} doesn&apos;t accept reference images. The
+                      {selectedImageModel.displayName} doesn't accept reference images. The
                       inspiration will only influence the prompt via the vision analysis.
                       Switch to Flux Kontext Max for direct style transfer.
                     </span>
@@ -1171,7 +1171,7 @@ export function InspirationMode({
                         className="mt-0.5 h-3.5 w-3.5 rounded border-slate-300 text-[#1D9CA1]"
                       />
                       <span className="text-slate-600">
-                        Use the first inspiration image as the video&apos;s opening frame.
+                        Use the first inspiration image as the video's opening frame.
                         Otherwise we generate a seed still from the brief.
                       </span>
                     </label>

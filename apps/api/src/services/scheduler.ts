@@ -50,7 +50,7 @@ export function startScheduler() {
   cron.schedule('*/2 * * * *', () => { analyzePendingImages(10).catch((e) => console.error('[cron analyze]', e)); }, { timezone: 'UTC' });
   cron.schedule('0 9 1 * *', () => { generateMonthlyBatches().catch((e) => console.error('[cron monthly]', e)); }, { timezone: 'UTC' });
   cron.schedule('*/5 * * * *', () => { runDuePersonalAccounts().catch((e) => console.error('[cron personal]', e)); }, { timezone: 'UTC' });
-  cron.schedule('*/15 * * * *', () => {
+  cron.schedule('*/5 * * * *', () => {
     failStaleRenderingPersonalPosts().catch((e) =>
       console.error('[cron personalStaleRender]', e),
     );
@@ -60,7 +60,7 @@ export function startScheduler() {
   }, { timezone: 'UTC' });
 
   console.log(
-    '⏱  Scheduler started (publish=1m · analyze=2m · personalAutopilot=5m when account has scheduled generation on · personalStalePipeline=15m · monthly=day-1 09:00)',
+    '⏱  Scheduler started (publish=1m · analyze=2m · personalAutopilot=5m when account has scheduled generation on · personalStalePipeline=5m · monthly=day-1 09:00)',
   );
 
   void (async () => {

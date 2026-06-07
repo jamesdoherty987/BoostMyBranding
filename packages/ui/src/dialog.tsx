@@ -16,6 +16,8 @@ interface DialogProps {
   title?: string;
   description?: string;
   children?: ReactNode;
+  /** Renders below the scrollable body (e.g. actions) — stays visible while content scrolls. */
+  footer?: ReactNode;
   className?: string;
   closeOnOutside?: boolean;
   showCloseButton?: boolean;
@@ -29,12 +31,21 @@ export function Dialog({
   title,
   description,
   children,
+  footer,
   className,
   closeOnOutside = true,
   showCloseButton = true,
 }: DialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const prevActive = useRef<Element | null>(null);
+  const hasHeader = Boolean(title || description);
+  const hasFooter = Boolean(footer);
+  const gridRows = cn(
+    hasHeader && hasFooter && 'grid-rows-[auto_minmax(0,1fr)_auto]',
+    hasHeader && !hasFooter && 'grid-rows-[auto_minmax(0,1fr)]',
+    !hasHeader && hasFooter && 'grid-rows-[minmax(0,1fr)_auto]',
+    !hasHeader && !hasFooter && 'grid-rows-[minmax(0,1fr)]',
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -83,7 +94,7 @@ export function Dialog({
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.18 }}
-          className="fixed inset-0 z-[200] flex items-end justify-center bg-slate-900/50 p-0 backdrop-blur-sm sm:items-center sm:p-4"
+          className="fixed inset-0 z-[200] flex items-end justify-center overflow-y-auto bg-slate-900/50 p-0 backdrop-blur-sm sm:items-center sm:p-4 sm:py-6"
           onClick={closeOnOutside ? onClose : undefined}
           role="presentation"
         >
@@ -99,7 +110,8 @@ export function Dialog({
             aria-describedby={description ? 'dialog-desc' : undefined}
             onClick={(e) => e.stopPropagation()}
             className={cn(
-              'relative w-full max-w-lg overflow-hidden rounded-t-3xl bg-white shadow-2xl sm:rounded-3xl',
+              'relative grid w-full max-w-lg max-h-[min(88dvh,calc(100dvh-env(safe-area-inset-bottom,0px)-0.75rem))] overflow-hidden rounded-t-3xl bg-white shadow-2xl sm:max-h-[min(90dvh,calc(100dvh-env(safe-area-inset-top,0px)-env(safe-area-inset-bottom,0px)-2rem))] sm:rounded-3xl',
+              gridRows,
               className,
             )}
           >
@@ -113,20 +125,23 @@ export function Dialog({
               </button>
             ) : null}
             {title || description ? (
-              <div className="border-b border-slate-100 px-6 pt-6 pb-4">
+              <div className="border-b border-slate-100 px-6 pb-4 pr-14 pt-6">
                 {title ? (
                   <h2 id="dialog-title" className="text-lg font-semibold text-slate-900">
                     {title}
                   </h2>
                 ) : null}
                 {description ? (
-                  <p id="dialog-desc" className="mt-1 text-sm text-slate-600">
+                  <p id="dialog-desc" className="mt-1 text-sm leading-snug text-slate-600">
                     {description}
                   </p>
                 ) : null}
               </div>
             ) : null}
-            <div className="px-6 py-5">{children}</div>
+            <div className="min-h-0 overflow-y-auto overscroll-y-contain px-6 py-5">{children}</div>
+            {footer ? (
+              <div className="shrink-0 border-t border-slate-100 px-6 py-3">{footer}</div>
+            ) : null}
           </motion.div>
         </motion.div>
       ) : null}

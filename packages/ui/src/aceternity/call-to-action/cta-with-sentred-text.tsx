@@ -39,7 +39,7 @@ export function CTAWithCenteredText() {
 
         <div className="relative z-10 mx-auto h-full max-w-md border-x bg-white px-4 py-10 sm:py-16 md:px-8 md:py-32 dark:border-neutral-800 dark:bg-neutral-900">
           <h2 className="mx-auto max-w-[40ch] px-2 text-center text-lg font-semibold tracking-tight text-balance text-neutral-700 sm:px-4 sm:text-xl md:max-w-[35ch] md:px-8 md:text-3xl dark:text-neutral-300">
-            Let&apos;s give your agents infinite memory.
+            Let's give your agents infinite memory.
           </h2>
 
           <div className="mt-4 flex flex-col items-center justify-center gap-4 sm:flex-row">

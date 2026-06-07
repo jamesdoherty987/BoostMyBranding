@@ -274,7 +274,7 @@ export default function SettingsPage() {
       <div className="mt-4 flex items-center gap-2 rounded-2xl bg-slate-100 p-3">
         <Badge tone="brand">Pro tip</Badge>
         <p className="text-xs text-slate-600">
-          Upload photos weekly for the freshest content. Quality &gt; quantity.
+          Upload photos weekly for the freshest content. Quality{'>'} quantity.
         </p>
       </div>
 

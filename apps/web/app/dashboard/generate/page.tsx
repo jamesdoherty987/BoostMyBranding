@@ -198,7 +198,7 @@ export default function GeneratePage() {
               </div>
               <div className="flex items-center gap-2 rounded-xl bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
                 <Shield className="h-3.5 w-3.5" />
-                Truthful mode — won&apos;t invent people, dates, events, or claims.
+                Truthful mode — won't invent people, dates, events, or claims.
               </div>
             </div>
 
@@ -349,7 +349,7 @@ function CaptionsMode({
             <h2 className="text-sm font-semibold text-slate-900">Monthly captions batch</h2>
             <p className="mt-1 text-xs text-slate-500">
               We read your website, pull your uploaded photos, and draft posts tied to real images
-              and facts only. Any slot we can&apos;t write honestly is skipped with a reason.
+              and facts only. Any slot we can't write honestly is skipped with a reason.
             </p>
           </div>
 
@@ -448,7 +448,7 @@ function CaptionsMode({
                     ))}
                   </ul>
                   <p className="mt-2 text-[10px] text-amber-700">
-                    Upload more media or fill in the client&apos;s facts (address, team, services)
+                    Upload more media or fill in the client's facts (address, team, services)
                     to unlock more posts.
                   </p>
                 </div>
@@ -470,7 +470,7 @@ function CaptionsMode({
           <Badge tone="brand">Safe</Badge>
           <p className="text-xs text-slate-600">
             No fabricated names, dates, or stories. Every post is grounded in an uploaded image or
-            a fact you&apos;ve given us.
+            a fact you've given us.
           </p>
         </div>
       </aside>
@@ -630,7 +630,7 @@ function AIVideoMode({ clientId, businessName }: { clientId: string; businessNam
           <div>
             <h2 className="text-sm font-semibold text-slate-900">Personalised AI video</h2>
             <p className="mt-1 text-xs text-slate-500">
-              Uses {businessName ?? 'this client'}&apos;s own photos and clips. Captions are
+              Uses {businessName ?? 'this client'}'s own photos and clips. Captions are
               grounded in what the AI actually sees in each clip.
             </p>
           </div>
@@ -918,9 +918,9 @@ function AIVideoMode({ clientId, businessName }: { clientId: string; businessNam
                 Fill missing clips with AI-generated images
               </p>
               <p className="mt-0.5 text-[11px] text-slate-500">
-                Off by default. If the client&apos;s media pool is too small, we prefer to render
+                Off by default. If the client's media pool is too small, we prefer to render
                 a shorter, more honest video than pad with stock-looking AI fills. Turn on only
-                when you&apos;re confident the brand aesthetic can handle it.
+                when you're confident the brand aesthetic can handle it.
               </p>
             </div>
           </label>
@@ -977,7 +977,7 @@ function AIVideoMode({ clientId, businessName }: { clientId: string; businessNam
                 <p className="font-semibold">Could not render:</p>
                 <p className="mt-1">{errorMsg}</p>
                 <p className="mt-2 text-[11px] text-rose-700">
-                  Upload more media or fill in the client&apos;s facts to give the AI more to
+                  Upload more media or fill in the client's facts to give the AI more to
                   work with.
                 </p>
               </div>
@@ -1184,7 +1184,7 @@ function AIImageMode({ clientId }: { clientId: string }) {
                     className="h-full w-full object-cover"
                   />
                 </div>
-                <p className="text-[11px] text-slate-500">Saved to the client&apos;s library.</p>
+                <p className="text-[11px] text-slate-500">Saved to the client's library.</p>
               </div>
             ) : (
               <div className="mt-3 flex aspect-square items-center justify-center rounded-xl border-2 border-dashed border-slate-200">
@@ -1578,7 +1578,7 @@ function GeneratedPostsPreview({
         ) : filtered.length === 0 ? (
           <div className="mt-6 flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
             <AlertCircle className="h-4 w-4" />
-            Posts were generated but we couldn&apos;t load the previews.{' '}
+            Posts were generated but we couldn't load the previews.{' '}
             <a href="/dashboard/review" className="underline">
               Open the review queue
             </a>
@@ -1968,7 +1968,7 @@ function PostPreviewCard({ post, onChange }: { post: Post; onChange: () => void 
                 className="mt-2 no-zoom text-sm"
               />
               <p className="mt-1 break-words text-[11px] text-slate-400">
-                Real facts only. We won&apos;t invent names, dates, or events even if asked.
+                Real facts only. We won't invent names, dates, or events even if asked.
               </p>
               <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
                 <Button

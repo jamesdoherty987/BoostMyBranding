@@ -2,9 +2,10 @@
  * Director-first pipeline.
  *
  * An alternative to the script-first pipeline (personalPipeline.ts) that
- * plans a multi-shot storyboard, resolves each shot to an asset (AI
- * video, AI still with Ken Burns, scraped, or user media), then stitches
- * them with real editorial cuts + audio mix.
+ * plans a multi-shot storyboard, then (on fresh runs) measures real TTS
+ * length and repartitions shots to match dashboard avg clip before
+ * resolving each shot to an asset (AI video, AI still with Ken Burns,
+ * scraped, or user media), then stitches them with editorial cuts + audio.
  *
  * Produces noticeably more engaging output than the flat "image per beat"
  * path because:
@@ -27,25 +28,38 @@ import {
   type PersonalGeneratorConfig,
 } from '@boost/database';
 import { getTheme, type PersonalTheme } from './personalThemes.js';
+import { clampLongformTargetSeconds } from './personalLongform.js';
 import { findThemeForUser } from './personalCustomThemes.js';
 import {
   planStoryboard,
+  stripDirectorResumeKeys,
   type Storyboard,
 } from './personalDirector.js';
+import { channelVideoTitleLikeIsolatedTest } from './personalChannelTitle.js';
 import { broadcast } from './realtime.js';
-import { recentTopics, getPersonalProcessBootAt, personalPostIsFailed, recentVideoTitles } from './personalAccounts.js';
+import {
+  recentTopics,
+  getPersonalProcessBootAt,
+  personalPostIsFailed,
+  recentVideoTitles,
+  markPersonalPostQueuedFailedIfStillQueued,
+  PERSONAL_POST_CANCELLED_MESSAGE,
+} from './personalAccounts.js';
 import { chooseTopic } from './personalScript.js';
 import { getCharacterUnsafe } from './personalCharacters.js';
 import { internalListForPipeline } from './personalAccountMedia.js';
 import { researchTopic, researchToPromptBlock } from './personalResearch.js';
-import { pickDefaultModel, listAiModels } from './personalAiModels.js';
+import { pickImageModelForLongform } from './personalAiModels.js';
 import { StitcherError } from './personalStitcher.js';
+import { assertPersonalVideoExampleTitlesOrThrow } from './personalTitlePolicy.js';
 import type { GenerateForAccountArgs, GenerateForAccountResult } from './personalPipeline.js';
 import { generateForAccount } from './personalPipeline.js';
+import { enqueuePersonalGenerateForAccount } from './personalGenerateQueue.js';
 import {
   buildPersonalContentRulesPrompt,
   buildMediaPreferencePrompt,
   buildAverageShotPrompt,
+  buildMinShotsForRuntimePrompt,
 } from './personalContentHints.js';
 import {
   getViralFormat,
@@ -59,9 +73,7 @@ import {
   parsePreStitchCheckpoint,
   parseSourcingCheckpointByShotId,
   hasDirectorStoryboard,
-  stripDirectorResumeKeys,
 } from './personalDirectorPipelineMid.js';
-import { enqueuePersonalGenerateForAccount } from './personalGenerateQueue.js';
 
 async function resumeDirectorInto(
   args: GenerateForAccountArgs,
@@ -118,19 +130,29 @@ async function resumeDirectorInto(
     const isAnimatedTheme = theme.template === 'animated-explainer';
     const longformEnabled = genConfig.longformEnabled === true || isAnimatedTheme;
     const longformTargetSeconds = longformEnabled
-      ? clampLongformSeconds(genConfig.longformTargetSeconds ?? theme.targetDurationSeconds)
+      ? clampLongformTargetSeconds(genConfig.longformTargetSeconds ?? theme.targetDurationSeconds)
       : undefined;
-    const longformAnimationStyle =
-      genConfig.longformAnimationStyle ??
-      (theme.id === 'ancient-origins' || theme.id === 'storybook-myth'
-        ? 'storybook'
-        : theme.id === 'science-cartoon'
-          ? 'cartoon'
-          : theme.id === 'stick-figure-explainer'
-            ? 'stick_figure'
-            : undefined);
+    const longformAnimationStyle = longformEnabled ? ('custom' as const) : undefined;
 
     const accountMedia = await internalListForPipeline(account.id);
+    const inspirationResumeCount = accountMedia.filter(
+      (m) => m.role === 'inspiration' || m.role === 'style_reference',
+    ).length;
+    if (longformEnabled && inspirationResumeCount < 1) {
+      await markFailed(
+        post.id,
+        'Long-form requires at least one Media library item with role “Inspiration” or “Style reference” so every shot matches your visual references. Open Media → upload → set role → save.',
+      );
+      return {
+        postId: post.id,
+        videoUrl: null,
+        status: 'failed',
+        durationSeconds: 0,
+        costCents: post.costCents ?? 0,
+        skipped: true,
+        reason: 'no_longform_inspiration',
+      };
+    }
     const resumedShotById = parseSourcingCheckpointByShotId(post.script);
 
     broadcast({
@@ -258,8 +280,14 @@ export async function generateForAccountDirector(
     .where(eq(personalAccounts.id, args.accountId));
   if (!account) throw new Error('Personal account not found');
   if (account.status === 'archived') {
+    if (args.reservedPostId) {
+      await markPersonalPostQueuedFailedIfStillQueued(
+        args.reservedPostId,
+        'This channel is archived — generation was not started.',
+      );
+    }
     return {
-      postId: '',
+      postId: args.reservedPostId ?? '',
       videoUrl: null,
       status: 'skipped',
       durationSeconds: 0,
@@ -286,6 +314,8 @@ export async function generateForAccountDirector(
     return resumeDirectorInto(args, account, theme, genConfig, styleBible, character);
   }
 
+  assertPersonalVideoExampleTitlesOrThrow(account.formatKind, styleBible);
+
   const recent = await recentTopics(account.id, 15);
   const topic =
     args.topic?.trim() ??
@@ -294,22 +324,61 @@ export async function generateForAccountDirector(
       topicSeeds: account.topicSeeds ?? undefined,
       recentTopics: recent,
       customDirection: account.customDirection ?? undefined,
+      styleBible,
     }));
 
-  // Create row.
-  const [post] = await db
-    .insert(personalPosts)
-    .values({
-      accountId: account.id,
-      templateId: `director:${theme.template}`,
-      postKind: (account.formatKind as 'video' | 'slideshow' | 'static_image') ?? 'video',
-      topic,
-      script: {},
-      status: 'scripting',
-    })
-    .returning();
-  if (!post) throw new Error('Failed to create personal post row');
-  const postId = post.id;
+  const expectedTemplateId = `director:${theme.template}`;
+  let postId: string;
+  if (args.reservedPostId) {
+    const [existing] = await db
+      .select()
+      .from(personalPosts)
+      .where(eq(personalPosts.id, args.reservedPostId));
+    if (!existing || existing.accountId !== account.id) {
+      throw new Error('Reserved post not found for this account');
+    }
+    if (existing.status !== 'queued') {
+      throw new Error('Reserved post is no longer queued');
+    }
+    if (!existing.templateId.startsWith('director:')) {
+      throw new Error('Reserved post was not created for director mode');
+    }
+    if (existing.templateId !== expectedTemplateId) {
+      await markPersonalPostQueuedFailedIfStillQueued(
+        args.reservedPostId,
+        'Theme changed while this post was waiting in queue.',
+      );
+      throw new Error('Theme changed while post was in queue');
+    }
+    postId = args.reservedPostId;
+    const [claimed] = await db
+      .update(personalPosts)
+      .set({
+        topic,
+        status: 'scripting',
+        script: {},
+        updatedAt: new Date(),
+      })
+      .where(and(eq(personalPosts.id, postId), eq(personalPosts.status, 'queued')))
+      .returning({ id: personalPosts.id });
+    if (!claimed) {
+      throw new Error('Could not claim reserved post — it may have been cancelled or superseded.');
+    }
+  } else {
+    const [post] = await db
+      .insert(personalPosts)
+      .values({
+        accountId: account.id,
+        templateId: expectedTemplateId,
+        postKind: (account.formatKind as 'video' | 'slideshow' | 'static_image') ?? 'video',
+        topic,
+        script: {},
+        status: 'scripting',
+      })
+      .returning();
+    if (!post) throw new Error('Failed to create personal post row');
+    postId = post.id;
+  }
 
   broadcast({ type: 'personal:progress', payload: { accountId: account.id, postId, phase: 'started:director' } });
 
@@ -321,6 +390,19 @@ export async function generateForAccountDirector(
   try {
     let totalCostCents = 0;
 
+    const abortIfStopped = async () => {
+      if (!(await personalPostIsFailed(postId))) return null;
+      return {
+        postId,
+        videoUrl: null,
+        status: 'failed',
+        durationSeconds: 0,
+        costCents: totalCostCents,
+        skipped: true,
+        reason: 'stopped',
+      } as const;
+    };
+
     /* ── 1. Research (optional) ───────────────────────────── */
     let newsContext: string | undefined;
     if (theme.mediaSources.includes('news') || genConfig.allowWebResearch) {
@@ -330,6 +412,11 @@ export async function generateForAccountDirector(
       } catch {
         /* non-fatal */
       }
+    }
+
+    {
+      const stopped = await abortIfStopped();
+      if (stopped) return stopped;
     }
 
     /* ── 2. Reference library digest ─────────────────────── */
@@ -387,6 +474,25 @@ export async function generateForAccountDirector(
           .slice(0, 400)
       : undefined;
 
+    const isAnimatedTheme = theme.template === 'animated-explainer';
+    const longformEnabled = genConfig.longformEnabled === true || isAnimatedTheme;
+
+    if (longformEnabled && inspirationItems.length < 1) {
+      await markFailed(
+        postId,
+        'Long-form requires at least one Media library item with role “Inspiration” or “Style reference” so every shot matches your visual references. Open Media → upload → set role → save.',
+      );
+      return {
+        postId,
+        videoUrl: null,
+        status: 'failed',
+        durationSeconds: 0,
+        costCents: totalCostCents,
+        skipped: true,
+        reason: 'no_longform_inspiration',
+      };
+    }
+
     /* ── 3. Plan storyboard ──────────────────────────────── */
     broadcast({ type: 'personal:progress', payload: { accountId: account.id, postId, phase: 'directing' } });
 
@@ -414,6 +520,46 @@ export async function generateForAccountDirector(
 
     const usedVideoTitles = await recentVideoTitles(account.id, 40);
 
+    {
+      const stopped = await abortIfStopped();
+      if (stopped) return stopped;
+    }
+
+    const channelTitlePass = await channelVideoTitleLikeIsolatedTest({
+      account: {
+        id: account.id,
+        userId: account.userId,
+        themeId: account.themeId,
+        language: account.language,
+        styleBible: account.styleBible,
+        generatorConfig: account.generatorConfig,
+      },
+      topic,
+    });
+
+    if (channelTitlePass?.trim()) {
+      const [row] = await db
+        .select({ script: personalPosts.script })
+        .from(personalPosts)
+        .where(eq(personalPosts.id, postId));
+      const base =
+        row?.script && typeof row.script === 'object' && !Array.isArray(row.script)
+          ? { ...(row.script as Record<string, unknown>) }
+          : {};
+      await db
+        .update(personalPosts)
+        .set({
+          script: { ...base, title: channelTitlePass.trim() } as any,
+          updatedAt: new Date(),
+        })
+        .where(eq(personalPosts.id, postId));
+    }
+
+    {
+      const stopped = await abortIfStopped();
+      if (stopped) return stopped;
+    }
+
     /* ── Long-form mode ──────────────────────────────────────
      * Auto-enabled when:
      *   - the theme is `animated-explainer` (the themes built for it)
@@ -423,24 +569,26 @@ export async function generateForAccountDirector(
      * operator picks an explicit `longformTargetSeconds` we use that
      * directly; otherwise we fall back to the theme's target. Both
      * conditions bypass the viral-format duration (which is tuned for
-     * shorts). */
-    const isAnimatedTheme = theme.template === 'animated-explainer';
-    const longformEnabled =
-      genConfig.longformEnabled === true || isAnimatedTheme;
+     * shorts).
+     *
+     * Visual look: long-form always uses `custom` animation style so the
+     * ANIMATION STYLE preset block is omitted — look comes from inspiration
+     * + style_reference media only (validated above). */
     const longformTargetSeconds = longformEnabled
-      ? clampLongformSeconds(
-          genConfig.longformTargetSeconds ?? theme.targetDurationSeconds,
-        )
+      ? clampLongformTargetSeconds(genConfig.longformTargetSeconds ?? theme.targetDurationSeconds)
       : undefined;
-    const longformAnimationStyle =
-      genConfig.longformAnimationStyle ??
-      (theme.id === 'ancient-origins' || theme.id === 'storybook-myth'
-        ? 'storybook'
-        : theme.id === 'science-cartoon'
-          ? 'cartoon'
-          : theme.id === 'stick-figure-explainer'
-            ? 'stick_figure'
-            : undefined);
+    const longformAnimationStyle = longformEnabled ? ('custom' as const) : undefined;
+
+    const storyboardTargetSeconds = longformEnabled
+      ? (longformTargetSeconds ?? theme.targetDurationSeconds)
+      : genConfig.viralFormatId
+        ? chosenFormat.targetDurationSeconds
+        : theme.targetDurationSeconds;
+
+    {
+      const stopped = await abortIfStopped();
+      if (stopped) return stopped;
+    }
 
     const storyboard = await planStoryboard({
       theme,
@@ -448,11 +596,7 @@ export async function generateForAccountDirector(
       // Respect the format's sweet-spot duration when it's been picked
       // explicitly; otherwise fall back to the theme default. When
       // long-form is on, the long-form target takes precedence.
-      targetDurationSeconds: longformEnabled
-        ? (longformTargetSeconds ?? theme.targetDurationSeconds)
-        : genConfig.viralFormatId
-          ? chosenFormat.targetDurationSeconds
-          : theme.targetDurationSeconds,
+      targetDurationSeconds: storyboardTargetSeconds,
       styleBible,
       customDirection: account.customDirection ?? undefined,
       blacklist: account.topicBlacklist ?? undefined,
@@ -477,12 +621,18 @@ export async function generateForAccountDirector(
       cutPace: genConfig.cutPace ?? 'normal',
       keywordPopStyle: genConfig.keywordPopStyle ?? 'off',
       allowSparseImageText: genConfig.allowSparseImageText === true,
+      namesNumbersTitleCard: genConfig.namesNumbersTitleCard === true,
       averageShotSeconds: genConfig.averageClipSeconds,
       promptAppendix:
         [
           buildPersonalContentRulesPrompt(genConfig, styleBible),
           buildMediaPreferencePrompt(genConfig.mediaPreference),
           buildAverageShotPrompt(genConfig.averageClipSeconds),
+          buildMinShotsForRuntimePrompt(
+            storyboardTargetSeconds,
+            genConfig.averageClipSeconds,
+            { longform: longformEnabled, cutPace: genConfig.cutPace ?? 'normal' },
+          ),
         ]
           .map((s) => s.trim())
           .filter(Boolean)
@@ -496,19 +646,13 @@ export async function generateForAccountDirector(
         : undefined,
       scriptModel: genConfig.scriptModel,
       recentVideoTitles: usedVideoTitles,
+      lockedVideoTitle: channelTitlePass ?? undefined,
     });
     totalCostCents += 3;
 
-    if (await personalPostIsFailed(postId)) {
-      return {
-        postId,
-        videoUrl: null,
-        status: 'failed',
-        durationSeconds: 0,
-        costCents: totalCostCents,
-        skipped: true,
-        reason: 'stopped',
-      };
+    {
+      const stopped = await abortIfStopped();
+      if (stopped) return stopped;
     }
 
     if (storyboard.blocked) {
@@ -530,6 +674,12 @@ export async function generateForAccountDirector(
     const aspectRatio: '9:16' | '1:1' | '16:9' | '4:5' =
       genConfig.aspectRatio ?? (longformEnabled ? '16:9' : '9:16');
 
+    const durationHintSeconds = longformEnabled
+      ? longformTargetSeconds
+      : Math.round(storyboard.estimatedDurationSeconds ?? 0) > 2
+        ? Math.round(storyboard.estimatedDurationSeconds ?? 0)
+        : undefined;
+
     await db
       .update(personalPosts)
       .set({
@@ -538,6 +688,13 @@ export async function generateForAccountDirector(
           outputAspectRatio: aspectRatio,
         } as any,
         status: 'sourcing_media',
+        ...(durationHintSeconds != null ? { durationSeconds: durationHintSeconds } : {}),
+        renderActivityLog: [
+          {
+            at: new Date().toISOString(),
+            m: 'Storyboard ready — entering media sourcing (AI / stock assets; can take several minutes).',
+          },
+        ],
         updatedAt: new Date(),
       })
       .where(eq(personalPosts.id, postId));
@@ -568,10 +725,12 @@ export async function generateForAccountDirector(
         : e instanceof Error
           ? e.message
           : String(e);
-    try {
-      await markFailed(postId, msg);
-    } catch (dbErr) {
-      console.error('[director] markFailed could not persist:', (dbErr as Error).message);
+    if (msg !== PERSONAL_POST_CANCELLED_MESSAGE) {
+      try {
+        await markFailed(postId, msg);
+      } catch (dbErr) {
+        console.error('[director] markFailed could not persist:', (dbErr as Error).message);
+      }
     }
     try {
       broadcast({
@@ -611,60 +770,6 @@ function maxAiShotsFor(
   if (tier === 'max') return motionBoost ? 7 : 5;
   if (tier === 'balanced') return motionBoost ? 5 : 3;
   return motionBoost ? 2 : 1;
-}
-
-/** Clamp long-form duration to 60–480 seconds (1–8 minutes). */
-function clampLongformSeconds(s: number | undefined): number {
-  const n = typeof s === 'number' && Number.isFinite(s) ? s : 240;
-  return Math.max(60, Math.min(480, Math.round(n)));
-}
-
-/**
- * Choose an image model tuned for long-form animation.
- *
- *   - stick_figure / cartoon / pixel_art → prefer `recraft-v3` or
- *     `ideogram-v3` (illustration-native, non-photoreal).
- *   - storybook / watercolour / claymation → prefer `nano-banana`
- *     (best multi-ref character consistency) then `flux-pro-ultra`
- *     because painterly AI images can get away with subtle photoreal
- *     undertones.
- *   - custom / not-longform → pickDefaultModel() default chain.
- *
- * We only recommend models that are `available` in the current deploy
- * — if the preferred model isn't configured we walk down the list.
- */
-function pickImageModelForLongform(
-  style:
-    | 'storybook'
-    | 'cartoon'
-    | 'stick_figure'
-    | 'claymation'
-    | 'pixel_art'
-    | 'watercolour'
-    | 'custom'
-    | undefined,
-  tier: 'max' | 'balanced' | 'budget',
-): string | undefined {
-  if (!style || style === 'custom') {
-    return pickDefaultModel('image', tier)?.id;
-  }
-
-  const priority: Record<string, string[]> = {
-    stick_figure: ['recraft-v3', 'ideogram-v3', 'nano-banana', 'flux-dev'],
-    cartoon: ['recraft-v3', 'ideogram-v3', 'nano-banana', 'flux-pro-ultra'],
-    pixel_art: ['recraft-v3', 'ideogram-v3', 'flux-dev'],
-    storybook: ['nano-banana', 'flux-pro-ultra', 'seedream-v4', 'ideogram-v3'],
-    watercolour: ['nano-banana', 'flux-pro-ultra', 'seedream-v4', 'recraft-v3'],
-    claymation: ['flux-pro-ultra', 'nano-banana', 'seedream-v4'],
-  };
-
-  const preferred = priority[style] ?? [];
-  const available = listAiModels();
-  for (const id of preferred) {
-    const m = available.find((x) => x.id === id && x.available && x.kind === 'image');
-    if (m) return m.id;
-  }
-  return pickDefaultModel('image', tier)?.id;
 }
 
 async function markStatus(postId: string, status: string) {

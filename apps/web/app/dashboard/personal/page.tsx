@@ -6,7 +6,7 @@
  * Reachable from the dashboard sidebar ("Personal") or ⌘K → "Personal channels" (g then p).
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import useSWR from 'swr';
 import { motion } from 'framer-motion';
 import {
@@ -23,12 +23,16 @@ import {
   Mic,
   CircleStop,
   CalendarPlus,
+  RefreshCw,
+  Share2,
+  Info,
 } from 'lucide-react';
-import { Badge, Button, Card, CardContent, Input, Textarea, Spinner, toast } from '@boost/ui';
+import { Badge, Button, Card, CardContent, Input, Textarea, Spinner, toast, Dialog, confirmDialog } from '@boost/ui';
 import {
   ApiError,
   type PersonalAccount,
   type PersonalPost,
+  type PersonalGenerationInfo,
   type PersonalThemeSummary,
   type PersonalPlatform,
 } from '@boost/api-client';
@@ -99,7 +103,7 @@ export default function PersonalDashboardPage() {
             {accountsError ? (
               <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">
                 <div className="font-semibold">
-                  {accountsUnauthorized ? 'Sign in required' : 'Couldn&apos;t load channels'}
+                  {accountsUnauthorized ? 'Sign in required' : "Couldn't load channels"}
                 </div>
                 <p className="mt-2 break-words text-xs leading-relaxed text-rose-800/90">
                   {(accountsError as Error).message ?? 'Request failed'}
@@ -275,8 +279,8 @@ function FeatureBanner({
           <div className="min-w-0 flex-1 break-words">
             <span className="font-semibold">ContentStudio workspace:</span> there is no default{' '}
             <code className="rounded bg-sky-100 px-1 [overflow-wrap:anywhere]">CONTENTSTUDIO_WORKSPACE_ID</code> in server
-            .env. Set it, or enter a workspace id on each channel&apos;s Publishing card, so account lists and &quot;Generate
-            &amp; schedule post&quot; can resolve a workspace.
+            .env. Set it, or enter a workspace id on each channel's <strong>Posting</strong> tab, so account lists and "Generate
+            & schedule post" can resolve a workspace.
           </div>
         </div>
       ) : null}
@@ -519,6 +523,8 @@ function AccountDetail({
         if (!list?.length) return 0;
         const rendering = list.some((p) => p.status === 'rendering');
         if (rendering) return 2_500;
+        const sourcing = list.some((p) => p.status === 'sourcing_media');
+        if (sourcing) return 3_000;
         const busy = list.some((p) =>
           ['queued', 'scripting', 'sourcing_media', 'rendering'].includes(p.status),
         );
@@ -542,7 +548,9 @@ function AccountDetail({
     void onChanged();
   }, [postsLifecycleSig, onChanged]);
 
-  const [tab, setTab] = useState<'overview' | 'media' | 'characters' | 'themes' | 'config' | 'longform'>('overview');
+  const [tab, setTab] = useState<
+    'overview' | 'posting' | 'media' | 'characters' | 'themes' | 'config' | 'longform'
+  >('overview');
   const [generating, setGenerating] = useState(false);
   const [topicOverride, setTopicOverride] = useState('');
 
@@ -556,9 +564,27 @@ function AccountDetail({
   );
   const canGenerateAndSchedulePost = Boolean(features?.contentStudio && hasResolvableCsWorkspace);
 
+  const videoExampleTitleCount = useMemo(() => {
+    if ((account.formatKind ?? 'video') !== 'video') return 99;
+    return (account.styleBible?.exampleVideoTitles ?? []).filter(
+      (t) => String(t).trim().length > 0,
+    ).length;
+  }, [account.formatKind, account.styleBible]);
+
   async function runNow() {
     setGenerating(true);
     try {
+      const fresh = await api.getPersonalAccount(account.id);
+      const exampleCount = (fresh.styleBible?.exampleVideoTitles ?? []).filter(
+        (t) => String(t).trim().length > 0,
+      ).length;
+      if ((fresh.formatKind ?? 'video') === 'video' && exampleCount < 1) {
+        toast.error(
+          'Example video titles required',
+          'Add at least one under Style & config (and save) before generating video posts.',
+        );
+        return;
+      }
       const res = await api.generatePersonalPost(account.id, {
         topic: topicOverride.trim() || undefined,
       });
@@ -582,6 +608,17 @@ function AccountDetail({
   async function generateAndSchedulePost() {
     setGenerating(true);
     try {
+      const fresh = await api.getPersonalAccount(account.id);
+      const exampleCount = (fresh.styleBible?.exampleVideoTitles ?? []).filter(
+        (t) => String(t).trim().length > 0,
+      ).length;
+      if ((fresh.formatKind ?? 'video') === 'video' && exampleCount < 1) {
+        toast.error(
+          'Example video titles required',
+          'Add at least one under Style & config (and save) before generating video posts.',
+        );
+        return;
+      }
       const res = await api.generatePersonalPost(account.id, {
         topic: topicOverride.trim() || undefined,
         scheduleToContentStudio: true,
@@ -639,16 +676,22 @@ function AccountDetail({
               />
               <div className="flex flex-wrap gap-2">
                 <Button
-                  onClick={runNow}
+                  onClick={() => void runNow()}
                   disabled={generating || account.status === 'archived'}
-                  title={account.status === 'archived' ? 'Archived channels cannot generate new posts.' : undefined}
+                  title={
+                    account.status === 'archived'
+                      ? 'Archived channels cannot generate new posts.'
+                      : videoExampleTitleCount < 1
+                        ? 'Add example video titles under Style & config (and save). The button still works once they are saved on the server.'
+                        : undefined
+                  }
                 >
                   {generating ? <Spinner className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
                   {generating ? 'Starting…' : 'Generate post'}
                 </Button>
                 <Button
                   variant="secondary"
-                  onClick={generateAndSchedulePost}
+                  onClick={() => void generateAndSchedulePost()}
                   disabled={
                     generating ||
                     account.status === 'archived' ||
@@ -657,24 +700,27 @@ function AccountDetail({
                   title={
                     account.status === 'archived'
                       ? 'Archived channels cannot generate new posts.'
-                      : !features?.contentStudio
-                        ? 'Set CONTENTSTUDIO_API_KEY in .env and restart the API.'
-                        : !hasResolvableCsWorkspace
-                          ? 'Set CONTENTSTUDIO_WORKSPACE_ID in server .env or a workspace id under Overview → Publishing for this channel.'
-                          : 'Render then schedule to ContentStudio (~1h from now) using this channel’s workspace and connected account below.'
+                      : videoExampleTitleCount < 1
+                        ? 'Add example video titles under Style & config (and save). The button still works once they are saved on the server.'
+                        : !features?.contentStudio
+                          ? 'Set CONTENTSTUDIO_API_KEY in .env and restart the API.'
+                          : !hasResolvableCsWorkspace
+                            ? 'Set CONTENTSTUDIO_WORKSPACE_ID in server .env or a workspace id under the Posting tab for this channel.'
+                            : 'Render then schedule to ContentStudio (~1h from now) using this channel’s workspace and connected account (Posting tab).'
                   }
                 >
                   <CalendarPlus className="h-4 w-4" />
-                  Generate &amp; schedule post
+                  Generate & schedule post
                 </Button>
               </div>
             </div>
             <p className="mt-2 text-[11px] text-slate-400">
-              <span className="font-medium text-slate-500">Generate post</span> — video only. To publish after render, use
-              Overview → Publishing, or turn on Auto-approve + Auto-schedule on the schedule card.{' '}
-              <span className="font-medium text-slate-500">Generate &amp; schedule post</span> — requires ContentStudio API
-              key and a resolvable workspace (server default or per-channel Publishing). With ContentStudio off, the API
-              uses mock scheduling only.
+              <span className="font-medium text-slate-500">Generate post</span> — creates the video. It will{' '}
+              <strong>not</strong> queue in Content Studio unless{' '}
+              <span className="font-medium text-slate-500">Posting → Send to Content Studio</span> is on (or you use
+              Generate &amp; schedule below).{' '}
+              <span className="font-medium text-slate-500">Generate &amp; schedule post</span> — always queues in
+              Content Studio after render (~1h slot) when the API key and workspace are set.
             </p>
           </div>
 
@@ -682,6 +728,12 @@ function AccountDetail({
           <div className="mt-6 flex flex-wrap gap-1 border-b border-slate-200">
             <TabButton active={tab === 'overview'} onClick={() => setTab('overview')}>
               Overview
+            </TabButton>
+            <TabButton active={tab === 'posting'} onClick={() => setTab('posting')}>
+              <span className="inline-flex items-center gap-1">
+                <Share2 className="h-3.5 w-3.5 opacity-80" />
+                Posting
+              </span>
             </TabButton>
             <TabButton active={tab === 'media'} onClick={() => setTab('media')}>
               Media
@@ -693,7 +745,7 @@ function AccountDetail({
               Themes
             </TabButton>
             <TabButton active={tab === 'config'} onClick={() => setTab('config')}>
-              Style &amp; config
+              Style & config
             </TabButton>
             <TabButton active={tab === 'longform'} onClick={() => setTab('longform')}>
               Long-form
@@ -705,18 +757,51 @@ function AccountDetail({
       {/* ── Tab content ────────────────────────────────────── */}
       {tab === 'overview' ? (
         <>
-          <ScheduleCard account={account} onChanged={onChanged} />
-          <PublishingCard account={account} features={features} onChanged={onChanged} />
+          <Card>
+            <CardContent className="p-4 sm:p-5">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <h3 className="text-sm font-bold text-slate-900">Where videos get published</h3>
+                  <p className="mt-1 text-xs leading-snug text-slate-600">
+                    YouTube, Instagram, TikTok, and other networks are connected inside{' '}
+                    <span className="font-semibold">Content Studio</span> (each platform uses its own OAuth there). Use
+                    the <span className="font-semibold">Posting</span> tab to map this channel to a workspace and pick
+                    which connected account receives finished videos.
+                  </p>
+                </div>
+                <div className="flex shrink-0 flex-wrap gap-2">
+                  {features?.contentStudioAppUrl ? (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      type="button"
+                      onClick={() => window.open(features.contentStudioAppUrl!, '_blank', 'noopener,noreferrer')}
+                    >
+                      Open Content Studio
+                    </Button>
+                  ) : null}
+                  <Button size="sm" onClick={() => setTab('posting')}>
+                    Posting settings
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+          <ScheduleCard account={account} onChanged={onChanged} onOpenPostingTab={() => setTab('posting')} />
           <TopicsCard account={account} onChanged={onChanged} theme={theme} />
           <PostsGrid
             accountId={account.id}
             posts={posts}
             isLoading={postsLoading}
-            onPostsChanged={() => {
-              void refetchPosts();
+            onPostsChanged={async (): Promise<void> => {
+              await refetchPosts();
             }}
           />
         </>
+      ) : null}
+
+      {tab === 'posting' ? (
+        <PublishingCard account={account} features={features} onChanged={onChanged} />
       ) : null}
 
       {tab === 'media' ? (
@@ -740,7 +825,9 @@ function AccountDetail({
           account={account}
           theme={theme}
           onChanged={onChanged}
-          onPostsChanged={() => void refetchPosts()}
+          onPostsChanged={async (): Promise<void> => {
+            await refetchPosts();
+          }}
           onSwitchTab={(t) => setTab(t)}
         />
       ) : null}
@@ -759,21 +846,65 @@ function PublishingCard({
 }) {
   const [workspaceId, setWorkspaceId] = useState(account.contentStudioWorkspaceId ?? '');
   const [accountIdPick, setAccountIdPick] = useState(account.contentStudioAccountId ?? '');
-  const [connected, setConnected] = useState<Array<{ platform: string; handle: string; id: string }>>([]);
+  const [postToContentStudio, setPostToContentStudio] = useState(account.autoSchedule);
+  const [connected, setConnected] = useState<
+    Array<{ platform: string; handle: string; id: string; label: string }>
+  >([]);
   const [loadBusy, setLoadBusy] = useState(false);
   const [saveBusy, setSaveBusy] = useState(false);
   const [listBanner, setListBanner] = useState<'empty' | 'mismatch' | null>(null);
 
+  const csOk = Boolean(features?.contentStudio);
+  const envDefaultWorkspace = Boolean(features?.contentStudioDefaultWorkspace);
+
   useEffect(() => {
     setWorkspaceId(account.contentStudioWorkspaceId ?? '');
     setAccountIdPick(account.contentStudioAccountId ?? '');
-    setConnected([]);
-    setListBanner(null);
   }, [account.id, account.contentStudioWorkspaceId, account.contentStudioAccountId]);
 
+  /** Invalidate cached Content Studio list only when workspace or channel row changes — not when only the pinned account id is saved (that was clearing the dropdown and falsely showing "not in list"). */
+  useEffect(() => {
+    setConnected([]);
+    setListBanner(null);
+  }, [account.id, account.contentStudioWorkspaceId]);
+
+  useEffect(() => {
+    setPostToContentStudio(account.autoSchedule);
+  }, [account.autoSchedule]);
+
+  /** Load Content Studio accounts when Posting opens so dropdown options have real ids (not only after manual refresh). */
+  useEffect(() => {
+    if (!csOk) return;
+    if (!workspaceId.trim() && !envDefaultWorkspace) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await api.listPersonalContentStudioAccounts(workspaceId.trim() || undefined);
+        if (cancelled) return;
+        const accounts = res.accounts ?? [];
+        setConnected(accounts);
+        if (!res.configured) {
+          setListBanner(null);
+        } else if (accounts.length === 0) {
+          setListBanner('empty');
+        } else {
+          const matches = accounts.filter((a) => a.platform === account.platform);
+          setListBanner(matches.length === 0 ? 'mismatch' : null);
+        }
+      } catch {
+        if (!cancelled) setConnected([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [account.id, account.platform, csOk, envDefaultWorkspace, workspaceId]);
+
   const platformMatches = connected.filter((a) => a.platform === account.platform);
+  const normId = (s: string) => String(s).trim();
   const savedPickMissingFromList =
-    Boolean(accountIdPick.trim()) && !platformMatches.some((a) => a.id === accountIdPick);
+    Boolean(accountIdPick.trim()) &&
+    !platformMatches.some((a) => normId(a.id) === normId(accountIdPick));
 
   async function loadConnected() {
     setLoadBusy(true);
@@ -809,8 +940,9 @@ function PublishingCard({
       await api.updatePersonalAccount(account.id, {
         contentStudioWorkspaceId: workspaceId.trim() ? workspaceId.trim() : null,
         contentStudioAccountId: accountIdPick.trim() || null,
+        autoSchedule: postToContentStudio,
       });
-      toast.success('Publishing settings saved');
+      toast.success('Posting settings saved');
       onChanged();
     } catch (e) {
       toast.error('Could not save', (e as Error).message);
@@ -819,13 +951,41 @@ function PublishingCard({
     }
   }
 
-  const csOk = Boolean(features?.contentStudio);
-  const envDefaultWorkspace = Boolean(features?.contentStudioDefaultWorkspace);
-
   return (
     <Card>
       <CardContent className="p-6">
-        <h3 className="mb-1 text-sm font-bold uppercase tracking-wide text-slate-600">Publishing (ContentStudio)</h3>
+        <h3 className="mb-1 text-sm font-bold uppercase tracking-wide text-slate-600">Posting (Content Studio)</h3>
+        <p className="mb-3 text-xs text-slate-500">
+          <strong className="text-slate-700">You cannot add YouTube or other social logins inside this dashboard</strong>{' '}
+          — OAuth happens in the Content Studio product. Checklist: (1) In Content Studio, connect each network (YouTube,
+          Instagram, …). (2) Put <code className="rounded bg-slate-100 px-1">CONTENTSTUDIO_API_KEY</code> and{' '}
+          <code className="rounded bg-slate-100 px-1">CONTENTSTUDIO_WORKSPACE_ID</code> in the API <code className="rounded bg-slate-100 px-1">.env</code>{' '}
+          and restart the API. (3) Below, confirm workspace id (or leave blank to use the env default). (4){' '}
+          <em>Refresh list</em> and pick the connected account that matches this channel&apos;s platform ({account.platform}
+          ). (5) Turn on <strong>Send to Content Studio</strong> only when you want finished videos queued there automatically.
+          (6) Save. For uploads, production needs public video URLs (R2 or <code className="rounded bg-slate-100 px-1">API_PUBLIC_URL</code>
+          ) so Content Studio can fetch the file.
+        </p>
+        {features?.contentStudioAppUrl ? (
+          <p className="mb-4 text-xs text-slate-600">
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="mr-2 align-middle"
+              onClick={() => window.open(features.contentStudioAppUrl!, '_blank', 'noopener,noreferrer')}
+            >
+              Open Content Studio
+            </Button>
+            Connect Instagram, YouTube, TikTok, etc. there; they will appear in the dropdown after Refresh list.
+          </p>
+        ) : (
+          <p className="mb-4 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+            Set <code className="rounded bg-slate-200 px-1">CONTENTSTUDIO_APP_URL</code> in the API{' '}
+            <code className="rounded bg-slate-200 px-1">.env</code> to show an &quot;Open Content Studio&quot; button here
+            (your team&apos;s Content Studio web URL).
+          </p>
+        )}
         <p className="mb-4 text-xs text-slate-500">
           API key and default workspace live in server <code className="rounded bg-slate-100 px-1">.env</code>. Per channel
           you can override the workspace and pick which connected social account receives posts (same platform as this
@@ -846,6 +1006,22 @@ function PublishingCard({
           </div>
         ) : null}
 
+        {csOk ? (
+          <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+            <Toggle
+              label="Send finished videos to Content Studio after generation"
+              checked={postToContentStudio}
+              onChange={setPostToContentStudio}
+              disabled={!csOk}
+            />
+            <p className="mt-2 text-[11px] leading-snug text-slate-600">
+              When <strong>off</strong>, videos stay in this app (ready / pending approval). Scheduled autopilot also
+              won&apos;t push to Content Studio until you turn this on. The <strong>Generate &amp; schedule post</strong>{' '}
+              button on Overview still queues in Content Studio in one step (explicit).
+            </p>
+          </div>
+        ) : null}
+
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
           <Field label="Workspace id (optional override)">
             <Input
@@ -862,15 +1038,17 @@ function PublishingCard({
                 onChange={(e) => setAccountIdPick(e.target.value)}
                 className="w-full min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
               >
-                <option value="">Auto — first {account.platform} account in workspace</option>
+                <option value="">
+                  Auto — first {account.platform} account in this workspace (no pinned id)
+                </option>
                 {savedPickMissingFromList ? (
                   <option value={accountIdPick}>
-                    Saved account (not in current list — refresh or pick another)
+                    Saved selection (id not in current list — refresh or pick again)
                   </option>
                 ) : null}
                 {platformMatches.map((a) => (
                   <option key={a.id} value={a.id}>
-                    {a.handle || a.id} ({a.platform})
+                    {a.label}
                   </option>
                 ))}
               </select>
@@ -880,7 +1058,7 @@ function PublishingCard({
             </div>
             <p className="mt-1 text-[11px] text-slate-400">
               Click Refresh list after setting workspace id (or leave blank to use env default). Only accounts matching
-              this channel&apos;s platform are listed.
+              this channel's platform are listed.
             </p>
           </Field>
         </div>
@@ -894,7 +1072,7 @@ function PublishingCard({
         ) : null}
         {csOk && listBanner === 'mismatch' ? (
           <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-            This workspace has connected accounts, but none match this channel&apos;s platform ({account.platform}).
+            This workspace has connected accounts, but none match this channel's platform ({account.platform}).
             Connect the right network in ContentStudio or pick a workspace that includes it.
           </div>
         ) : null}
@@ -902,7 +1080,7 @@ function PublishingCard({
         <div className="mt-4 flex flex-wrap gap-2">
           <Button onClick={savePublishing} disabled={saveBusy || !csOk} size="sm">
             {saveBusy ? <Spinner className="h-4 w-4" /> : <Save className="h-4 w-4" />}
-            Save publishing settings
+            Save posting settings
           </Button>
         </div>
       </CardContent>
@@ -940,16 +1118,17 @@ function TabButton({
 function ScheduleCard({
   account,
   onChanged,
+  onOpenPostingTab,
 }: {
   account: PersonalAccount;
   onChanged: () => void;
+  onOpenPostingTab: () => void;
 }) {
   const [postsPerDay, setPostsPerDay] = useState(account.postsPerDay);
   const [hour, setHour] = useState(account.postingHourUtc);
   const [minute, setMinute] = useState(account.postingMinuteUtc);
   const [spacing, setSpacing] = useState(account.postSpacingMinutes);
   const [autoApprove, setAutoApprove] = useState(account.autoApprove);
-  const [autoSchedule, setAutoSchedule] = useState(account.autoSchedule);
   const [autoGenerateOnSchedule, setAutoGenerateOnSchedule] = useState(
     account.autoGenerateOnSchedule ?? false,
   );
@@ -961,7 +1140,6 @@ function ScheduleCard({
     setMinute(account.postingMinuteUtc);
     setSpacing(account.postSpacingMinutes);
     setAutoApprove(account.autoApprove);
-    setAutoSchedule(account.autoSchedule);
     setAutoGenerateOnSchedule(account.autoGenerateOnSchedule ?? false);
   }, [account]);
 
@@ -1002,7 +1180,6 @@ function ScheduleCard({
         postingMinuteUtc: minute,
         postSpacingMinutes: spacing,
         autoApprove,
-        autoSchedule,
         autoGenerateOnSchedule,
       });
       toast.success('Schedule saved');
@@ -1015,7 +1192,16 @@ function ScheduleCard({
   }
 
   async function deleteAcc() {
-    if (!confirm('Delete this channel and all of its posts? This cannot be undone.')) return;
+    if (
+      !(await confirmDialog({
+        title: 'Delete this channel?',
+        description: 'This removes the channel and all of its posts permanently. This cannot be undone.',
+        confirmLabel: 'Delete channel',
+        danger: true,
+      }))
+    ) {
+      return;
+    }
     setBusy(true);
     try {
       await api.deletePersonalAccount(account.id);
@@ -1132,8 +1318,19 @@ function ScheduleCard({
             disabled={account.status === 'paused' || account.status === 'archived'}
           />
           <Toggle label="Auto-approve" checked={autoApprove} onChange={setAutoApprove} />
-          <Toggle label="Auto-schedule to ContentStudio" checked={autoSchedule} onChange={setAutoSchedule} />
         </div>
+
+        <p className="mt-3 text-xs leading-snug text-slate-500">
+          <strong className="text-slate-700">Content Studio:</strong> whether finished videos are sent there is controlled on the{' '}
+          <button
+            type="button"
+            className="font-semibold text-sky-700 underline decoration-sky-300 underline-offset-2 hover:text-sky-900"
+            onClick={onOpenPostingTab}
+          >
+            Posting
+          </button>{' '}
+          tab (<em>Send finished videos to Content Studio after generation</em>). Saving this schedule card does not change that setting.
+        </p>
 
         <div className="mt-4 flex flex-col gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0 break-words text-xs text-slate-500">
@@ -1296,6 +1493,89 @@ function TopicsCard({
 /* Posts grid                                                           */
 /* ═══════════════════════════════════════════════════════════════════ */
 
+function formatMusicSource(s: PersonalGenerationInfo['musicSource']): string {
+  if (s === 'custom_bed') return 'Custom uploaded bed';
+  if (s === 'library') return 'Library track';
+  return '—';
+}
+
+function InfoRow({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-0.5 border-b border-slate-100 py-1.5 last:border-0 sm:flex-row sm:items-baseline sm:justify-between sm:gap-3">
+      <dt className="shrink-0 text-xs font-medium text-slate-500">{label}</dt>
+      <dd className="min-w-0 break-words text-sm text-slate-900">{value ?? '—'}</dd>
+    </div>
+  );
+}
+
+function PostGenerationInfoDialog({
+  open,
+  onClose,
+  info,
+  postTemplateId,
+}: {
+  open: boolean;
+  onClose: () => void;
+  info: PersonalGenerationInfo | null;
+  postTemplateId: string;
+}) {
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title="Video details"
+      description="Snapshot of models and settings used for this render."
+      footer={
+        <div className="flex justify-end">
+          <Button type="button" variant="ghost" size="sm" onClick={onClose}>
+            Close
+          </Button>
+        </div>
+      }
+    >
+      {!info ? (
+        <p className="text-sm leading-snug text-slate-600">
+          No snapshot for this post yet. New renders store models, TTS, music, and cost here.
+        </p>
+      ) : (
+        <dl className="m-0">
+          <InfoRow
+            label="Pipeline"
+            value={info.pipeline === 'director' ? 'Director (multi-shot)' : 'Classic pipeline'}
+          />
+          <InfoRow label="Post template" value={postTemplateId || '—'} />
+          <InfoRow label="Theme template" value={info.themeTemplate ?? '—'} />
+          <InfoRow label="Image model" value={info.imageModelId ?? '—'} />
+          <InfoRow label="Video model" value={info.videoModelId ?? '—'} />
+          <InfoRow label="Script model" value={info.scriptModel ?? '—'} />
+          <InfoRow label="TTS provider" value={info.ttsProvider ?? '—'} />
+          <InfoRow label="TTS voice id" value={<span className="font-mono text-xs">{info.ttsVoiceId ?? '—'}</span>} />
+          <InfoRow label="TTS speed" value={info.ttsSpeed != null ? String(info.ttsSpeed) : '—'} />
+          <InfoRow label="Music source" value={formatMusicSource(info.musicSource)} />
+          <InfoRow
+            label="Music bed level (1–10)"
+            value={info.musicBackgroundLevel != null ? String(info.musicBackgroundLevel) : 'Default'}
+          />
+          <InfoRow label="Music credit" value={info.musicAttribution ?? '—'} />
+          <InfoRow label="Stitch encode" value={info.stitchEncodePreset ?? '—'} />
+          <InfoRow label="Quality tier" value={info.qualityTier ?? '—'} />
+          <InfoRow
+            label="Long-form"
+            value={
+              info.longformEnabled == null ? '—' : info.longformEnabled ? 'Yes' : 'No'
+            }
+          />
+          <InfoRow
+            label="Est. generation cost"
+            value={info.costCents != null ? `${(info.costCents / 100).toFixed(2)} USD` : '—'}
+          />
+          <InfoRow label="Recorded at" value={new Date(info.completedAt).toLocaleString()} />
+        </dl>
+      )}
+    </Dialog>
+  );
+}
+
 function postPosterAspectClass(ar: PersonalPost['aspectRatio']): string {
   switch (ar) {
     case '16:9':
@@ -1319,7 +1599,7 @@ function PostsGrid({
   accountId: string;
   posts: PersonalPost[] | undefined;
   isLoading: boolean;
-  onPostsChanged: () => void;
+  onPostsChanged: () => void | Promise<void>;
 }) {
   const failedInView = (posts ?? []).filter((p) => p.status === 'failed');
   const [clearingFailed, setClearingFailed] = useState(false);
@@ -1327,9 +1607,13 @@ function PostsGrid({
   async function clearAllFailed() {
     if (failedInView.length === 0) return;
     if (
-      !confirm(
-        'Delete every failed video for this channel? This cannot be undone. (Includes failed posts not shown in the recent list.)',
-      )
+      !(await confirmDialog({
+        title: 'Remove all failed videos?',
+        description:
+          'This permanently deletes every failed post for this channel, including failures not shown in this recent list. This cannot be undone.',
+        confirmLabel: 'Delete all failed',
+        danger: true,
+      }))
     ) {
       return;
     }
@@ -1340,7 +1624,7 @@ function PostsGrid({
         deleted === 0 ? 'Nothing to remove' : 'Failed videos removed',
         deleted === 0 ? 'No failed posts were in the database.' : `Removed ${deleted} failed post(s).`,
       );
-      onPostsChanged();
+      await Promise.resolve(onPostsChanged());
     } catch (e) {
       toast.error('Could not remove failed posts', (e as Error).message);
     } finally {
@@ -1429,7 +1713,7 @@ function postGenerationProgressUi(post: PersonalPost): { percent: number; label:
 
   switch (post.status) {
     case 'queued':
-      return { percent: 5, label: 'In queue…' };
+      return { percent: 5, label: 'In queue — starts when the current video finishes' };
     case 'scripting':
       return { percent: 22, label: 'Writing script & storyboard…' };
     case 'sourcing_media':
@@ -1455,24 +1739,71 @@ function PostCard({
 }: {
   post: PersonalPost;
   accountId: string;
-  onPostsChanged: () => void;
+  onPostsChanged: () => void | Promise<void>;
 }) {
   const statusMeta = statusFor(post.status);
   const genUi = postGenerationProgressUi(post);
   const [stopping, setStopping] = useState(false);
+  const videoTitle = (post.title ?? '').trim();
+  const topicSeed = (post.topic ?? '').trim();
+  const isWaitingInAccountQueue = topicSeed.startsWith('⏳ In queue');
+  const busyPlanningTitle =
+    IN_PROGRESS_POST_STATUSES.has(post.status) && !videoTitle && Boolean(topicSeed) && !isWaitingInAccountQueue;
+  const headline =
+    videoTitle ||
+    (busyPlanningTitle ? 'Planning channel headline…' : '') ||
+    (isWaitingInAccountQueue ? 'Waiting in queue' : '') ||
+    '—';
+  const [playing, setPlaying] = useState(false);
+  const [thumbBusy, setThumbBusy] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
+  useEffect(() => {
+    setPlaying(false);
+  }, [post.id]);
+
+  const posterUrl = post.videoUrl?.trim()
+    ? post.thumbnailUrl?.trim() || undefined
+    : (post.thumbnailUrl?.trim() || post.mediaAssets[0]?.url) ?? undefined;
 
   async function stopGeneration() {
     if (!IN_PROGRESS_POST_STATUSES.has(post.status)) return;
-    if (!confirm('Stop this generation? The video will be marked as failed.')) return;
+    if (
+      !(await confirmDialog({
+        title: 'Stop this generation?',
+        description: 'The run will be cancelled and this post will be marked as failed.',
+        confirmLabel: 'Stop generation',
+        danger: true,
+      }))
+    ) {
+      return;
+    }
     setStopping(true);
     try {
       await api.cancelPersonalPost(accountId, post.id);
       toast.success('Generation stopped');
-      onPostsChanged();
+      await Promise.resolve(onPostsChanged());
     } catch (e) {
       toast.error('Could not stop', (e as Error).message);
     } finally {
       setStopping(false);
+    }
+  }
+
+  const canRegenerateThumb =
+    Boolean(post.videoUrl?.trim()) &&
+    ['ready', 'scheduled', 'published'].includes(post.status);
+
+  async function regenerateThumbnail() {
+    if (!canRegenerateThumb) return;
+    setThumbBusy(true);
+    try {
+      await api.regeneratePersonalPostThumbnail(accountId, post.id);
+      toast.success('Thumbnail updated');
+      await Promise.resolve(onPostsChanged());
+    } catch (e) {
+      toast.error('Could not regenerate thumbnail', (e as Error).message);
+    } finally {
+      setThumbBusy(false);
     }
   }
 
@@ -1483,16 +1814,55 @@ function PostCard({
       className="overflow-hidden rounded-xl border border-slate-200 bg-white"
     >
       <div
-        className={`relative overflow-hidden bg-slate-100 ${postPosterAspectClass(post.aspectRatio)}`}
+        className={`relative w-full overflow-hidden bg-slate-100 ${postPosterAspectClass(post.aspectRatio)} max-h-[min(78vh,720px)]`}
         style={{ minHeight: 180 }}
       >
         {post.videoUrl ? (
-          <video
-            src={post.videoUrl}
-            controls
-            className="h-full w-full object-cover"
-            poster={post.mediaAssets[0]?.url}
-          />
+          playing ? (
+            <div className="relative flex h-full min-h-0 w-full items-center justify-center bg-black">
+              <video
+                src={post.videoUrl}
+                controls
+                playsInline
+                className="max-h-full w-full object-contain"
+                poster={posterUrl}
+              />
+              <button
+                type="button"
+                onClick={() => setPlaying(false)}
+                className="absolute left-2 top-10 z-10 rounded-md bg-black/60 px-2 py-1 text-[10px] font-semibold text-white backdrop-blur-sm hover:bg-black/75"
+              >
+                Back to poster
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setPlaying(true)}
+              className="group relative flex h-full min-h-[180px] w-full cursor-pointer border-0 bg-black p-0 text-left"
+              aria-label="Play video"
+            >
+              {posterUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  key={posterUrl}
+                  src={posterUrl}
+                  alt=""
+                  className="absolute inset-0 h-full w-full object-contain transition-transform duration-300 group-hover:scale-[1.01]"
+                />
+              ) : (
+                <div className="absolute inset-0 flex items-center justify-center bg-slate-900">
+                  <Play className="h-12 w-12 text-white/70" />
+                </div>
+              )}
+              <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-black/20" />
+              <div className="absolute inset-0 flex items-center justify-center">
+                <span className="flex h-14 w-14 items-center justify-center rounded-full bg-white/95 text-slate-900 shadow-lg ring-4 ring-black/20 transition-transform group-hover:scale-105">
+                  <Play className="ml-0.5 h-6 w-6" fill="currentColor" />
+                </span>
+              </div>
+            </button>
+          )
         ) : post.status === 'failed' ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 bg-rose-50 p-3 text-center">
             <AlertTriangle className="h-8 w-8 shrink-0 text-rose-500" />
@@ -1504,12 +1874,15 @@ function PostCard({
             ) : null}
           </div>
         ) : post.mediaAssets[0]?.url ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={post.mediaAssets[0].url}
-            alt={post.title}
-            className="h-full w-full object-cover opacity-70"
-          />
+          <div className="relative h-full min-h-[180px] w-full bg-black">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={posterUrl ?? post.mediaAssets[0].url}
+              alt={videoTitle || topicSeed || 'Post'}
+              className="h-full w-full object-contain opacity-95"
+            />
+            <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
+          </div>
         ) : (
           <div className="flex h-full items-center justify-center">
             <Spinner className="h-6 w-6 text-slate-400" />
@@ -1518,11 +1891,19 @@ function PostCard({
         <div className="absolute left-2 top-2">
           <Badge tone={statusMeta.tone}>{statusMeta.label}</Badge>
         </div>
-        {post.durationSeconds ? (
-          <div className="absolute right-2 top-2 rounded-md bg-black/60 px-2 py-0.5 text-[11px] font-medium text-white">
-            {post.durationSeconds}s
-          </div>
-        ) : null}
+        {(() => {
+          const sec =
+            post.durationSeconds ??
+            (!post.videoUrl && post.plannedDurationSeconds ? post.plannedDurationSeconds : null);
+          if (sec == null) return null;
+          const approx = post.durationSeconds == null && post.plannedDurationSeconds != null;
+          return (
+            <div className="absolute right-2 top-2 rounded-md bg-black/60 px-2 py-0.5 text-[11px] font-medium text-white">
+              {approx ? '~' : ''}
+              {sec}s
+            </div>
+          );
+        })()}
       </div>
       {genUi ? (
         <div className="relative z-10 min-w-0 border-t border-slate-200/90 bg-slate-950 px-3 py-2.5 text-white">
@@ -1553,38 +1934,103 @@ function PostCard({
         </div>
       ) : null}
       <div className="min-w-0 p-3">
-        <div className="break-words text-sm font-semibold leading-snug text-slate-900 line-clamp-2">
-          {post.title || post.topic}
+        <div
+          className="min-w-0 max-w-full break-words text-sm font-semibold leading-snug text-slate-900"
+          title={videoTitle || undefined}
+        >
+          {headline}
         </div>
-        <div className="mt-1 break-words text-[12px] leading-snug text-slate-500 line-clamp-2">{post.hook}</div>
-        <div className="mt-2 flex flex-wrap gap-1">
-          {post.voiceoverUrl ? (
-            <span className="inline-flex items-center gap-1 rounded-md bg-purple-50 px-1.5 py-0.5 text-[10px] text-purple-700">
-              <Mic className="h-3 w-3" /> VO
-            </span>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 gap-1 px-2 text-[11px] text-slate-600"
+            onClick={() => setInfoOpen(true)}
+          >
+            <Info className="h-3.5 w-3.5" />
+            Details
+          </Button>
+          {canRegenerateThumb ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 gap-1 px-2 text-[11px]"
+              disabled={thumbBusy}
+              onClick={() => void regenerateThumbnail()}
+            >
+              {thumbBusy ? <Spinner className="h-3 w-3" /> : <RefreshCw className="h-3 w-3" />}
+              Regenerate thumbnail
+            </Button>
           ) : null}
-          {post.musicUrl ? (
-            <span className="inline-flex items-center gap-1 rounded-md bg-indigo-50 px-1.5 py-0.5 text-[10px] text-indigo-700">
-              <Music2 className="h-3 w-3" /> Music
-            </span>
-          ) : null}
-          {post.mediaAssets.some((m) => m.source === 'news') ? (
-            <span className="inline-flex items-center gap-1 rounded-md bg-red-50 px-1.5 py-0.5 text-[10px] text-red-700">
-              News
-            </span>
-          ) : null}
-          {post.mediaAssets.some((m) => m.source === 'wikipedia') ? (
-            <span className="inline-flex items-center gap-1 rounded-md bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-700">
-              Wiki
-            </span>
-          ) : null}
+          <div className="flex flex-wrap gap-1">
+            {post.voiceoverUrl ? (
+              <span className="inline-flex items-center gap-1 rounded-md bg-purple-50 px-1.5 py-0.5 text-[10px] text-purple-700">
+                <Mic className="h-3 w-3" /> VO
+              </span>
+            ) : null}
+            {post.musicUrl ? (
+              <span className="inline-flex items-center gap-1 rounded-md bg-indigo-50 px-1.5 py-0.5 text-[10px] text-indigo-700">
+                <Music2 className="h-3 w-3" /> Music
+              </span>
+            ) : null}
+            {post.mediaAssets.some((m) => m.source === 'news') ? (
+              <span className="inline-flex items-center gap-1 rounded-md bg-red-50 px-1.5 py-0.5 text-[10px] text-red-700">
+                News
+              </span>
+            ) : null}
+            {post.mediaAssets.some((m) => m.source === 'wikipedia') ? (
+              <span className="inline-flex items-center gap-1 rounded-md bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-700">
+                Wiki
+              </span>
+            ) : null}
+          </div>
         </div>
+        {(post.renderActivityLog?.length ?? 0) > 0 ? (
+          <details className="mt-2 rounded-md border border-slate-200 bg-slate-50/90 text-left">
+            <summary className="cursor-pointer select-none px-2 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-100">
+              Generation log ({post.renderActivityLog!.length} line
+              {post.renderActivityLog!.length === 1 ? '' : 's'})
+            </summary>
+            <p className="border-b border-slate-200/90 px-2 py-1.5 text-[10px] leading-snug text-slate-500">
+              Rolling tail — you see the newest lines returned by the server; older entries fall off once the buffer is
+              full.
+            </p>
+            <div className="max-h-52 overflow-y-auto border-t border-slate-200/90 px-2 py-1.5 font-mono text-[10px] leading-relaxed text-slate-800">
+              {(post.renderActivityLog ?? []).map((row, i) => (
+                <div
+                  key={`${row.at}-${i}`}
+                  className="whitespace-pre-wrap break-words border-b border-slate-100/90 py-0.5 last:border-0"
+                >
+                  <span className="tabular-nums text-slate-500">{row.at.slice(11, 19)}</span>{' '}
+                  <span>{row.m}</span>
+                </div>
+              ))}
+            </div>
+            <p className="border-t border-slate-200/90 px-2 py-1.5 text-[9px] leading-snug text-slate-500">
+              API env <code className="rounded bg-slate-100 px-0.5 font-mono">PERSONAL_DEBUG_SOURCING=1</code> adds
+              extra sourcing lines to the server console.
+            </p>
+          </details>
+        ) : IN_PROGRESS_POST_STATUSES.has(post.status) ? (
+          <p className="mt-2 text-[10px] leading-snug text-slate-400">
+            A generation log will appear here as the API records each step (this page refreshes every few seconds
+            while a post is generating).
+          </p>
+        ) : null}
         {post.errorMessage ? (
           <div className="mt-2 break-words rounded-md bg-rose-50 p-2 text-[11px] text-rose-700">
             {post.errorMessage}
           </div>
         ) : null}
       </div>
+      <PostGenerationInfoDialog
+        open={infoOpen}
+        onClose={() => setInfoOpen(false)}
+        info={post.generationSummary ?? null}
+        postTemplateId={post.templateId}
+      />
     </motion.div>
   );
 }
@@ -1602,6 +2048,7 @@ function statusFor(status: string): {
     case 'failed':
       return { label: 'failed', tone: 'danger' };
     case 'queued':
+      return { label: 'In queue', tone: 'warning' };
     case 'scripting':
     case 'sourcing_media':
       return { label: status.replace('_', ' '), tone: 'warning' };

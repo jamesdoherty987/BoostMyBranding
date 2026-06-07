@@ -54,7 +54,7 @@ export function FullBackgroundImageWithText({
         Indie Hackers
       </h1>
       <p className="relative z-10 mt-2 max-w-2xl text-center text-neutral-200 md:mt-6 md:text-xl">
-        We&apos;re building a community of indie hackers to help each other
+        We're building a community of indie hackers to help each other
         succeed. Get in touch with us to join the community.
       </p>
 

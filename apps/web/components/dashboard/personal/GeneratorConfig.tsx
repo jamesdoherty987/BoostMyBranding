@@ -4,8 +4,8 @@
  * Generator configuration — per-account.
  *
  * Two blocks:
- *   1. Style Bible — free-form "this is the vibe" guide, dos, donts, motifs,
- *      banned phrases. The biggest anti-slop lever we have.
+ *   1. Style Bible — free-form "this is the vibe" guide, dos, donts, title examples,
+ *      and optional full reference scripts. The biggest anti-slop lever we have.
  *   2. Generator settings — which AI models, which features on/off, quality
  *      tier, aspect ratio, web research toggle. Every knob is optional; we
  *      auto-pick sensible defaults.
@@ -14,7 +14,7 @@
 import { useEffect, useRef, useState } from 'react';
 import useSWR from 'swr';
 import { Plus, Save, Sparkles, Info, Trash2, Zap } from 'lucide-react';
-import { Button, Card, CardContent, Input, Textarea, Spinner, toast } from '@boost/ui';
+import { Button, Card, CardContent, Input, Textarea, Spinner, toast, confirmDialog } from '@boost/ui';
 import type {
   PersonalAccount,
   PersonalAccountStyleBible,
@@ -24,6 +24,7 @@ import type {
 } from '@boost/api-client';
 import { ApiError } from '@boost/api-client';
 import { api } from '@/lib/dashboard/api';
+import { TTS_VOICE_PRESETS, matchTtsPresetId, ttsPresetOptionLabel } from '@/lib/ttsVoicePresets';
 
 type TitleExampleRow = { id: string; text: string };
 
@@ -38,6 +39,29 @@ function initExampleTitleRows(bible: PersonalAccountStyleBible): TitleExampleRow
   const titles = (bible.exampleVideoTitles ?? []).map((s) => s.trim()).filter(Boolean);
   if (titles.length === 0) return [{ id: newTitleExampleRowId(), text: '' }];
   return titles.map((text) => ({ id: newTitleExampleRowId(), text }));
+}
+
+/** Tiny mock of in-edit slate lower-thirds (not full-screen). */
+function NamesNumbersSlatePreview() {
+  return (
+    <div className="mt-1 rounded-lg border border-slate-200 bg-slate-100/70 p-3">
+      <p className="mb-2 text-xs font-semibold text-slate-600">Preview — short lower-third cards</p>
+      <div className="relative mx-auto aspect-[9/16] max-h-[200px] w-full max-w-[120px] overflow-hidden rounded-md bg-gradient-to-b from-slate-800 to-slate-950 shadow-inner">
+        <div className="absolute bottom-[12%] left-1/2 flex w-[88%] -translate-x-1/2 flex-col items-center gap-1">
+          <span className="w-full rounded-md bg-white/95 px-1.5 py-0.5 text-center text-[9px] font-semibold leading-tight tracking-tight text-slate-900 shadow-sm">
+            Marie Curie
+          </span>
+          <span className="w-full rounded-md bg-white/95 px-1.5 py-0.5 text-center text-[9px] font-semibold leading-tight tracking-tight text-slate-900 shadow-sm">
+            76%
+          </span>
+        </div>
+      </div>
+      <p className="mt-2 text-[11px] leading-snug text-slate-500">
+        Shown only when narration hits a high-signal name, date, or figure — each flash is brief. Keyword pop-ups → Bold
+        slightly enlarges the card.
+      </p>
+    </div>
+  );
 }
 
 export function GeneratorConfigPanel({
@@ -57,20 +81,12 @@ export function GeneratorConfigPanel({
   const [vibe, setVibe] = useState(initBible.vibe ?? '');
   const [dos, setDos] = useState<string>((initBible.dos ?? []).join('\n'));
   const [donts, setDonts] = useState<string>((initBible.donts ?? []).join('\n'));
-  const [motifs, setMotifs] = useState<string>((initBible.motifs ?? []).join('\n'));
-  const [copySamples, setCopySamples] = useState<string>((initBible.copySamples ?? []).join('\n'));
   const [exampleTitleRows, setExampleTitleRows] = useState<TitleExampleRow[]>(() =>
     initExampleTitleRows(initBible),
   );
   const [videoTitleGuidance, setVideoTitleGuidance] = useState(initBible.videoTitleGuidance ?? '');
-  const [exampleScriptSnippets, setExampleScriptSnippets] = useState<string>(
-    (initBible.exampleScriptSnippets ?? []).join('\n'),
-  );
   const [referenceScriptSlots, setReferenceScriptSlots] = useState(() =>
     initReferenceScriptSlots(initBible.referenceFullScripts),
-  );
-  const [bannedPhrases, setBannedPhrases] = useState<string>(
-    (initBible.bannedPhrases ?? []).join('\n'),
   );
 
   const [gen, setGen] = useState<PersonalGeneratorConfig>(initGen);
@@ -87,13 +103,9 @@ export function GeneratorConfigPanel({
     setVibe(bible.vibe ?? '');
     setDos((bible.dos ?? []).join('\n'));
     setDonts((bible.donts ?? []).join('\n'));
-    setMotifs((bible.motifs ?? []).join('\n'));
-    setCopySamples((bible.copySamples ?? []).join('\n'));
     setExampleTitleRows(initExampleTitleRows(bible));
     setVideoTitleGuidance(bible.videoTitleGuidance ?? '');
-    setExampleScriptSnippets((bible.exampleScriptSnippets ?? []).join('\n'));
     setReferenceScriptSlots(initReferenceScriptSlots(bible.referenceFullScripts));
-    setBannedPhrases((bible.bannedPhrases ?? []).join('\n'));
   }, [account.id, styleBibleFingerprint]);
 
   useEffect(() => {
@@ -110,18 +122,15 @@ export function GeneratorConfigPanel({
       await api.updatePersonalAccount(account.id, {
         characterId: characterId || null,
         styleBible: {
+          ...(account.styleBible ?? {}),
           // Always send (even '') so merge overwrites DB; omitting the key would preserve an old vibe.
           vibe: vibe.trim(),
           dos: splitLines(dos),
           donts: splitLines(donts),
-          motifs: splitLines(motifs),
-          copySamples: splitLines(copySamples),
           exampleVideoTitles: exampleTitleRows.map((r) => r.text.trim()).filter(Boolean),
           // Always send a string (may be '') so JSON merge overwrites; omitting the key would leave old DB text.
           videoTitleGuidance: videoTitleGuidance.trim(),
-          exampleScriptSnippets: splitLines(exampleScriptSnippets),
           referenceFullScripts: packReferenceFullScripts(referenceScriptSlots),
-          bannedPhrases: splitLines(bannedPhrases),
         },
         generatorConfig: omitNullShallow(gen as unknown as Record<string, unknown>) as PersonalGeneratorConfig,
       });
@@ -182,31 +191,7 @@ export function GeneratorConfigPanel({
                   placeholder="No 'dive in', 'unlock', or 'game-changer'\nNo hype emoji\nNever stack more than 2 questions"
                 />
               </Field>
-              <Field label="Recurring motifs" hint="Visual or written threads the account returns to.">
-                <Textarea
-                  rows={3}
-                  value={motifs}
-                  onChange={(e) => setMotifs(e.target.value)}
-                  placeholder="Film grain\nHandheld B-roll\nOpen with a question"
-                />
-              </Field>
-              <Field label="Banned phrases" hint="Strings the script must never contain (on top of the built-in list).">
-                <Textarea
-                  rows={3}
-                  value={bannedPhrases}
-                  onChange={(e) => setBannedPhrases(e.target.value)}
-                  placeholder="let me explain\nmind-blowing\nyou won't believe"
-                />
-              </Field>
             </div>
-            <Field label="Copy samples" hint="Paste 3-8 lines of captions you love. The AI will mimic the rhythm and word choice.">
-              <Textarea
-                rows={5}
-                value={copySamples}
-                onChange={(e) => setCopySamples(e.target.value)}
-                placeholder='e.g. "Bought a bond you cant touch for 10 years. Made peace with that."\n"The index fund is boring. That is the point."'
-              />
-            </Field>
             <Field
               label="Example video titles"
               hint="One field per example. The model studies these for tone, length, and punctuation — then writes a new title per topic. Save configuration before generating."
@@ -271,17 +256,6 @@ export function GeneratorConfigPanel({
                 placeholder='e.g. "Curiosity questions only, no spoiler in the title" or "Match the dry documentary voice of the examples"'
                 maxLength={1500}
                 className="text-sm"
-              />
-            </Field>
-            <Field
-              label="Example script lines"
-              hint="One short line per row — hook energy and cadence only. For full scripts use the field below."
-            >
-              <Textarea
-                rows={4}
-                value={exampleScriptSnippets}
-                onChange={(e) => setExampleScriptSnippets(e.target.value)}
-                placeholder={'You are not behind. You are on a different clock.\nThree numbers changed how I save.'}
               />
             </Field>
             <div className="space-y-3">
@@ -492,6 +466,13 @@ export function GeneratorConfigPanel({
                 value={gen.kenBurnsOnStills !== false}
                 onChange={(v) => setGen({ ...gen, kenBurnsOnStills: v })}
               />
+              <Toggle
+                label="Names & numbers on video"
+                hint="Director mode: brief white-panel / dark-text lower-thirds when narration hits an important name, date, or figure — snappy, not full-screen, no opening title reel. Keyword pop-ups (subtle/bold) sets card size."
+                value={gen.namesNumbersTitleCard === true}
+                onChange={(v) => setGen({ ...gen, namesNumbersTitleCard: v })}
+              />
+              {gen.namesNumbersTitleCard === true ? <NamesNumbersSlatePreview /> : null}
             </div>
 
             {/* Model picker + quality */}
@@ -543,6 +524,45 @@ export function GeneratorConfigPanel({
                 </select>
               </Field>
               <Field
+                label="Narration voice"
+                hint="Each preset sets provider + voice. The text after the em dash is a plain-language sketch of how it usually sounds (not a guarantee). Stock accent/gender applies when this is “Default”. OpenAI presets only work when TTS provider is OpenAI."
+              >
+                <select
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                  value={matchTtsPresetId(gen)}
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    if (!id) {
+                      setGen({ ...gen, ttsVoiceId: undefined });
+                      return;
+                    }
+                    const p = TTS_VOICE_PRESETS.find((x) => x.id === id);
+                    if (!p) return;
+                    setGen({
+                      ...gen,
+                      ttsProvider: p.provider,
+                      ttsVoiceId: p.voiceId,
+                    });
+                  }}
+                >
+                  <option value="">Default (accent/gender below)</option>
+                  <optgroup label="ElevenLabs">
+                    {TTS_VOICE_PRESETS.filter((x) => x.provider === 'elevenlabs').map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {ttsPresetOptionLabel(p)}
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="OpenAI TTS">
+                    {TTS_VOICE_PRESETS.filter((x) => x.provider === 'openai').map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {ttsPresetOptionLabel(p)}
+                      </option>
+                    ))}
+                  </optgroup>
+                </select>
+              </Field>
+              <Field
                 label="Stock voice accent"
                 hint="Used when no custom voice ID is set below. British maps to UK-leaning stock voices per provider."
               >
@@ -571,7 +591,7 @@ export function GeneratorConfigPanel({
               </Field>
               <Field
                 label="Custom voice ID (optional)"
-                hint="ElevenLabs voice UUID or OpenAI voice name (alloy, echo, fable, onyx, nova, shimmer). Leave blank for stock accent/gender."
+                hint="Overrides the preset above when set: ElevenLabs voice UUID, or OpenAI name (alloy, echo, fable, onyx, nova, shimmer). Clear this field to use the narration voice dropdown or stock accent/gender."
               >
                 <Input
                   value={gen.ttsVoiceId ?? ''}
@@ -657,7 +677,7 @@ export function GeneratorConfigPanel({
               </Field>
               <Field
                 label="Keyword pop-ups"
-                hint="Short on-screen cards for names, places, stats — not full captions."
+                hint="Short on-screen cards for names, places, stats — not full captions. When “Names & numbers on video” is on, the director uses timed slate-style cards for narration anchors; this control sets subtle vs bold sizing for those (and for classic dark lower-thirds when that mode is off)."
               >
                 <select
                   value={gen.keywordPopStyle ?? 'off'}
@@ -682,7 +702,7 @@ export function GeneratorConfigPanel({
               />
               <Field
                 label="Avg seconds per clip / beat"
-                hint="Rough target for each on-screen segment (1.5–12). Director uses it for shot pacing; legacy path for beat length."
+                hint="Target seconds per on-screen beat (1–12). With voiceover, clips must add up to narration length, so the true average is `voice length ÷ number of shots` — each clip is capped near this value ×1.32; if the storyboard does not plan enough shots for your narration, the run will stop with a clear error instead of holding one image for minutes."
               >
                 <Input
                   type="number"
@@ -695,71 +715,103 @@ export function GeneratorConfigPanel({
                       averageClipSeconds: raw === '' ? undefined : Number(raw) || undefined,
                     });
                   }}
-                  min={1.5}
+                  min={1}
                   max={12}
                   placeholder="e.g. 3.5"
                   className="w-full"
                 />
               </Field>
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-                <Field
-                  label="Music under voice (FFmpeg)"
-                  hint="0.05–0.55 when VO + music mix. Default 0.22."
-                >
-                  <Input
-                    type="number"
-                    step={0.02}
-                    value={gen.musicDuckUnderVoice ?? ''}
-                    onChange={(e) => {
-                      const raw = e.target.value;
+              <Field
+                label="Background music level"
+                hint="1 = very subtle bed behind voice; 10 = loudest allowed. Advanced numeric fields below override automatic mix if you set them."
+              >
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range"
+                    min={1}
+                    max={10}
+                    step={1}
+                    className="min-w-0 flex-1 accent-violet-600"
+                    value={gen.musicBackgroundLevel ?? 2}
+                    onChange={(e) =>
                       setGen({
                         ...gen,
-                        musicDuckUnderVoice: raw === '' ? undefined : Number(raw) || undefined,
-                      });
-                    }}
-                    min={0.05}
-                    max={0.55}
-                    className="w-full"
+                        musicBackgroundLevel: Math.min(
+                          10,
+                          Math.max(1, Math.round(Number(e.target.value)) || 2),
+                        ),
+                      })
+                    }
                   />
-                </Field>
-                <Field label="Music solo (FFmpeg)" hint="0.1–0.85 when there is no VO. Default 0.55.">
-                  <Input
-                    type="number"
-                    step={0.02}
-                    value={gen.musicSoloVolume ?? ''}
-                    onChange={(e) => {
-                      const raw = e.target.value;
-                      setGen({
-                        ...gen,
-                        musicSoloVolume: raw === '' ? undefined : Number(raw) || undefined,
-                      });
-                    }}
-                    min={0.1}
-                    max={0.85}
-                    className="w-full"
-                  />
-                </Field>
-                <Field
-                  label="Music in Remotion render"
-                  hint="0.05–0.5 linear gain for slideshow / viral-short path. Leave blank for template default."
-                >
-                  <Input
-                    type="number"
-                    step={0.02}
-                    value={gen.musicBedVolume ?? ''}
-                    onChange={(e) => {
-                      const raw = e.target.value;
-                      setGen({
-                        ...gen,
-                        musicBedVolume: raw === '' ? undefined : Number(raw) || undefined,
-                      });
-                    }}
-                    min={0.05}
-                    max={0.5}
-                    className="w-full"
-                  />
-                </Field>
-              </div>
+                  <span className="w-8 shrink-0 text-right text-sm font-semibold tabular-nums text-slate-800">
+                    {gen.musicBackgroundLevel ?? 2}
+                  </span>
+                </div>
+              </Field>
+              <details className="rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2">
+                <summary className="cursor-pointer select-none text-xs font-semibold text-slate-700">
+                  Advanced music mix (optional overrides)
+                </summary>
+                <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                  <Field
+                    label="Music under voice (FFmpeg)"
+                    hint="0.05–0.55 when VO + music mix. Default 0.22."
+                  >
+                    <Input
+                      type="number"
+                      step={0.02}
+                      value={gen.musicDuckUnderVoice ?? ''}
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        setGen({
+                          ...gen,
+                          musicDuckUnderVoice: raw === '' ? undefined : Number(raw) || undefined,
+                        });
+                      }}
+                      min={0.05}
+                      max={0.55}
+                      className="w-full"
+                    />
+                  </Field>
+                  <Field label="Music solo (FFmpeg)" hint="0.1–0.85 when there is no VO. Default 0.55.">
+                    <Input
+                      type="number"
+                      step={0.02}
+                      value={gen.musicSoloVolume ?? ''}
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        setGen({
+                          ...gen,
+                          musicSoloVolume: raw === '' ? undefined : Number(raw) || undefined,
+                        });
+                      }}
+                      min={0.1}
+                      max={0.85}
+                      className="w-full"
+                    />
+                  </Field>
+                  <Field
+                    label="Music in Remotion render"
+                    hint="0.05–0.5 linear gain for slideshow / viral-short path. Leave blank for template default."
+                  >
+                    <Input
+                      type="number"
+                      step={0.02}
+                      value={gen.musicBedVolume ?? ''}
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        setGen({
+                          ...gen,
+                          musicBedVolume: raw === '' ? undefined : Number(raw) || undefined,
+                        });
+                      }}
+                      min={0.05}
+                      max={0.5}
+                      className="w-full"
+                    />
+                  </Field>
+                </div>
+              </details>
               <Field label="Aspect ratio">
                 <select
                   value={gen.aspectRatio ?? '9:16'}
@@ -848,7 +900,7 @@ export function GeneratorConfigPanel({
                   <option value="cool">Cool (morning blue)</option>
                   <option value="teal_orange">Teal & Orange (cinematic)</option>
                   <option value="film">Film (vintage curve)</option>
-                  <option value="bw">Black &amp; White</option>
+                  <option value="bw">Black & White</option>
                   <option value="high_contrast">High contrast punch</option>
                 </select>
               </Field>
@@ -896,51 +948,41 @@ export function GeneratorConfigPanel({
                 </div>
                 <Toggle
                   label="Long-form mode"
-                  hint="Chapter-style director; combine with a long-form-friendly theme or target length."
+                  hint="Chapter-style director; combine with a long-form-friendly theme or target length. Visual look comes from Media → Inspiration / Style reference (required), not a preset here. Set target length on the Long-form tab (single source of truth)."
                   value={gen.longformEnabled ?? false}
                   onChange={(v) => setGen({ ...gen, longformEnabled: v })}
                 />
-                <Field label="Target length (seconds)" hint="60–480. Used when long-form is on.">
+                <p className="text-xs leading-snug text-slate-600">
+                  <span className="font-semibold text-slate-700">Target length (60–480s)</span> is configured on the{' '}
+                  <span className="font-medium text-slate-800">Long-form</span> tab so it stays in sync with generation
+                  and the director prompt.
+                </p>
+                <Toggle
+                  label="Long-form cold open"
+                  hint="When on, the first shot stays up a little longer and narration starts after a short beat (music only) so the video eases in before the script."
+                  value={gen.longformIntroEnabled ?? false}
+                  onChange={(v) => setGen({ ...gen, longformIntroEnabled: v })}
+                />
+                <Field
+                  label="Cold open length (seconds)"
+                  hint="Only when cold open is on. 1.5–5 seconds before voiceover begins."
+                >
                   <Input
                     type="number"
-                    step={30}
-                    value={gen.longformTargetSeconds ?? ''}
+                    step={0.25}
+                    value={gen.longformIntroSeconds ?? ''}
                     onChange={(e) => {
                       const raw = e.target.value;
                       setGen({
                         ...gen,
-                        longformTargetSeconds: raw === '' ? undefined : Number(raw) || undefined,
+                        longformIntroSeconds: raw === '' ? undefined : Number(raw) || undefined,
                       });
                     }}
-                    min={60}
-                    max={480}
-                    placeholder="e.g. 240"
+                    min={1.5}
+                    max={5}
+                    placeholder="2.5"
                     className="w-full"
                   />
-                </Field>
-                <Field label="Long-form visual style" hint="Preset layered into AI prompts in long-form.">
-                  <select
-                    value={gen.longformAnimationStyle ?? ''}
-                    onChange={(e) =>
-                      setGen({
-                        ...gen,
-                        longformAnimationStyle:
-                          e.target.value === ''
-                            ? undefined
-                            : (e.target.value as PersonalGeneratorConfig['longformAnimationStyle']),
-                      })
-                    }
-                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
-                  >
-                    <option value="">Theme default</option>
-                    <option value="storybook">Storybook</option>
-                    <option value="cartoon">Cartoon / explainer</option>
-                    <option value="stick_figure">Stick figure</option>
-                    <option value="claymation">Claymation</option>
-                    <option value="pixel_art">Pixel art</option>
-                    <option value="watercolour">Watercolour</option>
-                    <option value="custom">Custom</option>
-                  </select>
                 </Field>
                 <Field
                   label="Max AI video clips (long-form)"
@@ -1174,7 +1216,16 @@ function CustomAudioCard({
   }
 
   async function clearAudio() {
-    if (!confirm('Remove the custom audio for this account?')) return;
+    if (
+      !(await confirmDialog({
+        title: 'Remove custom audio?',
+        description: 'Generated posts will go back to the default music picker for this channel.',
+        confirmLabel: 'Remove audio',
+        danger: true,
+      }))
+    ) {
+      return;
+    }
     setBusy(true);
     try {
       const base = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000').replace(/\/$/, '');

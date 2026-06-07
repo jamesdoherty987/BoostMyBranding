@@ -547,6 +547,61 @@ async function resolveCommonsFile(name: string): Promise<PersonalScrapedItem | n
 /* Google News RSS — real-world news imagery                            */
 /* ═══════════════════════════════════════════════════════════════════ */
 
+function extractTag(xml: string, tag: string): string | undefined {
+  const re = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'i');
+  const m = xml.match(re);
+  if (!m) return undefined;
+  let value = m[1]?.trim() ?? '';
+  // Strip CDATA wrapper.
+  const cdata = value.match(/^<!\[CDATA\[([\s\S]*?)\]\]>$/);
+  if (cdata) value = cdata[1]!;
+  return value.trim() || undefined;
+}
+
+/** Google News RSS often embeds tiny thumbs; some are YouTube preview tiles for unrelated embeds. */
+function isLikelyBadNewsThumbUrl(url: string): boolean {
+  const u = url.toLowerCase();
+  return (
+    u.includes('ytimg.com') ||
+    u.includes('youtube.com/vi/') ||
+    (u.includes('googleusercontent.com') && u.includes('youtube'))
+  );
+}
+
+/**
+ * Minimal, regex-based RSS item parser. Handles the standard RSS 2.0
+ * shape Google News returns without pulling in an XML library. We keep
+ * it tolerant — malformed items are skipped, not thrown.
+ */
+function parseRssItems(xml: string): Array<{
+  title?: string;
+  link?: string;
+  description?: string;
+  pubDate?: string;
+  source?: string;
+}> {
+  const items: Array<{
+    title?: string;
+    link?: string;
+    description?: string;
+    pubDate?: string;
+    source?: string;
+  }> = [];
+  const itemRegex = /<item[^>]*>([\s\S]*?)<\/item>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = itemRegex.exec(xml)) !== null) {
+    const inner = m[1] ?? '';
+    items.push({
+      title: extractTag(inner, 'title'),
+      link: extractTag(inner, 'link'),
+      description: extractTag(inner, 'description'),
+      pubDate: extractTag(inner, 'pubDate'),
+      source: extractTag(inner, 'source'),
+    });
+  }
+  return items;
+}
+
 /**
  * Fetches the top N items for a query from Google News RSS. Each item
  * carries a description HTML blob that usually includes an article
@@ -593,51 +648,6 @@ export async function searchGoogleNews(
 }
 
 /**
- * Minimal, regex-based RSS item parser. Handles the standard RSS 2.0
- * shape Google News returns without pulling in an XML library. We keep
- * it tolerant — malformed items are skipped, not thrown.
- */
-function parseRssItems(xml: string): Array<{
-  title?: string;
-  link?: string;
-  description?: string;
-  pubDate?: string;
-  source?: string;
-}> {
-  const items: Array<{
-    title?: string;
-    link?: string;
-    description?: string;
-    pubDate?: string;
-    source?: string;
-  }> = [];
-  const itemRegex = /<item[^>]*>([\s\S]*?)<\/item>/gi;
-  let m: RegExpExecArray | null;
-  while ((m = itemRegex.exec(xml)) !== null) {
-    const inner = m[1] ?? '';
-    items.push({
-      title: extractTag(inner, 'title'),
-      link: extractTag(inner, 'link'),
-      description: extractTag(inner, 'description'),
-      pubDate: extractTag(inner, 'pubDate'),
-      source: extractTag(inner, 'source'),
-    });
-  }
-  return items;
-}
-
-function extractTag(xml: string, tag: string): string | undefined {
-  const re = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'i');
-  const m = xml.match(re);
-  if (!m) return undefined;
-  let value = m[1]?.trim() ?? '';
-  // Strip CDATA wrapper.
-  const cdata = value.match(/^<!\[CDATA\[([\s\S]*?)\]\]>$/);
-  if (cdata) value = cdata[1]!;
-  return value.trim() || undefined;
-}
-
-/**
  * When we need actual photographs alongside the news narrative (not
  * just thumbnails), we run the article's keywords through Pexels /
  * Wikipedia. This is the "grounded imagery" path for the News theme.
@@ -652,9 +662,10 @@ export async function searchNewsImagery(
     searchPexelsPhotos(query, 4),
   ]);
 
-  // Prefer news thumbnails (real photojournalism) → Wikipedia → Pexels
+  // Prefer Wikipedia + Pexels (full-resolution, on-brief) before RSS inline thumbs,
+  // which are often low-res or point at unrelated YouTube preview tiles.
   const real: PersonalScrapedItem[] = news
-    .filter((n) => n.url)
+    .filter((n) => n.url && !isLikelyBadNewsThumbUrl(n.url))
     .map((n) => ({
       url: n.url,
       kind: 'image',
@@ -662,7 +673,7 @@ export async function searchNewsImagery(
       attribution: n.attribution,
       creditUrl: n.creditUrl,
     }));
-  const combined = [...real, ...wiki, ...pexels];
+  const combined = [...wiki, ...pexels, ...real];
   // De-dupe by URL.
   const seen = new Set<string>();
   return combined.filter((it) => {

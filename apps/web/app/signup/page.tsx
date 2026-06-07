@@ -154,7 +154,7 @@ function SignupPageInner() {
           <p className="font-semibold">Check your inbox</p>
           <p className="mt-1">
             We sent a sign-in link to <span className="font-semibold">{form.email}</span>. Click
-            it and you&apos;ll land back here — once signed in you can change your password from
+            it and you'll land back here — once signed in you can change your password from
             Settings.
           </p>
           <button

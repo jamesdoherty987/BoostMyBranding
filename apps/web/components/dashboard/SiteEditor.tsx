@@ -3552,7 +3552,7 @@ function BrandEditor({
       {/* SEO meta — what shows in the browser tab + Google search result. */}
       <div className="rounded-xl border border-slate-200 bg-white p-3">
         <p className="text-xs font-medium text-slate-600">
-          SEO &amp; sharing
+          SEO & sharing
           <span className="ml-2 font-normal text-slate-400">
             what search engines see
           </span>
@@ -4428,9 +4428,9 @@ function DomainEditor({ clientId }: { clientId: string }) {
                 ))}
               </div>
               <p className="mt-3 text-[11px] text-slate-500">
-                Registrar dashboards (GoDaddy, Namecheap, Cloudflare etc.) all have a &quot;DNS&quot;
-                or &quot;DNS management&quot; section. Add the record, wait 1–10 minutes, then click
-                &quot;Check verification&quot; below.
+                Registrar dashboards (GoDaddy, Namecheap, Cloudflare etc.) all have a "DNS"
+                or "DNS management" section. Add the record, wait 1–10 minutes, then click
+                "Check verification" below.
               </p>
             </div>
           ) : null}
@@ -5674,7 +5674,7 @@ function ItemsEditor({
                   allowDefault
                 />
                 <p className="text-[10px] text-slate-400">
-                  Tip: photos are managed from the preview — click the member&apos;s avatar
+                  Tip: photos are managed from the preview — click the member's avatar
                   in the preview or the Images tab.
                 </p>
               </ExpandableItemRow>
@@ -7325,7 +7325,7 @@ function ImagesEditor({
 
       {/* Hero link */}
       <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-[11px] text-slate-600">
-        Looking for the hero image? It&apos;s in the{' '}
+        Looking for the hero image? It's in the{' '}
         <strong className="text-slate-900">Hero</strong> tab — use it there so
         you can pick between AI-generated and client-uploaded, plus regenerate
         the illustration.
@@ -9726,7 +9726,7 @@ function IllustrationEditor({
               ) : null}
             </div>
             <p className="mt-1 text-[10px] text-slate-600">
-              Describe what you want and we&apos;ll draw a custom illustration
+              Describe what you want and we'll draw a custom illustration
               in your brand colours. Replaces the preset style when ready.
             </p>
 

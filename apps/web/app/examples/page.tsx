@@ -118,7 +118,7 @@ export default function ExamplesPage() {
               Want this for your brand?
             </h2>
             <p className="mt-3 text-slate-600">
-              Get started and you&apos;ll have your first month&apos;s content live in about a week.
+              Get started and you'll have your first month's content live in about a week.
             </p>
             <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">
               <Link href="/signup">
@@ -477,7 +477,7 @@ function StylisedContentPreview({ siteUrl }: { siteUrl: string }) {
             </h3>
             <p className="mt-4 max-w-md text-sm text-white/75 md:text-base">
               Stop missing calls and losing jobs. Our AI handles your phone, books
-              appointments, and manages customers while you&apos;re on site.
+              appointments, and manages customers while you're on site.
             </p>
             <div className="mt-6 flex flex-col gap-3 sm:flex-row">
               <a
@@ -564,7 +564,7 @@ function CafeSite() {
               ))}
             </div>
             <p className="mt-3 text-base text-slate-800 md:text-lg">
-              &ldquo;Best oat flat white in town. I&apos;d walk past three other places to get here.&rdquo;
+              “Best oat flat white in town. I'd walk past three other places to get here.”
             </p>
             <div className="mt-2 text-xs text-slate-500">— Happy customer</div>
           </div>
@@ -616,7 +616,7 @@ function TradeSite() {
               <h3 className="mt-4 text-4xl font-bold tracking-tight md:text-6xl">
                 Pipe burst at 2am?
                 <br />
-                <span className="text-[#48D886]">We&apos;re on it.</span>
+                <span className="text-[#48D886]">We're on it.</span>
               </h3>
               <p className="mt-4 text-white/80">
                 24/7 emergency plumbing. 30-minute average response.

@@ -397,7 +397,7 @@ export function VideosPanel({ clientId, client }: Props) {
           <Video className="h-10 w-10 text-slate-300" />
           <p className="text-sm font-medium text-slate-700">No videos yet</p>
           <p className="text-xs text-slate-500">
-            Hit &ldquo;Create video&rdquo; to render your first one.
+            Hit “Create video” to render your first one.
           </p>
         </div>
       ) : (

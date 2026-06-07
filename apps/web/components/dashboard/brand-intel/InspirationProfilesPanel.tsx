@@ -11,6 +11,7 @@ import {
   Spinner,
   Badge,
   toast,
+  confirmDialog,
 } from '@boost/ui';
 import {
   Plus,
@@ -255,7 +256,16 @@ function ProfileCard({
   }
 
   async function remove() {
-    if (!confirm(`Delete inspiration profile "${profile.name}"?`)) return;
+    if (
+      !(await confirmDialog({
+        title: `Delete “${profile.name}”?`,
+        description: 'This removes the inspiration profile permanently.',
+        confirmLabel: 'Delete',
+        danger: true,
+      }))
+    ) {
+      return;
+    }
     setBusy(true);
     try {
       await api.deleteInspirationProfile(clientId, profile.id);
@@ -495,7 +505,7 @@ function ProfileCard({
                 <ul className="mt-1 space-y-1">
                   {profile.copySamples.slice(0, 3).map((s, i) => (
                     <li key={i} className="text-xs italic text-slate-600">
-                      &ldquo;{s}&rdquo;
+                      “{s}”
                     </li>
                   ))}
                 </ul>

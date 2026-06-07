@@ -247,7 +247,7 @@ export function MediaLibrary({ clientId }: Props) {
           <ImageIcon className="h-10 w-10 text-slate-300" />
           <p className="text-sm font-medium text-slate-700">No media yet</p>
           <p className="text-xs text-slate-500">
-            Upload photos or videos — they&apos;ll show up here tied to this client.
+            Upload photos or videos — they'll show up here tied to this client.
           </p>
         </div>
       ) : (

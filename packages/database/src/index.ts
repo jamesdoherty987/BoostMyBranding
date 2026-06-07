@@ -11,6 +11,7 @@ import * as schema from './schema.js';
 
 export * from './schema.js';
 export { schema };
+export { loadRepoRootEnv } from './load-env.js';
 
 type DB = PostgresJsDatabase<typeof schema>;
 

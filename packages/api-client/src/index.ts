@@ -1845,6 +1845,8 @@ export class BoostApi {
       contentStudio: boolean;
       /** Server has CONTENTSTUDIO_WORKSPACE_ID (boolean only; id is never sent). */
       contentStudioDefaultWorkspace: boolean;
+      /** When set, Personal → Posting can link users to Content Studio to connect YouTube / IG / etc. */
+      contentStudioAppUrl: string | null;
       fal: boolean;
       scrapers: {
         pexels: boolean;
@@ -1924,7 +1926,7 @@ export class BoostApi {
         : '';
     return this.request<{
       configured: boolean;
-      accounts: Array<{ platform: string; handle: string; id: string }>;
+      accounts: Array<{ platform: string; handle: string; id: string; label: string }>;
     }>(`/api/v1/personal/contentstudio/accounts${q}`);
   }
 
@@ -1940,6 +1942,13 @@ export class BoostApi {
     return this.request<{ deleted: number }>(
       `/api/v1/personal/accounts/${accountId}/posts/failed`,
       { method: 'DELETE' },
+    );
+  }
+
+  regeneratePersonalPostThumbnail(accountId: string, postId: string) {
+    return this.request<{ thumbnailUrl: string }>(
+      `/api/v1/personal/accounts/${accountId}/posts/${postId}/regenerate-thumbnail`,
+      { method: 'POST' },
     );
   }
 
@@ -2249,6 +2258,26 @@ export type PersonalPlatform =
   | 'youtube'
   | 'google_business';
 
+/** Snapshot from `personal_posts.script.generationInfo` (list API as `generationSummary`). */
+export interface PersonalGenerationInfo {
+  pipeline: 'director' | 'legacy';
+  completedAt: string;
+  imageModelId?: string | null;
+  videoModelId?: string | null;
+  scriptModel?: string | null;
+  stitchEncodePreset?: string | null;
+  ttsProvider?: string | null;
+  ttsVoiceId?: string | null;
+  ttsSpeed?: number | null;
+  musicAttribution?: string | null;
+  musicSource?: 'custom_bed' | 'library' | null;
+  musicBackgroundLevel?: number | null;
+  themeTemplate?: string | null;
+  qualityTier?: string | null;
+  longformEnabled?: boolean | null;
+  costCents?: number | null;
+}
+
 export interface PersonalAccount {
   id: string;
   userId: string;
@@ -2342,6 +2371,8 @@ export interface PersonalPost {
   caption: string | null;
   hashtags: string[];
   durationSeconds: number | null;
+  /** Storyboard estimate when `durationSeconds` is not set yet (in-flight posts). */
+  plannedDurationSeconds?: number | null;
   qualityScore: number | null;
   status: string;
   errorMessage: string | null;
@@ -2363,6 +2394,8 @@ export interface PersonalPost {
   renderProgressLabel?: string | null;
   /** Recent encode activity from the API (timestamps + messages). */
   renderActivityLog?: Array<{ at: string; m: string }>;
+  /** Models / TTS / music when the post finished (from server `script.generationInfo`). */
+  generationSummary?: PersonalGenerationInfo | null;
 }
 
 /* ─── Account media library ──────────────────────────────── */
@@ -2453,15 +2486,11 @@ export interface PersonalAccountStyleBible {
   donts?: string[];
   palette?: string[];
   typography?: string;
-  motifs?: string[];
-  copySamples?: string[];
   exampleVideoTitles?: string[];
   /** Optional: tell the AI what you want in a headline (besides the example titles). */
   videoTitleGuidance?: string;
-  exampleScriptSnippets?: string[];
   /** Full scripts to learn structure / pacing from — never copy verbatim. */
   referenceFullScripts?: string[];
-  bannedPhrases?: string[];
 }
 
 export interface PersonalGeneratorConfig {
@@ -2491,6 +2520,8 @@ export interface PersonalGeneratorConfig {
   musicDuckUnderVoice?: number;
   musicSoloVolume?: number;
   musicBedVolume?: number;
+  /** 1 = very subtle background bed; 10 = loudest allowed. Server maps to FFmpeg + Remotion gains. */
+  musicBackgroundLevel?: number;
   trueStoriesOnly?: boolean;
   extraContentRules?: string;
   minQualityScore?: number;
@@ -2522,6 +2553,10 @@ export interface PersonalGeneratorConfig {
     | 'watercolour'
     | 'custom';
   longformMaxAiVideoShots?: number;
+  /** Long-form only: brief cold open before narration (hold first shot + delayed VO). */
+  longformIntroEnabled?: boolean;
+  /** Long-form intro length in seconds (typically 1.5–5). */
+  longformIntroSeconds?: number;
   /** FFmpeg encode tier when server env preset/crf unset (director stitch). */
   stitchEncodePreset?: 'fast' | 'balanced' | 'high';
   /**
@@ -2529,6 +2564,11 @@ export interface PersonalGeneratorConfig {
    * Default true.
    */
   kenBurnsOnStills?: boolean;
+  /**
+   * When true, director mode: timed **slate lower-thirds** for important spoken names/dates/figures
+   * (short white panel, dark type — not full-screen). Keyword pop-ups (subtle/bold) tunes card size.
+   */
+  namesNumbersTitleCard?: boolean;
 }
 
 /* ─── Custom themes (user-editable library) ──────────────── */

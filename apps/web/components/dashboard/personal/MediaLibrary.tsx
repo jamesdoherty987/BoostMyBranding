@@ -42,6 +42,7 @@ import {
   Textarea,
   Spinner,
   toast,
+  confirmDialog,
 } from '@boost/ui';
 import type {
   PersonalAccount,
@@ -422,7 +423,16 @@ function MediaCard({
   }
 
   async function remove() {
-    if (!confirm('Delete this asset?')) return;
+    if (
+      !(await confirmDialog({
+        title: 'Delete this asset?',
+        description: 'This removes the file from your library for this channel.',
+        confirmLabel: 'Delete',
+        danger: true,
+      }))
+    ) {
+      return;
+    }
     try {
       await api.deletePersonalMedia(item.id);
       onChanged();

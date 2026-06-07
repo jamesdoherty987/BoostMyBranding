@@ -8,6 +8,7 @@
     "dev": "turbo dev",
     "dev:stack": "turbo dev --filter=web --filter=api",
     "dev:web": "pnpm --filter web dev",
+    "dev:web:clean": "pnpm --filter web dev:clean",
     "dev:api": "pnpm --filter api dev",
     "lint": "turbo lint",
     "audit": "pnpm audit --prod",
@@ -16,7 +17,9 @@
     "db:generate": "pnpm --filter @boost/database db:generate",
     "db:migrate": "pnpm --filter @boost/database db:migrate",
     "db:seed": "pnpm --filter @boost/database db:seed",
-    "db:studio": "pnpm --filter @boost/database db:studio"
+    "db:studio": "pnpm --filter @boost/database db:studio",
+    "test:isolated-channel-title": "pnpm --filter api test:isolated-channel-title",
+    "print:personal-title-test-env": "pnpm --filter api print:personal-title-test-env"
   },
   "devDependencies": {
     "prettier": "^3.3.3",

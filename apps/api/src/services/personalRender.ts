@@ -55,10 +55,11 @@ export interface RenderPersonalVideoArgs {
   /** Frame aspect for Remotion output; defaults to 9:16 portrait. */
   aspectRatio?: '9:16' | '1:1' | '16:9' | '4:5';
   /**
-   * Background music gain in Remotion (0.05–0.45). Defaults: viral-short 0.15, slideshow 0.28.
-   * Director / FFmpeg path uses {@link PersonalGeneratorConfig.musicDuckUnderVoice} instead.
+   * Background music gain for viral-short Remotion path (0.05–0.45).
    */
   musicBedVolume?: number;
+  /** Slideshow / static path uses a slightly higher internal clamp — set separately when caller has both. */
+  musicBedVolumeSlideshow?: number;
   /** When false, hide burned-in hook / beat / slide text overlays. Default true. */
   useSubtitles?: boolean;
 }
@@ -136,11 +137,13 @@ export async function renderPersonalVideo(
   const viralMusicVol =
     typeof args.musicBedVolume === 'number' && Number.isFinite(args.musicBedVolume)
       ? Math.min(0.45, Math.max(0.05, args.musicBedVolume))
-      : 0.15;
+      : 0.12;
   const slideMusicVol =
-    typeof args.musicBedVolume === 'number' && Number.isFinite(args.musicBedVolume)
-      ? Math.min(0.5, Math.max(0.08, args.musicBedVolume))
-      : 0.28;
+    typeof args.musicBedVolumeSlideshow === 'number' && Number.isFinite(args.musicBedVolumeSlideshow)
+      ? Math.min(0.5, Math.max(0.08, args.musicBedVolumeSlideshow))
+      : typeof args.musicBedVolume === 'number' && Number.isFinite(args.musicBedVolume)
+        ? Math.min(0.5, Math.max(0.08, args.musicBedVolume))
+        : 0.14;
   const showBurnedInText = args.useSubtitles !== false;
 
   if (templateId === 'slideshow') {

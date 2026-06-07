@@ -25,7 +25,7 @@ export function TestimonialsMasonryGrid() {
           "mt-2 text-lg text-neutral-600 sm:text-center dark:text-neutral-200",
         )}
       >
-        Here&apos;s what some of our users have to say about Aceternity UI.
+        Here's what some of our users have to say about Aceternity UI.
       </p>
 
       <div className="mx-auto mt-10 grid max-w-7xl grid-cols-1 items-start gap-4 px-4 md:grid-cols-2 md:px-8 lg:grid-cols-4">

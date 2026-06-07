@@ -4,11 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "test:isolated-channel-title": "tsx --import ./scripts/load-root-env.ts scripts/isolated-channel-title-test.ts",
+    "print:personal-title-test-env": "tsx --import ./scripts/load-root-env.ts scripts/print-personal-title-test-env.ts",
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
     "lint": "tsc --noEmit",
-    "upload:public-music-manifest": "node scripts/upload-public-music-from-manifest.mjs scripts/r2-public-music-manifest.json"
+    "upload:public-music-manifest": "node scripts/upload-public-music-from-manifest.mjs scripts/r2-public-music-manifest.json",
+    "sync:r2-public-music-folder": "tsx --import ./scripts/load-root-env.ts ./scripts/sync-r2-public-music-folder.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",

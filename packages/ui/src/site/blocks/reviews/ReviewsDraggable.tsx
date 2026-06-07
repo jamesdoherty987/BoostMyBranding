@@ -65,7 +65,7 @@ export function ReviewsDraggable({ config }: ReviewsDraggableProps) {
                 ))}
               </div>
               <blockquote className="text-sm text-slate-800">
-                &ldquo;{r.text}&rdquo;
+                “{r.text}”
               </blockquote>
               <figcaption className="text-xs font-semibold text-slate-500">
                 &mdash; {r.author}

@@ -11,7 +11,7 @@ export function TestimonialsMarqueeGrid() {
           Used by builders around the world
         </h1>
         <p className="mt-4 text-base text-neutral-600 dark:text-neutral-200">
-          Everyone uses our product, except for the people who don&apos;t use
+          Everyone uses our product, except for the people who don't use
           it.
         </p>
       </div>

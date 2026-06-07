@@ -38,6 +38,7 @@ import {
   Textarea,
   Spinner,
   toast,
+  confirmDialog,
 } from '@boost/ui';
 import type {
   CreateCustomThemeBody,
@@ -122,7 +123,8 @@ export function ThemesManager() {
               Themes library
             </h3>
             <p className="mt-0.5 text-xs text-slate-500">
-              Edit existing themes or create your own. Custom themes flow into the account picker immediately.
+              <strong className="font-semibold text-slate-600">Account setup uses Overview</strong> to pick a
+              built-in theme per channel. This tab is only if you need <strong className="font-semibold text-slate-600">custom templates</strong>: create or clone a theme, edit defaults (voice, visuals, duration), then it appears in that same picker. Skip it if built-ins are enough.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -209,7 +211,17 @@ function ThemeList({
   }
 
   async function remove(id: string) {
-    if (!confirm('Delete this custom theme? Any account currently using it will keep working but the theme will no longer be selectable for new accounts.')) return;
+    if (
+      !(await confirmDialog({
+        title: 'Delete this custom theme?',
+        description:
+          'Accounts already using it keep working, but the theme will no longer be selectable for new channels.',
+        confirmLabel: 'Delete theme',
+        danger: true,
+      }))
+    ) {
+      return;
+    }
     setBusyId(id);
     try {
       await api.deleteCustomTheme(id);

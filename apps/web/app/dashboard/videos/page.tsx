@@ -390,7 +390,7 @@ export default function VideosPage() {
                   <li>• Image templates need publicly accessible URLs</li>
                   <li>• Product Showcase works best with transparent-background shots</li>
                   <li>• Image Reveal wants a full-bleed photo that tells a story</li>
-                  <li>• Brand colors are pulled from the client&apos;s record</li>
+                  <li>• Brand colors are pulled from the client's record</li>
                 </ul>
               </CardContent>
             </Card>

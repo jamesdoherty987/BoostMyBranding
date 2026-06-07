@@ -1030,7 +1030,7 @@ export default function WebsitesPage() {
                     >
                       <p className="mt-2 text-[11px] text-slate-500">
                         Leave this off to let the AI pick. Only override when you
-                        know the business doesn&apos;t match any obvious industry keyword.
+                        know the business doesn't match any obvious industry keyword.
                       </p>
                       <div className="mt-2 grid grid-cols-2 gap-1.5 md:grid-cols-3">
                         <button
@@ -2975,7 +2975,7 @@ function ImagePickerModal({
           ) : filtered.length === 0 ? (
             <div className="py-10 text-center">
               <p className="text-sm text-slate-500">
-                No images match &quot;{query.trim()}&quot;.
+                No images match "{query.trim()}".
               </p>
               <button
                 type="button"

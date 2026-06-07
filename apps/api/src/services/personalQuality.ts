@@ -119,7 +119,6 @@ export interface ScriptCheckResult {
 export function checkScriptRules(
   script: PersonalScript,
   theme: PersonalTheme,
-  extraBannedPhrases: string[] = [],
 ): ScriptCheckResult {
   const issues: string[] = [];
   const warnings: string[] = [];
@@ -134,8 +133,8 @@ export function checkScriptRules(
     .join(' ')
     .toLowerCase();
 
-  // 1. Banned phrases — hard-fail.
-  const allBanned = [...BANNED_PHRASES, ...extraBannedPhrases.map((p) => p.toLowerCase())];
+  // 1. Banned phrases — hard-fail (built-in list only).
+  const allBanned = [...BANNED_PHRASES];
   for (const phrase of allBanned) {
     if (joined.includes(phrase)) {
       issues.push(`Banned cliché: "${phrase}"`);

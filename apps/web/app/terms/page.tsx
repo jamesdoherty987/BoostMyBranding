@@ -22,7 +22,7 @@ export default function TermsPage() {
           <section>
             <h2 className="text-lg font-semibold text-slate-900">1. Agreement to terms</h2>
             <p className="mt-2">
-              By accessing or using BoostMyBranding&apos;s website, client portal, or services,
+              By accessing or using BoostMyBranding's website, client portal, or services,
               you agree to be bound by these Terms of Service. If you do not agree, please do
               not use our services.
             </p>
@@ -60,7 +60,7 @@ export default function TermsPage() {
                 subscription.
               </li>
               <li>
-                Prices may change with 30 days&apos; written notice. Existing subscribers will
+                Prices may change with 30 days' written notice. Existing subscribers will
                 be notified by email before any price change takes effect.
               </li>
             </ul>
@@ -100,7 +100,7 @@ export default function TermsPage() {
               </li>
               <li>
                 You confirm that you have the right to use all content you provide and that it
-                does not infringe on any third party&apos;s rights.
+                does not infringe on any third party's rights.
               </li>
               <li>
                 Content we create for you (captions, graphics, website copy) is owned by you
@@ -140,7 +140,7 @@ export default function TermsPage() {
               </li>
               <li>
                 We are not liable for any changes to social media platform algorithms, policies,
-                or availability that may affect your content&apos;s performance.
+                or availability that may affect your content's performance.
               </li>
               <li>
                 Our total liability for any claim arising from our services is limited to the
@@ -157,9 +157,9 @@ export default function TermsPage() {
             <h2 className="text-lg font-semibold text-slate-900">8. Acceptable use</h2>
             <p className="mt-2">You agree not to:</p>
             <ul className="mt-2 list-disc space-y-1 pl-5">
-              <li>Provide content that is unlawful, defamatory, or infringes on others&apos; rights.</li>
+              <li>Provide content that is unlawful, defamatory, or infringes on others' rights.</li>
               <li>Use our services for any illegal purpose.</li>
-              <li>Attempt to access other users&apos; accounts or data.</li>
+              <li>Attempt to access other users' accounts or data.</li>
               <li>Interfere with the operation of our platform.</li>
             </ul>
           </section>

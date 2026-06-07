@@ -230,9 +230,9 @@ export default function OnboardingPage() {
               <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-gradient-cta text-white shadow-brand">
                 <CheckCircle2 className="h-8 w-8" />
               </div>
-              <h1 className="mt-5 text-2xl font-bold tracking-tight">You&apos;re all set</h1>
+              <h1 className="mt-5 text-2xl font-bold tracking-tight">You're all set</h1>
               <p className="mt-2 text-sm text-slate-600">
-                Your account manager is putting together your first month. We&apos;ll
+                Your account manager is putting together your first month. We'll
                 message you in chat within two business days when the first posts
                 are ready for your approval.
               </p>

@@ -35,7 +35,11 @@ export interface ClaudeOptions {
 let _client: Anthropic | null = null;
 function client() {
   if (!_client && env.ANTHROPIC_API_KEY) {
-    _client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
+    _client = new Anthropic({
+      apiKey: env.ANTHROPIC_API_KEY,
+      /** Long director JSON can run past the SDK’s default; streaming is primary fix below. */
+      timeout: 25 * 60 * 1000,
+    });
   }
   return _client;
 }
@@ -55,9 +59,15 @@ export async function generateText(prompt: string, opts: ClaudeOptions = {}): Pr
   // regardless). Other models still accept the override.
   const omitTemperature = modelKey === 'opus';
 
-  const resp = await client()!.messages.create({
+  const maxTokens = opts.maxTokens ?? 2048;
+
+  // Anthropic’s SDK rejects (or warns then fails) non-streaming calls that
+  // are expected to run longer than ~10 minutes when max_tokens is large.
+  // Long-form storyboards use 32k output — always stream and assemble the
+  // final message so idle connections and the client-side guard behave.
+  const stream = client()!.messages.stream({
     model,
-    max_tokens: opts.maxTokens ?? 2048,
+    max_tokens: maxTokens,
     ...(omitTemperature ? {} : { temperature: opts.temperature ?? 0.7 }),
     system: opts.systemPrompt
       ? opts.cacheSystemPrompt
@@ -66,6 +76,8 @@ export async function generateText(prompt: string, opts: ClaudeOptions = {}): Pr
       : undefined,
     messages: [{ role: 'user', content: prompt }],
   });
+
+  const resp = await stream.finalMessage();
   const textBlocks = resp.content
     .filter((c): c is Anthropic.TextBlock => c.type === 'text')
     .map((c) => c.text);
@@ -198,7 +210,7 @@ export async function analyzeImage(
   const modelKey = opts.model ?? 'sonnet';
   const model = MODEL_MAP[modelKey];
   const omitTemperature = modelKey === 'opus';
-  const resp = await client()!.messages.create({
+  const stream = client()!.messages.stream({
     model,
     max_tokens: opts.maxTokens ?? 1024,
     ...(omitTemperature ? {} : { temperature: opts.temperature ?? 0.3 }),
@@ -212,6 +224,7 @@ export async function analyzeImage(
       },
     ],
   });
+  const resp = await stream.finalMessage();
   const text = resp.content
     .filter((c): c is Anthropic.TextBlock => c.type === 'text')
     .map((c) => c.text)

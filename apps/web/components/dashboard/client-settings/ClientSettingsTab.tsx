@@ -518,7 +518,7 @@ export function ClientSettingsTab({
             <div className="flex-1">
               <div className="text-sm font-medium text-slate-900">Public site is live</div>
               <div className="text-xs text-slate-500">
-                When off, the client&apos;s public site returns a 404 and custom domains stop
+                When off, the client's public site returns a 404 and custom domains stop
                 resolving. Client portal access is unchanged.
               </div>
             </div>
@@ -629,7 +629,7 @@ export function ClientSettingsTab({
               </button>
             </div>
             <p className="mt-0.5 text-[11px] text-slate-500">
-              Rename, hide, or reorder. Changes only affect this client&apos;s portal nav —
+              Rename, hide, or reorder. Changes only affect this client's portal nav —
               deep links always work.
             </p>
             <ul className="mt-3 space-y-2">

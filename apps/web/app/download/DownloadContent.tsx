@@ -168,7 +168,7 @@ function IOSSteps({ highlight }: { highlight?: boolean }) {
           </span>
         )}
       </div>
-      <p className="mt-1 text-xs text-slate-500">Use Safari — Chrome on iOS doesn&apos;t support PWA install.</p>
+      <p className="mt-1 text-xs text-slate-500">Use Safari — Chrome on iOS doesn't support PWA install.</p>
       <ol className="mt-4 space-y-3">
         {[
           { icon: Share, text: 'Tap the Share button at the bottom of Safari' },

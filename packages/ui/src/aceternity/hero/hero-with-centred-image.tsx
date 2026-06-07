@@ -17,7 +17,7 @@ export function HeroWithCenteredImage() {
             console.log("clicked");
           }}
         >
-          We&apos;ve raised $69M seed funding
+          We've raised $69M seed funding
         </Badge>
       </motion.div>
       <motion.h1

@@ -341,7 +341,7 @@ export function TalkingHeadTab({ clientId }: { clientId: string }) {
               <p className="flex items-start gap-1 text-xs text-slate-500">
                 <Info className="mt-0.5 h-3 w-3 shrink-0" />
                 The avatar reads this verbatim. Use ellipses (…) for natural pauses.
-                Avoid brackets, emoji, and markdown — they&apos;ll be read aloud.
+                Avoid brackets, emoji, and markdown — they'll be read aloud.
               </p>
             </CardContent>
           </Card>
@@ -432,7 +432,7 @@ export function TalkingHeadTab({ clientId }: { clientId: string }) {
                 {overDuration ? (
                   <div className="flex items-center gap-1 text-amber-700">
                     <Info className="h-3 w-3" />
-                    Script exceeds the model&apos;s {selectedModel?.maxDurationSeconds}s cap —
+                    Script exceeds the model's {selectedModel?.maxDurationSeconds}s cap —
                     consider trimming before rendering.
                   </div>
                 ) : null}

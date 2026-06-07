@@ -17,7 +17,7 @@
  * generation in real-time and debug failures.
  */
 
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import {
   getDb,
   isDbConfigured,
@@ -28,8 +28,10 @@ import {
   type PersonalGeneratorConfig,
 } from '@boost/database';
 import { getTheme, type PersonalTheme } from './personalThemes.js';
+import { clampLongformTargetSeconds } from './personalLongform.js';
 import { findThemeForUser } from './personalCustomThemes.js';
 import { generateScript, chooseTopic, type PersonalScript } from './personalScript.js';
+import { channelVideoTitleLikeIsolatedTest } from './personalChannelTitle.js';
 import {
   buildPersonalContentRulesPrompt,
   buildLegacyMediaPreferenceLine,
@@ -38,9 +40,19 @@ import {
   searchAssets,
   pickGameplayLoop,
 } from './personalScraper.js';
-import { synthesizeVoice, estimateDurationSeconds, joinNarrationParts } from './personalVoice.js';
+import {
+  synthesizeVoice,
+  estimateDurationSeconds,
+  joinNarrationParts,
+  stripLeadingHookFromFirstVoiceover,
+} from './personalVoice.js';
 import { pickMusic } from './personalMusic.js';
 import { renderPersonalVideo } from './personalRender.js';
+import { buildLegacyGenerationInfo } from './personalGenerationMeta.js';
+import {
+  resolveMusicBedSlideshow,
+  resolveMusicBedViral,
+} from './personalMusicMix.js';
 import { schedulePost } from './contentStudio.js';
 import {
   contentStudioAccountIdsOverride,
@@ -48,10 +60,18 @@ import {
 } from './personalContentPosting.js';
 import { generateImage } from './fal.js';
 import { broadcast } from './realtime.js';
-import { recentTopics, recentVideoTitles } from './personalAccounts.js';
+import {
+  recentTopics,
+  recentVideoTitles,
+  markPersonalPostQueuedFailedIfStillQueued,
+  withAbortWhenPersonalPostFailed,
+  PERSONAL_POST_CANCELLED_MESSAGE,
+  appendPersonalGenerationLog,
+} from './personalAccounts.js';
 import { features } from '../env.js';
 import { withRetry } from './retry.js';
 import { checkScriptRules } from './personalQuality.js';
+import { assertPersonalVideoExampleTitlesOrThrow } from './personalTitlePolicy.js';
 import { getCharacterUnsafe } from './personalCharacters.js';
 import { internalListForPipeline } from './personalAccountMedia.js';
 import { researchTopic, researchToPromptBlock } from './personalResearch.js';
@@ -77,6 +97,11 @@ export interface GenerateForAccountArgs {
   scheduledAt?: string;
   /** Dry-run — log what would happen without actually generating. */
   dryRun?: boolean;
+  /**
+   * When set, claim this `queued` row created by the HTTP handler instead of
+   * inserting a new personal_posts row (per-account generation queue).
+   */
+  reservedPostId?: string;
   /**
    * Internal: continue an interrupted director-mode post (same row). Used by
    * boot recovery — not exposed on the public generate HTTP route.
@@ -122,6 +147,7 @@ export async function generateForAccount(
       scheduledAt: args.scheduledAt,
       dryRun: args.dryRun,
       resumeFromPostId: args.resumeFromPostId,
+      reservedPostId: args.reservedPostId,
     });
   }
   return generateForAccountScript(args);
@@ -140,8 +166,14 @@ async function generateForAccountScript(
     .where(eq(personalAccounts.id, args.accountId));
   if (!account) throw new Error('Personal account not found');
   if (account.status === 'archived') {
+    if (args.reservedPostId) {
+      await markPersonalPostQueuedFailedIfStillQueued(
+        args.reservedPostId,
+        'This channel is archived — generation was not started.',
+      );
+    }
     return {
-      postId: '',
+      postId: args.reservedPostId ?? '',
       videoUrl: null,
       status: 'skipped',
       durationSeconds: 0,
@@ -156,7 +188,10 @@ async function generateForAccountScript(
     (await findThemeForUser(account.userId, account.themeId));
   if (!theme) throw new Error(`Theme not found: ${account.themeId}`);
 
-  // 0. pick topic + create row
+  const styleBibleEarly = (account.styleBible as PersonalAccountStyleBible) ?? {};
+  assertPersonalVideoExampleTitlesOrThrow(account.formatKind, styleBibleEarly);
+
+  // 0. pick topic + create row (or claim a reserved `queued` row from the HTTP handler)
   const recent = await recentTopics(account.id, 15);
   const topic =
     args.topic?.trim() ??
@@ -165,24 +200,64 @@ async function generateForAccountScript(
       topicSeeds: account.topicSeeds ?? undefined,
       recentTopics: recent,
       customDirection: account.customDirection ?? undefined,
+      styleBible: styleBibleEarly,
     }));
 
-  const [post] = await db
-    .insert(personalPosts)
-    .values({
-      accountId: account.id,
-      templateId: theme.template,
-      postKind:
-        (account.formatKind as 'video' | 'slideshow' | 'static_image') ??
-        theme.defaultFormat ??
-        'video',
-      topic,
-      script: {}, // filled in step 1
-      status: 'scripting',
-    })
-    .returning();
-  if (!post) throw new Error('Failed to create personal post row');
-  const postId = post.id;
+  const expectedTemplateId = theme.template;
+  let postId: string;
+  if (args.reservedPostId) {
+    const [existing] = await db
+      .select()
+      .from(personalPosts)
+      .where(eq(personalPosts.id, args.reservedPostId));
+    if (!existing || existing.accountId !== account.id) {
+      throw new Error('Reserved post not found for this account');
+    }
+    if (existing.status !== 'queued') {
+      throw new Error('Reserved post is no longer queued');
+    }
+    if (existing.templateId.startsWith('director:')) {
+      throw new Error('Reserved post was created for director mode but legacy pipeline was selected');
+    }
+    if (existing.templateId !== expectedTemplateId) {
+      await markPersonalPostQueuedFailedIfStillQueued(
+        args.reservedPostId,
+        'Theme changed while this post was waiting in queue.',
+      );
+      throw new Error('Theme changed while post was in queue');
+    }
+    postId = args.reservedPostId;
+    const [claimed] = await db
+      .update(personalPosts)
+      .set({
+        topic,
+        status: 'scripting',
+        script: {},
+        updatedAt: new Date(),
+      })
+      .where(and(eq(personalPosts.id, postId), eq(personalPosts.status, 'queued')))
+      .returning({ id: personalPosts.id });
+    if (!claimed) {
+      throw new Error('Could not claim reserved post — it may have been cancelled or superseded.');
+    }
+  } else {
+    const [post] = await db
+      .insert(personalPosts)
+      .values({
+        accountId: account.id,
+        templateId: theme.template,
+        postKind:
+          (account.formatKind as 'video' | 'slideshow' | 'static_image') ??
+          theme.defaultFormat ??
+          'video',
+        topic,
+        script: {}, // filled in step 1
+        status: 'scripting',
+      })
+      .returning();
+    if (!post) throw new Error('Failed to create personal post row');
+    postId = post.id;
+  }
 
   broadcastEvent(account.id, postId, 'started', { topic });
 
@@ -254,12 +329,28 @@ async function generateForAccountScript(
 
     const usedVideoTitles = await recentVideoTitles(account.id, 40);
 
+    const channelTitlePass = await channelVideoTitleLikeIsolatedTest({
+      account: {
+        id: account.id,
+        userId: account.userId,
+        themeId: account.themeId,
+        language: account.language,
+        styleBible: account.styleBible,
+        generatorConfig: account.generatorConfig,
+      },
+      topic,
+    });
+
     const script = await generateScript({
       theme,
       topic,
+      targetDurationSeconds: longformScript
+        ? clampLongformTargetSeconds(genConfig.longformTargetSeconds ?? theme.targetDurationSeconds)
+        : undefined,
       customDirection: account.customDirection ?? undefined,
       blacklist: account.topicBlacklist ?? undefined,
       language: account.language,
+      longform: longformScript,
       newsContext,
       styleBible,
       characterGuide: character
@@ -279,6 +370,7 @@ async function generateForAccountScript(
       averageClipSeconds: genConfig.averageClipSeconds,
       scriptModel: genConfig.scriptModel,
       recentVideoTitles: usedVideoTitles,
+      lockedVideoTitle: channelTitlePass ?? undefined,
     });
     if (script.blocked) {
       await markFailed(postId, `Blocked by safety filter: ${script.blockReason ?? 'unspecified'}`);
@@ -295,7 +387,7 @@ async function generateForAccountScript(
     totalCostCents += 2;
 
     /* ── 1b. Anti-slop check ───────────────────────────────── */
-    const rules = checkScriptRules(script, theme, styleBible.bannedPhrases ?? []);
+    const rules = checkScriptRules(script, theme);
     const minScore = genConfig.minQualityScore ?? 65;
     if (rules.score < minScore) {
       await markFailed(
@@ -328,24 +420,35 @@ async function generateForAccountScript(
 
     /* ── 2. Media sourcing ───────────────────────────────────── */
     broadcastEvent(account.id, postId, 'sourcing_media', {});
-    const mediaAssets = await sourceMediaForBeats({
-      theme,
-      script,
-      accountId: account.id,
-      styleBible,
-      genConfig: effectiveGen,
-      characterRefs: character
-        ? accountMedia.filter(
-            (m) => m.role === 'avatar_reference' && m.characterId === character.id,
-          )
-        : [],
-      character,
-      // Treat 'inspiration' the same as 'style_reference' for the script
-      // pipeline — they're both "make it look like this".
-      styleRefs: accountMedia.filter(
-        (m) => m.role === 'style_reference' || m.role === 'inspiration',
-      ),
-    });
+    void appendPersonalGenerationLog(
+      postId,
+      `Legacy pipeline: sourcing media for ${script.beats?.length ?? 0} beat(s)…`,
+    ).catch(() => {});
+    const mediaAssets = await withAbortWhenPersonalPostFailed(
+      postId,
+      sourceMediaForBeats({
+        theme,
+        script,
+        accountId: account.id,
+        styleBible,
+        genConfig: effectiveGen,
+        characterRefs: character
+          ? accountMedia.filter(
+              (m) => m.role === 'avatar_reference' && m.characterId === character.id,
+            )
+          : [],
+        character,
+        // Treat 'inspiration' the same as 'style_reference' for the script
+        // pipeline — they're both "make it look like this".
+        styleRefs: accountMedia.filter(
+          (m) => m.role === 'style_reference' || m.role === 'inspiration',
+        ),
+      }),
+    );
+    void appendPersonalGenerationLog(
+      postId,
+      `Legacy pipeline: sourced ${mediaAssets.length} media asset(s).`,
+    ).catch(() => {});
     if (theme.requiresGroundedImages && mediaAssets.some((m) => m.source === 'ai')) {
       // Grounded themes (News, History) cannot fall back to AI imagery.
       const withoutAi = mediaAssets.filter((m) => m.source !== 'ai');
@@ -386,11 +489,15 @@ async function generateForAccountScript(
     const useVoiceover = genConfig.useVoiceover ?? theme.useVoiceover;
     if (useVoiceover) {
       broadcastEvent(account.id, postId, 'voicing', {});
-      const narration = joinNarrationParts([
-        script.hook,
-        ...script.beats.map((b) => b.voiceover),
-        script.outro,
-      ]);
+      const rawBeatVos = script.beats.map((b) => b.voiceover ?? '');
+      const beatVosForNarration =
+        rawBeatVos.length === 0
+          ? rawBeatVos
+          : [
+              stripLeadingHookFromFirstVoiceover(script.hook ?? '', rawBeatVos[0] ?? ''),
+              ...rawBeatVos.slice(1),
+            ];
+      const narration = joinNarrationParts([script.hook, ...beatVosForNarration, script.outro]);
       const voice = await synthesizeVoice({
         text: narration,
         voiceId:
@@ -439,6 +546,14 @@ async function generateForAccountScript(
       }
     }
 
+    let musicSource: 'custom_bed' | 'library' | 'none' = 'none';
+    if (musicUrl) {
+      musicSource =
+        wantMusicBed && account.customAudioUrl && musicUrl === account.customAudioUrl
+          ? 'custom_bed'
+          : 'library';
+    }
+
     /* ── 5. Render ───────────────────────────────────────────── */
     await db
       .update(personalPosts)
@@ -463,7 +578,8 @@ async function generateForAccountScript(
       mediaAssets,
       voiceoverUrl,
       musicUrl,
-      musicBedVolume: genConfig.musicBedVolume,
+      musicBedVolume: resolveMusicBedViral(genConfig),
+      musicBedVolumeSlideshow: resolveMusicBedSlideshow(genConfig),
       useSubtitles: genConfig.useSubtitles !== false,
       accentColor: account.accentColor ?? theme.accentColor,
       watermarkHandle: account.watermarkHandle ?? undefined,
@@ -507,6 +623,19 @@ async function generateForAccountScript(
     }
 
     /* ── 7. Persist final state ──────────────────────────────── */
+    const scriptFinal = {
+      ...(script as unknown as Record<string, unknown>),
+      outputAspectRatio,
+      generationInfo: buildLegacyGenerationInfo({
+        genConfig,
+        account,
+        character: character ? { voiceId: character.voiceId ?? null } : null,
+        musicAttribution,
+        musicSource,
+        themeTemplate: theme.template,
+        totalCostCents,
+      }),
+    };
     await db
       .update(personalPosts)
       .set({
@@ -522,6 +651,7 @@ async function generateForAccountScript(
         renderProgress: null,
         renderProgressLabel: null,
         renderActivityLog: [],
+        script: scriptFinal as any,
         updatedAt: new Date(),
       })
       .where(eq(personalPosts.id, postId));
@@ -547,10 +677,12 @@ async function generateForAccountScript(
     };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    try {
-      await markFailed(postId, msg);
-    } catch (dbErr) {
-      console.error('[personal] markFailed could not persist:', (dbErr as Error).message);
+    if (msg !== PERSONAL_POST_CANCELLED_MESSAGE) {
+      try {
+        await markFailed(postId, msg);
+      } catch (dbErr) {
+        console.error('[personal] markFailed could not persist:', (dbErr as Error).message);
+      }
     }
     try {
       broadcastEvent(account.id, postId, 'failed', { error: msg });
@@ -613,15 +745,7 @@ async function sourceMediaForBeats(
 
   // Build a "style prefix" that gets appended to every AI generation so
   // the whole reel feels coherent.
-  const stylePrefix = [
-    theme.visualStyle,
-    styleBible.vibe,
-    styleBible.motifs && styleBible.motifs.length > 0
-      ? styleBible.motifs.join(', ')
-      : '',
-  ]
-    .filter(Boolean)
-    .join('. ');
+  const stylePrefix = [theme.visualStyle, styleBible.vibe].filter(Boolean).join('. ');
 
   const negativePrompt = [
     ...(styleBible.donts ?? []),

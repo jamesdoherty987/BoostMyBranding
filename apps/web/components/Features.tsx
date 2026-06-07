@@ -296,7 +296,7 @@ function VoiceArt() {
             caption
           </span>
           <br />
-          &ldquo;Morning ☕ first pour is on us if you&apos;re in before 9. See you soon.&rdquo;
+          “Morning ☕ first pour is on us if you're in before 9. See you soon.”
         </p>
       </div>
     </div>

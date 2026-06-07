@@ -110,7 +110,7 @@ export default function DashboardPage() {
           </div>
           <div className="mt-1 text-2xl font-bold">Subscribe to start publishing</div>
           <p className="mt-1 text-sm text-white/90">
-            Have a look around. When you&apos;re set, pick a plan and we&apos;ll start building your
+            Have a look around. When you're set, pick a plan and we'll start building your
             first month of content.
           </p>
           <Link href="/portal/subscription">

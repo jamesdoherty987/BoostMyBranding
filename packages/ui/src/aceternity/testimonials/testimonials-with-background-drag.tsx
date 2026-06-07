@@ -845,7 +845,7 @@ export function TestimonialsCanvas({
                   <div className="flex h-full flex-col justify-between">
                     <div>
                       <p className="text-base leading-snug font-semibold text-neutral-800 dark:text-neutral-100">
-                        &ldquo;{card.testimonial.title}&rdquo;
+                        “{card.testimonial.title}”
                       </p>
                       <p className="mt-3 text-sm leading-relaxed text-neutral-500 dark:text-neutral-400">
                         {card.testimonial.quote}

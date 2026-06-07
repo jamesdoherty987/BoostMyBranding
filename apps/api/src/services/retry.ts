@@ -12,6 +12,38 @@ interface RetryOptions {
   label?: string;
 }
 
+/** Rejected when {@link withTimeout} elapses before the wrapped promise settles. */
+export class TimeoutError extends Error {
+  override readonly name = 'TimeoutError';
+  constructor(
+    public readonly label: string,
+    public readonly ms: number,
+  ) {
+    super(`${label}: timed out after ${ms}ms`);
+  }
+}
+
+/**
+ * Race `promise` against a timer. Does not cancel upstream work (e.g. fal HTTP);
+ * use to avoid indefinite hangs on stuck network calls.
+ */
+export function withTimeout<T>(ms: number, label: string, promise: Promise<T>): Promise<T> {
+  if (!Number.isFinite(ms) || ms <= 0) return promise;
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new TimeoutError(label, ms)), ms);
+    promise.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(t);
+        reject(e);
+      },
+    );
+  });
+}
+
 export async function withRetry<T>(fn: () => Promise<T>, opts: RetryOptions = {}): Promise<T> {
   const attempts = opts.attempts ?? 3;
   const base = opts.baseDelayMs ?? 400;
@@ -39,6 +71,7 @@ export async function withRetry<T>(fn: () => Promise<T>, opts: RetryOptions = {}
 
 /** Default: retry on network errors, 5xx, 429, and timeouts. */
 export function isDefaultRetryable(err: unknown): boolean {
+  if (err instanceof TimeoutError) return true;
   const anyErr = err as any;
   const status: number | undefined = anyErr?.status ?? anyErr?.statusCode ?? anyErr?.response?.status;
   const code: string | undefined = anyErr?.code ?? anyErr?.name;

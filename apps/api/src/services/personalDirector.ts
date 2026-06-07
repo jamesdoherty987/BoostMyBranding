@@ -31,15 +31,28 @@
  *   - Science / education (concept → demo → punchline)
  */
 
+import { randomUUID } from 'node:crypto';
 import { generateJSON } from './claude.js';
-import { withRetry } from './retry.js';
+import { isDefaultRetryable, withRetry } from './retry.js';
 import type { PersonalTheme } from './personalThemes.js';
 import type { PersonalAccountStyleBible } from '@boost/database';
 import {
   buildStyleExamplesPrompt,
   buildTitleFirstWorkflowPrompt,
+  directorShotCountRange,
 } from './personalContentHints.js';
-import { generateChannelVideoTitle } from './personalChannelTitle.js';
+import { resolveLockedChannelVideoTitle } from './personalChannelTitle.js';
+
+/** Embedded in persisted storyboard JSON; stripped before Claude replans. */
+export const PERSONAL_SCRIPT_CK_PRE = '__pipelineCheckpoint' as const;
+export const PERSONAL_SCRIPT_CK_SRC = '__sourcingCheckpoint' as const;
+
+export function stripDirectorResumeKeys(raw: Record<string, unknown>): Record<string, unknown> {
+  const o = { ...raw };
+  delete o[PERSONAL_SCRIPT_CK_PRE];
+  delete o[PERSONAL_SCRIPT_CK_SRC];
+  return o;
+}
 
 /* ═══════════════════════════════════════════════════════════════════ */
 /* Data shapes                                                          */
@@ -265,6 +278,11 @@ export interface DirectArgs {
   /** When false, `imageCaption` is stripped at normalise time. */
   allowSparseImageText?: boolean;
   /**
+   * When true: opening white title slate **plus** timed `keywordCards` for spoken
+   * names / numbers throughout (stitch uses white-card / dark-type overlays).
+   */
+  namesNumbersTitleCard?: boolean;
+  /**
    * Long-form mode. When set, the director plans a CHAPTER-structured
    * storyboard suitable for minutes of content instead of seconds:
    *
@@ -296,7 +314,8 @@ export interface DirectArgs {
   recentVideoTitles?: string[];
   /**
    * When set, the director must paste this exact string into JSON `title`.
-   * Normally computed inside {@link planStoryboard} via {@link generateChannelVideoTitle}.
+   * Pipelines normally set this via {@link channelVideoTitleLikeIsolatedTest} before calling
+   * {@link planStoryboard} so the headline matches `pnpm test:isolated-channel-title`.
    */
   lockedVideoTitle?: string;
 }
@@ -304,16 +323,15 @@ export interface DirectArgs {
 export async function planStoryboard(args: DirectArgs): Promise<Storyboard> {
   const exampleTitles = (args.styleBible?.exampleVideoTitles ?? []).map((t) => t.trim()).filter(Boolean);
 
-  const lockedVideoTitle =
-    exampleTitles.length > 0
-      ? await generateChannelVideoTitle({
-          topic: args.topic,
-          language: args.language,
-          styleBible: args.styleBible,
-          recentVideoTitles: args.recentVideoTitles,
-          scriptModel: args.scriptModel,
-        })
-      : undefined;
+  const lockedVideoTitle = await resolveLockedChannelVideoTitle({
+    topic: args.topic,
+    language: args.language,
+    styleBible: args.styleBible,
+    recentVideoTitles: args.recentVideoTitles,
+    longform: args.longform?.enabled === true,
+    /** When the pipeline ran {@link channelVideoTitleLikeIsolatedTest} first, reuse it (no second LLM). */
+    lockedVideoTitle: args.lockedVideoTitle,
+  });
 
   if (process.env.PERSONAL_DEBUG_TITLES === '1') {
     console.info('[director:planStoryboard]', {
@@ -324,8 +342,9 @@ export async function planStoryboard(args: DirectArgs): Promise<Storyboard> {
   }
   // Long-form storyboards emit a lot more JSON — 5-8 chapters × 3-5
   // shots with full cinematography fields per shot easily crosses
-  // the default 4k budget. Bump to 12k when longform is on.
-  const maxTokens = args.longform?.enabled ? 12_000 : 4_096;
+  // the default 4k budget. Use a large output budget so the model is not
+  // cut off mid-string (which surfaces as JSON.parse SyntaxError).
+  const maxTokens = args.longform?.enabled ? 32_000 : 4_096;
 
   const prompt = buildDirectorPrompt({
     ...args,
@@ -337,7 +356,11 @@ export async function planStoryboard(args: DirectArgs): Promise<Storyboard> {
         model: args.scriptModel ?? 'sonnet',
         maxTokens,
       }),
-    { label: `director:${args.theme.id}:${args.topic.slice(0, 40)}`, attempts: 2 },
+    {
+      label: `director:${args.theme.id}:${args.topic.slice(0, 40)}`,
+      attempts: 3,
+      retryOn: (e) => isDefaultRetryable(e) || e instanceof SyntaxError,
+    },
   );
 
   // Normalise + sanity defaults.
@@ -347,16 +370,31 @@ export async function planStoryboard(args: DirectArgs): Promise<Storyboard> {
     cutPace?: DirectArgs['cutPace'];
     keywordPopStyle?: DirectArgs['keywordPopStyle'];
     allowSparseImageText?: boolean;
+    namesNumbersTitleCard?: boolean;
   } = {
     averageShotSeconds: args.averageShotSeconds,
     cutPace: args.cutPace,
     keywordPopStyle: args.keywordPopStyle,
     allowSparseImageText: args.allowSparseImageText,
+    namesNumbersTitleCard: args.namesNumbersTitleCard === true,
   };
   if (args.longform?.enabled) normOpts.longform = true;
 
+  let storyboardTitle: string;
+  if (exampleTitles.length > 0) {
+    const t = lockedVideoTitle?.trim();
+    if (!t) {
+      throw new Error(
+        '[director] Example titles are configured but the title generator returned an empty string.',
+      );
+    }
+    storyboardTitle = t;
+  } else {
+    storyboardTitle = (lockedVideoTitle?.trim() || (raw.title ?? '').trim() || args.topic).trim();
+  }
+
   const out: Storyboard = {
-    title: (lockedVideoTitle?.trim() || (raw.title ?? '').trim() || args.topic).trim(),
+    title: storyboardTitle,
     hook: raw.hook ?? '',
     outro: raw.outro ?? '',
     caption: raw.caption ?? '',
@@ -449,7 +487,7 @@ export async function planStoryboard(args: DirectArgs): Promise<Storyboard> {
   // user's target (< 85%), stretch every shot proportionally so we land
   // near the target. Without this an "8 minute" video frequently ends
   // at 4 minutes because Claude under-plans shot counts. Cap stretch at
-  // 1.8× per shot to avoid one glacial 25-second stare.
+  // 2.2× per shot to avoid one glacial stare.
   if (args.longform?.enabled) {
     const target = args.longform.targetDurationSeconds;
     if (
@@ -457,7 +495,7 @@ export async function planStoryboard(args: DirectArgs): Promise<Storyboard> {
       out.estimatedDurationSeconds > 0 &&
       out.estimatedDurationSeconds < target * 0.85
     ) {
-      const ratio = Math.min(1.8, target / out.estimatedDurationSeconds);
+      const ratio = Math.min(2.2, target / out.estimatedDurationSeconds);
       for (const s of allShots) {
         s.durationSeconds = Math.min(
           perShotMax,
@@ -468,6 +506,28 @@ export async function planStoryboard(args: DirectArgs): Promise<Storyboard> {
         (acc, s) => acc + s.durationSeconds,
         0,
       );
+    }
+    // Greedy top-up: proportional stretch can still undershoot when many
+    // shots already sit at perShotMax. Add 0.1s to the shortest shot
+    // repeatedly until within ~8% of target or no headroom.
+    if (
+      target &&
+      out.estimatedDurationSeconds > 0 &&
+      out.estimatedDurationSeconds < target * 0.92
+    ) {
+      let guard = 0;
+      while (out.estimatedDurationSeconds < target * 0.92 && guard++ < 8000) {
+        let progressed = false;
+        const sorted = [...allShots].sort((a, b) => a.durationSeconds - b.durationSeconds);
+        for (const s of sorted) {
+          if (s.durationSeconds >= perShotMax - 0.051) continue;
+          s.durationSeconds = Math.round((Math.min(perShotMax, s.durationSeconds + 0.1)) * 10) / 10;
+          progressed = true;
+          break;
+        }
+        if (!progressed) break;
+        out.estimatedDurationSeconds = allShots.reduce((acc, s) => acc + s.durationSeconds, 0);
+      }
     }
   }
 
@@ -538,6 +598,7 @@ function normaliseShot(
     cutPace?: DirectArgs['cutPace'];
     keywordPopStyle?: DirectArgs['keywordPopStyle'];
     allowSparseImageText?: boolean;
+    namesNumbersTitleCard?: boolean;
   },
 ): DirectorShot {
   const pace = opts?.cutPace ?? 'normal';
@@ -567,10 +628,28 @@ function normaliseShot(
             ? 7
             : 4.5
           : baseDefault;
-  const duration = clamp(s.durationSeconds ?? defaultMid, minDur, maxDur);
+  const rawDur = (s as { durationSeconds?: unknown }).durationSeconds;
+  const parsedDur =
+    typeof rawDur === 'string'
+      ? Number(rawDur)
+      : typeof rawDur === 'number'
+        ? rawDur
+        : undefined;
+  let duration = clamp(
+    parsedDur !== undefined && Number.isFinite(parsedDur) ? parsedDur : defaultMid,
+    minDur,
+    maxDur,
+  );
+  // Honour operator "avg seconds per clip": model JSON often ignores pacing.
+  if (avg != null && Number.isFinite(avg) && avg > 0) {
+    const capLo = Math.max(minDur, avg * 0.75);
+    const capHi = Math.min(maxDur, avg * 1.35);
+    duration = clamp(duration, capLo, capHi);
+  }
 
   let keywordCards = parseKeywordCards((s as { keywordCards?: unknown }).keywordCards);
-  if (opts?.keywordPopStyle === 'off') keywordCards = undefined;
+  const slateNamesNumbers = opts?.namesNumbersTitleCard === true;
+  if (opts?.keywordPopStyle === 'off' && !slateNamesNumbers) keywordCards = undefined;
   else if (keywordCards) {
     keywordCards = keywordCards
       .map((k) => ({
@@ -647,18 +726,11 @@ function buildDirectorPrompt(args: DirectArgs): string {
         sb.vibe ? `- Vibe: ${sb.vibe}` : '',
         sb.dos && sb.dos.length > 0 ? `- Always do: ${sb.dos.join(' · ')}` : '',
         sb.donts && sb.donts.length > 0 ? `- Never do: ${sb.donts.join(' · ')}` : '',
-        sb.motifs && sb.motifs.length > 0 ? `- Recurring motifs: ${sb.motifs.join(' · ')}` : '',
         sb.palette && sb.palette.length > 0
           ? `- Brand palette (every shot should lean on these colours): ${sb.palette.join(', ')}`
           : '',
         sb.typography?.trim()
           ? `- Typography / on-screen text feel: ${sb.typography.trim()}`
-          : '',
-        sb.bannedPhrases && sb.bannedPhrases.length > 0
-          ? `- BANNED phrases (never write): ${sb.bannedPhrases.join(' · ')}`
-          : '',
-        sb.copySamples && sb.copySamples.length > 0
-          ? `- Copy samples (mimic rhythm and word choice — never copy verbatim):\n${sb.copySamples.map((s) => `  • "${s}"`).join('\n')}`
           : '',
       ]
         .filter(Boolean)
@@ -740,28 +812,77 @@ function buildDirectorPrompt(args: DirectArgs): string {
     ? pace === 'rapid'
       ? `- Plan approximately ${Math.round(totalShotTarget * 1.12)} SHOTS total across ${longformChapterCount} chapters — RAPID PACING: favour 3-7s shots, frequent cuts, still land near the ${longformTarget}s runtime target (±15%).`
       : `- Plan approximately ${totalShotTarget} SHOTS total across ${longformChapterCount} chapters. Keep every shot 5-10 seconds. The sum of shot durations must be close to the ${longformTarget}s target.`
-    : pace === 'rapid'
-      ? `- Plan 8-18 SHOTS total. MOST shots 1.5-3.5 seconds — rapid editorial cuts; keep the viewer oriented with strong subjectAction each time.${multiActHint}`
-      : pace === 'relaxed'
-        ? `- Plan 4-8 SHOTS total. Most shots 3.5-6 seconds — let moments breathe; fewer, richer frames.${multiActHint}`
-        : `- Plan 5-10 SHOTS total. Most shots are 2-4 seconds. Shots carry the viewer — one long clip is a dead video.${multiActHint}`;
+    : (() => {
+        const { min, max } = directorShotCountRange({
+          targetDurationSeconds: args.targetDurationSeconds,
+          averageShotSeconds: args.averageShotSeconds,
+          cutPace: pace,
+        });
+        const acHint =
+          args.averageShotSeconds != null && Number.isFinite(args.averageShotSeconds)
+            ? args.averageShotSeconds.toFixed(2)
+            : '3';
+        const tightPace =
+          args.averageShotSeconds != null &&
+          Number.isFinite(args.averageShotSeconds) &&
+          args.averageShotSeconds <= 3;
+        return [
+          `- Plan **${min}–${max}** SHOTS total for ~${args.targetDurationSeconds}s target runtime (on-screen average ≈${acHint}s — **vary** each shot's \`durationSeconds\`; never the same value on every shot).`,
+          ...(tightPace
+            ? [
+                `- **Low average clip (${acHint}s):** treat **${max}** shots as the planning target (not the minimum ${min}) unless the format truly needs fewer — otherwise each image stays on screen far longer than the pacing setting after narration is synthesized.`,
+              ]
+            : []),
+          '- Write **different-length** \`voiceover\` lines per shot so final audio can drive cut timing (dense line = shorter beat, explanatory line = longer beat).',
+          `- If you output fewer than ${min} shots, the edit cannot match the full narration — split acts into more beats/shots instead of stretching a handful of clips.${multiActHint}`,
+        ].join('\n');
+      })();
 
-  const keywordBlock =
-    args.keywordPopStyle && args.keywordPopStyle !== 'off'
-      ? `\n\nKEYWORD POP-UPS (premium lower-thirds — NOT full captions):\n- On roughly 30-45% of shots, add optional \`keywordCards\`: max 3 entries; each \`text\` is 1-3 words OR a compact stat (e.g. "Kyoto" or "$4.2T"). Never sentences.\n- Optional \`tStart\` / \`tEnd\` in seconds within that shot (must stay inside the shot duration). Omit for auto-timing.\n- Do not repeat words already in \`onScreen\` or the VO line.\n- Visual tier: ${args.keywordPopStyle === 'bold' ? 'BOLD — high contrast, occasional single-word punch.' : 'SUBTLE — refined documentary / broadcast look.'}`
+  const namesNumbersSlateBlock =
+    args.namesNumbersTitleCard === true
+      ? `\n\nNAMES & NUMBERS SLATE POPUPS (**enabled** — small **lower-third** cards only: light panel + dark type in post via FFmpeg, **not** burned into AI pixels; never full-screen, never paragraphs):\n` +
+        `- Add \`keywordCards\` only when a **high-signal** proper noun, date, year, place, headline figure, currency, %, or age appears in this shot's \`voiceover\` and seeing it briefly helps comprehension.\n` +
+        `- **Each card:** **1–3 words** (Title Case for names) OR one compact stat (\`"76%"\`, \`"$4.2T"\`). Never a phrase longer than three words; never duplicate the full hook/title.\n` +
+        `- **Max 2 cards per shot.** Do not repeat the same token on the next shot unless the VO reframes it materially.\n` +
+        `- **Timing (mandatory):** \`tStart\` / \`tEnd\` = seconds from **this shot's** start (0 = first frame). Keep each flash **~0.35–0.95s** — snappy. Windows must **not overlap**.\n` +
+        `- **Look:** concise sans-serif feel consistent with the edit's \`editPlan.colourGrade\` mood (neutral documentary — not neon, not meme fonts).\n` +
+        `- **Skip** low-value tokens, filler, opinion with no figure, and anything already obvious from the picture.\n` +
+        `- **Density:** ${args.keywordPopStyle === 'bold' ? 'Bold — fewer pops, only the sharpest anchors.' : 'Subtle — default to one card or none unless the VO is dense with facts.'}`
       : '';
 
+  const keywordBlock =
+    args.namesNumbersTitleCard === true
+      ? namesNumbersSlateBlock
+      : args.keywordPopStyle && args.keywordPopStyle !== 'off'
+        ? `\n\nKEYWORD POP-UPS (premium lower-thirds — NOT full captions):\n- On roughly 30-45% of shots, add optional \`keywordCards\`: max 3 entries; each \`text\` is 1-3 words OR a compact stat (e.g. "Kyoto" or "$4.2T"). Never sentences.\n- Optional \`tStart\` / \`tEnd\` in seconds within that shot (must stay inside the shot duration). Omit for auto-timing.\n- Do not repeat words already in \`onScreen\` or the VO line.\n- Visual tier: ${args.keywordPopStyle === 'bold' ? 'BOLD — high contrast, occasional single-word punch.' : 'SUBTLE — refined documentary / broadcast look.'}`
+        : '';
+
   const sparseTextBlock = args.allowSparseImageText
-    ? `\n\nON-IMAGE INFORMATION LABELS (\`imageCaption\` — **enabled** for this account):\n- Whenever the **voiceover** states something viewers should remember — **calendar dates**, **years**, **people's names**, **cities / countries / landmarks**, **amounts of money**, **percentages**, **ages**, or other **proper-noun facts** — set \`imageCaption\` on that **\`ai_image\`** shot (or the very next \`ai_image\` shot if the current shot is video). **Max 4 words** (symbols and digits count). Examples: "June 6, 1944", "Marie Curie", "Lagos", "$4.2T", "76%".\n- Aim for **imageCaption on a substantial share of \`ai_image\` shots** whenever the narration is fact-heavy — not one-off decoration. If the script names many dates or names, **most** of those beats should carry a matching label.\n- Never paste a full sentence, the hook, or duplicate \`onScreen\` verbatim — only the crisp fact. **Omit** \`imageCaption\` only when the frame is already a photo of a sign/document that clearly shows the same text, or the shot is not \`ai_image\`.`
+    ? `\n\nON-IMAGE INFORMATION LABELS (\`imageCaption\` — **enabled** for this account):\n- Only when **this shot's** voiceover states a memorable **proper noun or number** viewers must retain — **dates, years, people's names, places, money, %, ages** — set \`imageCaption\` on that **\`ai_image\`** shot (max **4 words**). Examples of valid labels: "June 6, 1944", "Marie Curie", "Lagos", "$4.2T", "76%".\n- **Never** put the video JSON \`title\`, hook line, channel name, or **any** style-bible example headline/script line into \`imageCaption\` — those are not spoken facts and become random on-screen junk.\n- Omit \`imageCaption\` on most shots; use sparingly when VO is fact-dense. Omit when the frame already shows the same text, or the shot is not \`ai_image\`.`
     : '';
 
   const sparseDirectingRule = args.allowSparseImageText
-    ? `- **imageCaption:** follow ON-IMAGE INFORMATION LABELS above — dates, names, places, and stats spoken in VO must get a ≤4-word \`imageCaption\` on \`ai_image\` shots unless redundant with the frame.\n`
+    ? `- **imageCaption:** only for proper-noun / number facts spoken in **that shot's** VO — never titles, hooks, or example lines; omit unless necessary.\n`
     : '';
 
   const imageCaptionJsonLine = args.allowSparseImageText
-    ? '              "imageCaption": "<on ai_image: set ≤4 words when VO gives a date, year, name, place, money, %, or stat; use often when facts are spoken; omit only if frame already shows same text>"'
+    ? '              "imageCaption": "<ai_image only: ≤4 words, ONLY a date/year/name/place/stat explicitly spoken in THIS shot\'s voiceover — never title/hook/example lines; usually omit>"'
     : '              "imageCaption": "<optional ≤4 words on rare ai_image shots>"';
+
+  const namesNumbersDirectingRule =
+    args.namesNumbersTitleCard === true
+      ? '- **Names & numbers slate popups:** obey NAMES & NUMBERS SLATE POPUPS — short lower-third flashes only; never open with a title slate.\n'
+      : '';
+
+  const avgClipOperatorRule =
+    args.averageShotSeconds != null &&
+    Number.isFinite(args.averageShotSeconds) &&
+    args.averageShotSeconds > 0
+      ? `- **Avg seconds per clip (~${args.averageShotSeconds.toFixed(2)}s):** centre most \`durationSeconds\` around ~${(args.averageShotSeconds * 0.88).toFixed(1)}–${(args.averageShotSeconds * 1.18).toFixed(1)}s unless that line of VO clearly needs more air; do not systematically overshoot without narrative reason — the stitcher enforces this band when stretching to voice.\n`
+      : '';
+
+  const visualPurposeRule =
+    '- **Every shot earns the cut:** each \`description\` (and scraper \`imageQuery\` when used) must advance a **new** idea aligned with that shot\'s \`voiceover\` — no run of near-duplicate frames for the same beat. If the story does not need another angle, merge beats instead of padding with redundant \`ai_image\` / \`ai_video\`.\n';
 
   const locked = args.lockedVideoTitle?.trim();
   const exampleTitleCount = (args.styleBible?.exampleVideoTitles ?? []).filter(Boolean).length;
@@ -771,14 +892,14 @@ function buildDirectorPrompt(args: DirectArgs): string {
       : buildTitleFirstWorkflowPrompt(args.styleBible, args.recentVideoTitles);
   const lockedTitleBlock =
     locked && locked.length > 0
-      ? `\n\nLOCKED TITLE — JSON "title" must be this exact string (do not edit):\n<<< ${locked} >>>\nHook and shots must match this title and the topic.\n`
+      ? `\n\nLOCKED TITLE — JSON "title" must be this exact string (do not edit):\n<<< ${locked} >>>\nThis string was generated to match the account’s **example video titles** (format + register). Hook and shots must match this title and the topic; DEFAULT VOICE below is for narration — do not reinterpret the title.\n`
       : '';
   const titleJsonLine =
     locked && locked.length > 0
       ? `  "title": ${JSON.stringify(locked)},`
       : `  "title": "${
           exampleTitleCount > 0
-            ? '<one line — MUST obey STEP 0 + STYLE REFERENCES: same headline *species* as example titles for THIS topic; MUST differ from every ALREADY-PUBLISHED title; never generic>'
+            ? '<one line — STRICT: same format and content register as STYLE example titles for THIS topic; must differ from ALREADY-PUBLISHED; theme voice is NOT a different title format>'
             : '<5-9 words>'
         }",`;
   const targetForPrompt = longform ? longformTarget : args.targetDurationSeconds;
@@ -792,9 +913,10 @@ PREFERRED PLATFORMS: ${args.theme.preferredPlatforms.join(', ')}${styleBibleBloc
 
 DIRECTING RULES (non-negotiable):
 ${shotCountRule}
-${sparseDirectingRule}- Give every shot a CONCRETE subject action (verb + object), a camera move, a framing, a lighting description, and a palette. Abstract = slop.
+${avgClipOperatorRule}${visualPurposeRule}${namesNumbersDirectingRule}${sparseDirectingRule}- Give every shot a CONCRETE subject action (verb + object), a camera move, a framing, a lighting description, and a palette. Abstract = slop.
 - Use intentional CUTS. Default transition is 'hard_cut'. Save 'whip_pan' / 'match_cut' / 'flash_cut' for moments that earn them.
 - Reuse the SAME character / setting descriptors across shots so AI models keep consistency. Don't say "a woman" once and "she" the next shot — re-describe every time.
+- When reference stills/clips or character sheets are passed into models, treat them as **continuity anchors only** — never plan shots that simply remake a reference frame (same pose, crop, and layout). Each shot must be a new editorial frame in the same visual world.
 - Mark each shot as ONE of: ai_video (expensive — use sparingly for money-shots and motion-critical moments), ai_image (cheap, animated at render with Ken Burns), scraped_video, scraped_image, user_media, b_roll.
 - Cap ai_video to at most ${args.maxAiVideoShots ?? (longform ? 5 : 3)} per storyboard. Use ai_image or scraped_image for the rest.
 - If user references (character refs) are relevant to a shot, add their index to \`referenceIndices\`. The video model will use them to anchor identity.
@@ -809,7 +931,7 @@ extreme_wide, wide, medium_wide, medium, medium_close, close_up, extreme_close_u
 
 SHOTS GRAMMAR (transition out):
 hard_cut (default), match_cut, whip_pan, dip_to_black, cross_dissolve, flash_cut, jump_cut, none.
-
+${longform && !locked ? `\n\nTOP-LEVEL JSON "title" (no saved example titles — operator must still get a **feed-shaped** headline):\n- One short line (~55–75 characters): curiosity question ("How…?", "What…?") or one blunt claim — same energy as short educational YouTube.\n- **Do not** use two-part "Label: subtitle" / episode / podcast season packaging (e.g. "Winter Cache: How…") — that reads like TV seasons, not this product's title style.\n` : ''}
 OUTPUT contract — return ONLY JSON:
 {
 ${titleJsonLine}
@@ -878,6 +1000,37 @@ If the topic is unsafe (medical advice, legal counsel, weapons, CSAM, explicit v
 /* ═══════════════════════════════════════════════════════════════════ */
 
 /**
+ * Synthetic still used only for cover/thumbnail generation — same schema as
+ * in-video {@link DirectorShot} so {@link shotToPrompt} matches shot sourcing.
+ */
+export function personalThumbnailCoverShot(args: {
+  topic: string;
+  /** Short line only — rendered as large simple type when set. */
+  coverText?: string | undefined;
+}): DirectorShot {
+  const topicTrim = args.topic.replace(/\s+/g, ' ').trim().slice(0, 240) || 'the video subject';
+  return {
+    id: `thumb_${randomUUID()}`,
+    role: 'thumbnail_cover',
+    description: `Single hero still for the video cover — same world and look as the other shots in this edit, not generic stock. Summarises: ${topicTrim}.`,
+    onScreen: '',
+    voiceover: '',
+    durationSeconds: 3,
+    camera: 'static',
+    framing: 'wide',
+    lighting: 'dramatic but clean key light; readable at small preview size',
+    palette: 'cohesive with reference stills',
+    subjectAction: topicTrim,
+    lensHint: 'cinematic shallow depth of field',
+    speedRamp: 'none',
+    transitionOut: 'hard_cut',
+    referenceIndices: [],
+    kind: 'ai_image',
+    imageCaption: args.coverText?.trim().slice(0, 28) || undefined,
+  };
+}
+
+/**
  * Builds a cinematographer-grade text prompt for a single shot from the
  * structured fields on DirectorShot. This is the string we send to
  * Sora / Veo / Kling / Higgsfield for that shot.
@@ -893,19 +1046,24 @@ export function shotToPrompt(args: {
   globalColourGrade?: string;
   /**
    * Distilled inspiration style hint ("editorial food photography, moody
-   * low-light…"). Appended to every AI shot so the generator mirrors the
-   * account's chosen visual language without the caller having to stitch
-   * it in manually.
+   * low-light…"). When set, prepended to every AI shot prompt as a hard
+   * brand-language lock so the generator mirrors the account references.
    */
   inspirationStyleHint?: string;
   /**
    * Long-form animation style preset ("flat 2D cartoon, bold outlines…").
-   * Appended to every AI shot in longform mode so every frame across all
-   * chapters matches the same animated look.
+   * Prepended with inspiration as the opening style lock for every AI shot.
    */
   animationStyleHint?: string;
   /** Title/copy/motif hints from the style bible for image+video models. */
   shotBrandHints?: string;
+  /**
+   * When true, prompt is tuned for a video cover / thumbnail still (same brand
+   * language as in-video shots; optional large title via `shot.imageCaption`).
+   */
+  thumbnailCoverMode?: boolean;
+  /** Random id fragment so each regenerate gets a distinct composition brief. */
+  thumbnailVariationKey?: string;
 }): string {
   const {
     shot,
@@ -916,6 +1074,8 @@ export function shotToPrompt(args: {
     inspirationStyleHint,
     animationStyleHint,
     shotBrandHints,
+    thumbnailCoverMode,
+    thumbnailVariationKey,
   } = args;
 
   // 1. IDENTITY — character / subject description (identity anchor).
@@ -931,29 +1091,53 @@ export function shotToPrompt(args: {
   // 3. MOTION — camera + subject motion.
   const motion = `Camera: ${cameraToEnglish(shot.camera)}. ${shot.subjectAction ? `Subject action: ${shot.subjectAction}.` : ''}${shot.speedRamp && shot.speedRamp !== 'none' ? ` Speed ramp: ${shot.speedRamp.replace('_', ' ')}.` : ''}`;
 
-  // 4. STYLE — theme + account vibe + colour grade + inspiration + animation.
+  // 4. STYLE — theme + account vibe + colour grade + brand hints.
+  // Inspiration + animation medium are spoken once up-front (styleLock) so
+  // image/video models weight them before scene description.
   let styleStr = [
-    // Animation preset comes first so the model locks on a medium (2D
-    // cartoon vs. stick-figure vs. storybook) before fine-tuning palette.
-    animationStyleHint ? `Medium: ${animationStyleHint}.` : '',
     themeVisualStyle,
     styleBibleVibe,
     globalColourGrade ? `Colour grade: ${globalColourGrade}.` : '',
-    inspirationStyleHint ? `Visual language: ${inspirationStyleHint}.` : '',
     shotBrandHints ? `Brand voice (visuals must match): ${shotBrandHints}` : '',
   ]
     .filter(Boolean)
     .join(' ');
 
-  if (shot.kind === 'ai_image' && shot.imageCaption?.trim()) {
+  if (thumbnailCoverMode) {
+    if (shot.kind === 'ai_image' && shot.imageCaption?.trim()) {
+      styleStr += ` Include very large bold simple title text reading "${shot.imageCaption.trim()}" — 2-6 words max, geometric sans-serif, extreme legibility, high contrast; centre or lower third. No extra small type, subtitles, or paragraphs.`;
+    } else {
+      styleStr +=
+        ' THUMBNAIL / COVER ROLE: single poster frame for the same video — visual language must match the other AI stills in this project. No words, numbers, watermarks, or logos on the image.';
+    }
+  } else if (shot.kind === 'ai_image' && shot.imageCaption?.trim()) {
     styleStr += ` Include a small tasteful typographic label reading "${shot.imageCaption.trim()}" — clean high-end sans-serif, subtle shadow, must stay secondary to the photograph.`;
   }
 
+  const styleLock = [
+    animationStyleHint
+      ? `BRAND MEDIUM (keep every frame in this look, not generic illustration): ${animationStyleHint}`
+      : '',
+    inspirationStyleHint
+      ? `BRAND VISUAL LANGUAGE (match account inspiration / style references, same palette and lighting — not stock look): ${inspirationStyleHint}`
+      : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
   // 5. NEGATIVE — implied by missing banned terms; handled per-model.
 
-  return [identity, image, motion, styleStr]
+  let out = [styleLock, identity, image, motion, styleStr]
     .filter((s) => s && s.trim().length > 0)
     .join(' ');
+
+  if (thumbnailCoverMode) {
+    const v =
+      (thumbnailVariationKey ?? '').replace(/[^a-z0-9-]/gi, '').slice(0, 12) || 'cover';
+    out += ` Cover-frame variation ${v}: same size and aspect as other shots — slightly more graphic and legible at small preview size than a mid-roll frame, still on-brand with reference stills.`;
+  }
+
+  return out;
 }
 
 /** Convert camera token to readable English for the video model. */
@@ -1037,6 +1221,154 @@ export function flattenStoryboard(sb: Storyboard): FlattenedShot[] {
     }
   }
   return out;
+}
+
+/** Prefer splitting narration near the middle on sentence / clause boundaries. */
+function findVoiceoverSplitIndex(vo: string): number {
+  const t = vo.trim();
+  if (t.length < 16) return -1;
+  const mid = Math.floor(t.length / 2);
+  const candidates: Array<{ sep: string; advance: number }> = [
+    { sep: '. ', advance: 2 },
+    { sep: '? ', advance: 2 },
+    { sep: '! ', advance: 2 },
+    { sep: '\n', advance: 1 },
+    { sep: '; ', advance: 2 },
+  ];
+  for (const { sep, advance } of candidates) {
+    let idx = t.indexOf(sep, Math.max(0, mid - 55));
+    if (idx >= 8 && idx < t.length - advance - 4) return idx + advance;
+    idx = t.lastIndexOf(sep, mid + 60);
+    if (idx >= 8 && idx < t.length - advance - 4) return idx + advance;
+  }
+  const sp = t.lastIndexOf(' ', mid + 40);
+  if (sp >= 10 && sp < t.length - 10) return sp + 1;
+  return mid > 10 && mid < t.length - 10 ? mid : -1;
+}
+
+/**
+ * After real TTS length is known, align the **number of shots** with operator
+ * "avg seconds per clip" and mux-safe pacing — **without** changing how each
+ * shot is rendered (same `generateAiImage` / scraper path per shot).
+ *
+ * Merges or splits **voiceover text** only (and duplicates shot metadata),
+ * then re-embeds all shots in the first beat of the first act so downstream
+ * code sees one ordered list. Multi-act layout is flattened when counts
+ * change (rare; most runs keep the planned shot count).
+ */
+export function rebalanceStoryboardToTargetShots(sb: Storyboard, targetShots: number): Storyboard {
+  const flat = flattenStoryboard(sb);
+  if (flat.length === 0) {
+    return sb;
+  }
+  if (targetShots === flat.length || targetShots < 1) {
+    return sb;
+  }
+
+  let shots: DirectorShot[] = flat.map((f) => ({
+    ...f.shot,
+    voiceover: (f.shot.voiceover ?? '').trim(),
+  }));
+
+  const mergePair = (a: DirectorShot, b: DirectorShot): DirectorShot => ({
+    ...a,
+    id: randomUUID(),
+    voiceover: [a.voiceover, b.voiceover].filter(Boolean).join(' ').trim(),
+    description: `${a.description ?? ''} ${b.description ?? ''}`.replace(/\s+/g, ' ').trim().slice(0, 1400),
+    onScreen:
+      (a.onScreen?.trim() || '').length >= (b.onScreen?.trim() || '').length
+        ? (a.onScreen ?? '').trim()
+        : (b.onScreen ?? '').trim(),
+    imageQuery:
+      [a.imageQuery, b.imageQuery]
+        .map((x) => (x ?? '').trim())
+        .filter(Boolean)
+        .join('; ')
+        .slice(0, 480) ||
+      (a.imageQuery ?? b.imageQuery),
+    durationSeconds: Math.min(24, (a.durationSeconds ?? 3) + (b.durationSeconds ?? 3)),
+    kind: a.kind,
+    referenceIndices:
+      (a.referenceIndices?.length ?? 0) >= (b.referenceIndices?.length ?? 0)
+        ? a.referenceIndices
+        : b.referenceIndices,
+  });
+
+  while (shots.length > targetShots) {
+    let bestI = 0;
+    let bestScore = Infinity;
+    for (let i = 0; i < shots.length - 1; i++) {
+      const len = shots[i]!.voiceover.length + shots[i + 1]!.voiceover.length;
+      if (len < bestScore) {
+        bestScore = len;
+        bestI = i;
+      }
+    }
+    shots.splice(bestI, 2, mergePair(shots[bestI]!, shots[bestI + 1]!));
+  }
+
+  let guard = 0;
+  while (shots.length < targetShots && guard++ < 220) {
+    let bestI = 0;
+    let bestLen = -1;
+    for (let i = 0; i < shots.length; i++) {
+      const L = shots[i]!.voiceover.length;
+      if (L > bestLen) {
+        bestLen = L;
+        bestI = i;
+      }
+    }
+    if (bestLen < 20) break;
+    const s = shots[bestI]!;
+    const idx = findVoiceoverSplitIndex(s.voiceover);
+    if (idx <= 0 || idx >= s.voiceover.length - 4) break;
+    const vo1 = s.voiceover.slice(0, idx).trim();
+    const vo2 = s.voiceover.slice(idx).trim();
+    if (vo1.length < 6 || vo2.length < 6) break;
+    const r = vo1.length / (vo1.length + vo2.length);
+    const dur = s.durationSeconds ?? 4;
+    const shot1: DirectorShot = {
+      ...s,
+      id: randomUUID(),
+      voiceover: vo1,
+      durationSeconds: Math.max(1.2, dur * r),
+      transitionOut: 'hard_cut',
+    };
+    const shot2: DirectorShot = {
+      ...s,
+      id: randomUUID(),
+      voiceover: vo2,
+      durationSeconds: Math.max(1.2, dur * (1 - r)),
+    };
+    shots.splice(bestI, 1, shot1, shot2);
+  }
+
+  const firstAct = sb.acts[0];
+  const firstBeat = firstAct?.beats[0];
+  if (!firstAct || !firstBeat) {
+    if (targetShots !== flat.length) {
+      console.warn(
+        '[director] rebalanceStoryboardToTargetShots: storyboard has no first act/beat; skipping repartition.',
+      );
+    }
+    return sb;
+  }
+
+  return {
+    ...sb,
+    acts: [
+      {
+        ...firstAct,
+        beats: [
+          {
+            ...firstBeat,
+            shots,
+          },
+        ],
+      },
+    ],
+    estimatedDurationSeconds: shots.reduce((acc, sh) => acc + (sh.durationSeconds ?? 3), 0),
+  };
 }
 
 /* ═══════════════════════════════════════════════════════════════════ */

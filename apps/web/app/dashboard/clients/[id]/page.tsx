@@ -15,7 +15,7 @@ import {
   type Client,
   type Message,
 } from '@boost/core';
-import { Badge, Button, Card, CardContent, Spinner, toast } from '@boost/ui';
+import { Badge, Button, Card, CardContent, Spinner, toast, confirmDialog } from '@boost/ui';
 import {
   ArrowLeft,
   Mail,
@@ -64,14 +64,16 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
 
   /**
    * Intercept tab switches when the Settings tab has unsaved edits.
-   * Native confirm() is good enough — matches browser-level UX the
-   * agency users are already familiar with, and avoids pulling in
-   * another modal primitive here.
    */
-  const switchTab = (next: Tab) => {
+  const switchTab = async (next: Tab) => {
     if (next === tab) return;
     if (tab === 'settings' && settingsDirty) {
-      const ok = window.confirm('Discard unsaved changes?');
+      const ok = await confirmDialog({
+        title: 'Discard unsaved changes?',
+        description: 'Your settings edits will be lost.',
+        confirmLabel: 'Discard',
+        danger: true,
+      });
       if (!ok) return;
       setSettingsDirty(false);
     }

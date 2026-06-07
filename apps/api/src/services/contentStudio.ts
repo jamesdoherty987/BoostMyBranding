@@ -270,14 +270,92 @@ export async function cancelPost(id: string, workspaceId?: string) {
   );
 }
 
+/** One connected social account row for workspace settings UIs. */
+export type ContentStudioConnectedAccount = {
+  platform: ContentStudioPlatform;
+  /** @handle / username when the API sends it. */
+  handle: string;
+  /** Stable id for `schedulePost` / `contentStudioAccountIds` (never empty in normal API responses). */
+  id: string;
+  /** Channel/page title + handle for multi-account dropdowns. */
+  label: string;
+};
+
+function pickAccountRowId(row: Record<string, unknown>): string {
+  const candidates = [
+    row.account_id,
+    row.accountId,
+    row.social_account_id,
+    row.socialAccountId,
+    row.connection_id,
+    row.connectionId,
+    row.id,
+    row._id,
+    row.uuid,
+  ];
+  for (const c of candidates) {
+    if (c == null) continue;
+    const s = String(c).trim();
+    if (s) return s;
+  }
+  return '';
+}
+
+function pickAccountHandle(row: Record<string, unknown>): string {
+  const candidates = [
+    row.handle,
+    row.username,
+    row.user_name,
+    row.screen_name,
+    row.channel_handle,
+    row.page_username,
+  ];
+  for (const c of candidates) {
+    if (typeof c === 'string' && c.trim()) return c.trim();
+  }
+  return '';
+}
+
+function pickAccountTitle(row: Record<string, unknown>): string {
+  const candidates = [
+    row.name,
+    row.title,
+    row.channel_title,
+    row.channel_name,
+    row.page_name,
+    row.display_name,
+    row.displayName,
+    row.account_name,
+    row.accountName,
+  ];
+  for (const c of candidates) {
+    if (typeof c === 'string' && c.trim()) return c.trim();
+  }
+  return '';
+}
+
+function buildAccountLabel(
+  platform: ContentStudioPlatform,
+  handle: string,
+  title: string,
+  id: string,
+): string {
+  const parts: string[] = [];
+  if (title) parts.push(title);
+  if (handle) parts.push(handle.startsWith('@') ? handle : `@${handle}`);
+  if (parts.length === 0 && id) {
+    parts.push(id.length > 14 ? `${id.slice(0, 6)}…${id.slice(-4)}` : id);
+  }
+  parts.push(platform);
+  return parts.join(' · ');
+}
+
 /**
  * Fetch the list of connected accounts in the active workspace so the
  * dashboard can tell the user which platforms actually have a handle
  * attached. Returns an empty list when the API isn't configured.
  */
-export async function listConnectedAccounts(workspaceId?: string): Promise<
-  Array<{ platform: ContentStudioPlatform; handle: string; id: string }>
-> {
+export async function listConnectedAccounts(workspaceId?: string): Promise<ContentStudioConnectedAccount[]> {
   if (!features.contentStudio) return [];
   const ws = (workspaceId ?? env.CONTENTSTUDIO_WORKSPACE_ID ?? '').trim();
   if (!ws) return [];
@@ -286,19 +364,40 @@ export async function listConnectedAccounts(workspaceId?: string): Promise<
     const res = await fetch(url, { headers: csHeaders() });
     if (!res.ok) return [];
     const body = (await res.json()) as {
-      data?: Array<{
-        platform: string;
-        handle?: string;
-        username?: string;
-        id?: string;
-        account_id?: string;
-      }>;
+      data?: unknown[];
+      accounts?: unknown[];
     };
-    return (body.data ?? []).map((a) => ({
-      platform: normalizePlatform(a.platform),
-      handle: a.handle ?? a.username ?? '',
-      id: String(a.account_id ?? a.id ?? ''),
-    }));
+    const rawRows = Array.isArray(body.data)
+      ? body.data
+      : Array.isArray(body.accounts)
+        ? body.accounts
+        : Array.isArray((body as { results?: unknown[] }).results)
+          ? (body as { results: unknown[] }).results
+          : [];
+    const out: ContentStudioConnectedAccount[] = [];
+    let missingId = 0;
+    for (const raw of rawRows) {
+      if (!raw || typeof raw !== 'object') continue;
+      const row = raw as Record<string, unknown>;
+      const platformRaw = row.platform;
+      if (typeof platformRaw !== 'string' || !platformRaw.trim()) continue;
+      const platform = normalizePlatform(platformRaw);
+      const id = pickAccountRowId(row);
+      const handle = pickAccountHandle(row);
+      const title = pickAccountTitle(row);
+      const label = buildAccountLabel(platform, handle, title, id);
+      if (!id) {
+        missingId++;
+        continue;
+      }
+      out.push({ platform, handle, id, label });
+    }
+    if (missingId > 0) {
+      console.warn(
+        `[contentStudio] ${missingId} workspace account row(s) skipped (no id). First row keys: ${rawRows[0] && typeof rawRows[0] === 'object' ? Object.keys(rawRows[0] as object).join(', ') : '—'}`,
+      );
+    }
+    return out;
   } catch (e) {
     console.warn('[contentStudio] listConnectedAccounts failed:', (e as Error).message);
     return [];

@@ -71,6 +71,45 @@ const schema = z.object({
 
   CONTENTSTUDIO_API_KEY: z.string().optional(),
   CONTENTSTUDIO_WORKSPACE_ID: z.string().optional(),
+  /** Optional dashboard URL shown in Personal → Posting (OAuth happens in Content Studio, not this app). */
+  CONTENTSTUDIO_APP_URL: z.string().url().optional(),
+
+  /**
+   * Claude model for the **personal channel title** JSON step only (short prompt).
+   * Default in code is `haiku` when unset — smaller model, usually better at
+   * sticking to example-title format than Sonnet/Opus on the main script pass.
+   */
+  PERSONAL_TITLE_MODEL: z.enum(['haiku', 'sonnet', 'opus']).optional(),
+  /**
+   * Sampling temperature for the personal channel title JSON call (0–1).
+   * Default in code is ~0.78 — low values (e.g. 0.2–0.35) repeat the same headline
+   * for the same topic; raise toward 1 for more variation.
+   */
+  PERSONAL_TITLE_TEMPERATURE: z.coerce.number().min(0).max(1).optional(),
+  /**
+   * Claude model for **topic invention** in the isolated title test script only
+   * (when you run `pnpm test:isolated-channel-title` with no CLI topic).
+   * Default in script is `sonnet` when unset — broader ideas than Haiku.
+   */
+  PERSONAL_TOPIC_INVENT_MODEL: z.enum(['haiku', 'sonnet', 'opus']).optional(),
+
+  /**
+   * Hard cap for a single personal director **AI image** shot (fal / Gemini).
+   * Prevents `sourcing_media` from hanging forever when upstream never resolves.
+   * Default in code is 4 minutes when unset.
+   */
+  PERSONAL_AI_IMAGE_TIMEOUT_MS: z.coerce.number().int().min(30_000).max(900_000).optional(),
+  /**
+   * Hard cap for a single personal director **AI video** clip (fal).
+   * Default in code is 10 minutes when unset.
+   */
+  PERSONAL_AI_VIDEO_TIMEOUT_MS: z.coerce.number().int().min(60_000).max(1_800_000).optional(),
+  /**
+   * Hard cap for a single R2 `uploadFile` (e.g. after Gemini / fal image gen).
+   * Prevents sourcing from hanging indefinitely on a stuck S3-compatible PUT.
+   * Default in code is 2 minutes when unset.
+   */
+  PERSONAL_R2_UPLOAD_TIMEOUT_MS: z.coerce.number().int().min(10_000).max(900_000).optional(),
 
   /**
    * Vercel API credentials for programmatic custom-domain management.
@@ -178,6 +217,8 @@ export const features = {
   contentStudio: Boolean(env.CONTENTSTUDIO_API_KEY),
   /** True when server .env has a default workspace (id never exposed via API). */
   contentStudioDefaultWorkspace: Boolean(env.CONTENTSTUDIO_WORKSPACE_ID?.trim()),
+  /** Public Content Studio web app (for “connect social” links in the dashboard). */
+  contentStudioAppUrl: env.CONTENTSTUDIO_APP_URL?.trim() || null,
   vercel: Boolean(env.VERCEL_API_TOKEN && env.VERCEL_PROJECT_ID),
   /** Canva Connect API is only useful when all three OAuth bits are set. */
   canva: Boolean(env.CANVA_CLIENT_ID && env.CANVA_CLIENT_SECRET && env.CANVA_REDIRECT_URI),

@@ -1730,18 +1730,8 @@ export const THEMES: PersonalTheme[] = [
       'Long before cities, long before writing — there was this.',
       'A single {object} can tell us {insight} about {era}.',
     ],
-    topicSeeds: [
-      'a day in the life of a Palaeolithic hunter-gatherer',
-      'how early humans first controlled fire',
-      'the cave paintings at Lascaux, 17,000 years ago',
-      'Ötzi the Iceman — a 5,000-year-old murder mystery',
-      'Çatalhöyük, the first proto-city in Neolithic Turkey',
-      'Blombos Cave, 75,000 years ago — the oldest known abstract drawing',
-      'flint knapping: how stone-age toolmakers shaped obsidian blades',
-      'how hunter-gatherer bands shared food and survived lean seasons',
-      'the Dolní Věstonice burial, 26,000 years ago',
-      'the Bronze Age collapse of 1177 BCE',
-    ],
+    /** Personal accounts use account seeds or style-bible examples — not theme defaults. */
+    topicSeeds: [],
     voiceGuide:
       'Calm, curious, documentary narrator — Attenborough without the flourishes. Measured pacing. Specific numbers, place names, and plausible sensory detail. Never anachronistic slang, never "mind-blowing".',
     visualStyle:

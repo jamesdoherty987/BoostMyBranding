@@ -11,6 +11,7 @@ import {
   Spinner,
   Badge,
   toast,
+  confirmDialog,
 } from '@boost/ui';
 import { Plus, Package, Loader2, Trash2, Archive, Eye, EyeOff } from 'lucide-react';
 import type { Product } from '@boost/api-client';
@@ -234,7 +235,16 @@ function ProductCard({
   }
 
   async function remove() {
-    if (!confirm(`Delete product "${product.name}"?`)) return;
+    if (
+      !(await confirmDialog({
+        title: `Delete “${product.name}”?`,
+        description: 'This permanently removes the product from brand intel.',
+        confirmLabel: 'Delete',
+        danger: true,
+      }))
+    ) {
+      return;
+    }
     setBusy(true);
     try {
       await api.deleteProduct(clientId, product.id);

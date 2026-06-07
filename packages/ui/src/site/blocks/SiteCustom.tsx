@@ -364,7 +364,7 @@ function PullQuote({
           section.background === 'brand' ? 'text-white' : 'text-slate-900'
         }`}
       >
-        <span aria-hidden>&ldquo;</span>
+        <span aria-hidden>“</span>
         <InlineEditable
           path={`${pathBase}.body`}
           value={section.body ?? ''}
@@ -372,7 +372,7 @@ function PullQuote({
           multiline
           placeholder="The quote…"
         />
-        <span aria-hidden>&rdquo;</span>
+        <span aria-hidden>”</span>
       </blockquote>
       {section.caption != null ? (
         <figcaption

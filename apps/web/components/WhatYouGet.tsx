@@ -436,7 +436,7 @@ function VoiceArt() {
           caption draft
         </p>
         <p className="mt-1 text-[11px] leading-relaxed text-slate-700">
-          &ldquo;Morning ☕ first pour is on us if you&apos;re in before 9.&rdquo;
+          “Morning ☕ first pour is on us if you're in before 9.”
         </p>
       </div>
     </div>

@@ -14,9 +14,9 @@ export default function PricingSuccessPage({
           <CheckCircle2 className="h-8 w-8" />
         </div>
         <Logo wordmark size="sm" className="justify-center" />
-        <h1 className="mt-4 text-3xl font-bold tracking-tight">You&apos;re in.</h1>
+        <h1 className="mt-4 text-3xl font-bold tracking-tight">You're in.</h1>
         <p className="mt-3 text-slate-600">
-          Thanks for signing up. We&apos;ll email your onboarding checklist within the next business
+          Thanks for signing up. We'll email your onboarding checklist within the next business
           hour. Meanwhile, you can head to the client portal and start uploading photos.
         </p>
         <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-center">

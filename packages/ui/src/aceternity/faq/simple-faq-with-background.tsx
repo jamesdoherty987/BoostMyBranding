@@ -45,7 +45,7 @@ export function SimpleFaqsWithBackground() {
       </h2>
       <p className="mx-auto max-w-lg text-center text-base text-neutral-600 dark:text-neutral-50">
         We are here to help you with any questions you may have. If you
-        don&apos;t find what you need, please contact us at{" "}
+        don't find what you need, please contact us at{" "}
         <a
           href="mailto:support@example.com"
           className="text-blue-500 underline"

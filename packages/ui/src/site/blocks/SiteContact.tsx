@@ -224,7 +224,7 @@ export function SiteContact({ config, clientId: clientIdProp, apiUrl: apiUrlProp
                     </div>
                     <h3 className="text-xl font-semibold text-slate-900">Thanks!</h3>
                     <p className="mt-2 text-sm text-slate-600">
-                      We&apos;ll get back to you within a few hours.
+                      We'll get back to you within a few hours.
                     </p>
                     <button
                       type="button"

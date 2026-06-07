@@ -696,7 +696,7 @@ function AIVideoTab({ clientId, businessName }: { clientId: string; businessName
           <div>
             <h2 className="text-sm font-semibold text-slate-900">Personalized reel</h2>
             <p className="mt-1 text-xs text-slate-500">
-              Claude writes a clip-by-clip script from {businessName ?? 'this client'}&apos;s own media,
+              Claude writes a clip-by-clip script from {businessName ?? 'this client'}'s own media,
               then Remotion renders it as a 1080×1920 reel.
             </p>
           </div>
@@ -1221,7 +1221,7 @@ function CanvaTab({ clientId }: { clientId: string }) {
       <Card>
         <CardContent className="p-8 text-center">
           <Palette className="mx-auto h-12 w-12 text-slate-300" />
-          <h3 className="mt-3 text-sm font-semibold text-slate-900">Canva isn&apos;t configured yet</h3>
+          <h3 className="mt-3 text-sm font-semibold text-slate-900">Canva isn't configured yet</h3>
           <p className="mx-auto mt-2 max-w-md text-xs text-slate-500">
             Add <code className="rounded bg-slate-100 px-1">CANVA_CLIENT_ID</code>,{' '}
             <code className="rounded bg-slate-100 px-1">CANVA_CLIENT_SECRET</code> and{' '}
@@ -1335,7 +1335,7 @@ function CanvaTab({ clientId }: { clientId: string }) {
                 <h3 className="text-sm font-semibold text-slate-900">Brand templates</h3>
                 <p className="mt-1 text-xs text-slate-500">
                   Autofill a template from a caption + hero image using the Content Studio. For now,
-                  here&apos;s a quick list of what&apos;s available in this Canva workspace.
+                  here's a quick list of what's available in this Canva workspace.
                 </p>
                 <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-6">
                   {brandTemplates.map((t) => (

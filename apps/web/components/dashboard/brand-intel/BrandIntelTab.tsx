@@ -102,7 +102,7 @@ export function BrandIntelTab({ clientId }: { clientId: string }) {
               </div>
               <p className="mt-1 text-sm text-slate-600">
                 The more you put in here, the more on-brand every AI-generated post, image,
-                and video will feel. Each section is optional — add what&apos;s useful.
+                and video will feel. Each section is optional — add what's useful.
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
                 <ReadinessPill label="Inspiration" count={counts.inspiration} />

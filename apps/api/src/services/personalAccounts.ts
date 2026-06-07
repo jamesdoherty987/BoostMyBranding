@@ -4,7 +4,8 @@
  * authenticated user id.
  */
 
-import { and, desc, eq, inArray, like, lt, not, or, sql } from 'drizzle-orm';
+import { randomUUID } from 'node:crypto';
+import { and, desc, eq, inArray, like, lt, ne, not, or, sql } from 'drizzle-orm';
 import {
   getDb,
   isDbConfigured,
@@ -18,6 +19,20 @@ import {
 import type { Platform } from '@boost/core';
 import { getTheme, type PersonalTheme } from './personalThemes.js';
 import { findThemeForUser } from './personalCustomThemes.js';
+import {
+  createPersonalPostThumbnail,
+  shortThumbnailOverlayLine,
+  buildPersonalThumbnailShotAlign,
+} from './personalAiThumbnail.js';
+import { stripDirectorResumeKeys, type Storyboard } from './personalDirector.js';
+import type { PersonalGenerationInfo } from './personalGenerationMeta.js';
+
+/**
+ * Topic string for rows created as soon as the user clicks Generate, while the
+ * per-account in-memory queue waits for the prior run. Excluded from {@link recentTopics}.
+ */
+export const PERSONAL_QUEUE_TOPIC_PLACEHOLDER =
+  '⏳ In queue — generation starts after the current video finishes.';
 
 /** Cutoff for "stale in-flight personal post from a prior process" (see {@link failInterruptedRenderingPersonalPostsOnBoot}). Evaluated when this module loads — must stay before `app.listen` because `routes/personal` imports this file first. */
 const PERSONAL_PROCESS_BOOT_AT = new Date();
@@ -134,13 +149,13 @@ export async function createAccount(args: CreateAccountArgs) {
       postingMinuteUtc: args.postingMinuteUtc ?? 0,
       postSpacingMinutes: args.postSpacingMinutes ?? 240,
       autoApprove: args.autoApprove ?? true,
-      autoSchedule: args.autoSchedule ?? true,
+      autoSchedule: args.autoSchedule ?? false,
       autoGenerateOnSchedule: args.autoGenerateOnSchedule ?? false,
       accentColor: args.accentColor ?? theme.accentColor,
       logoUrl: args.logoUrl,
       watermarkHandle: args.watermarkHandle,
       characterId: args.characterId ?? null,
-      styleBible: args.styleBible,
+      styleBible: stripRemovedStyleBibleKeys(args.styleBible ?? null),
       generatorConfig: args.generatorConfig,
       formatKind: args.formatKind ?? theme.defaultFormat ?? 'video',
       customAudioUrl: args.customAudioUrl ?? null,
@@ -232,10 +247,10 @@ export async function updateAccount(
   }
 
   if (patch.styleBible !== undefined) {
-    updates.styleBible = {
+    updates.styleBible = stripRemovedStyleBibleKeys({
       ...(existing.styleBible ?? {}),
       ...patch.styleBible,
-    };
+    } as PersonalAccountStyleBible);
   }
   if (patch.generatorConfig !== undefined) {
     updates.generatorConfig = {
@@ -302,13 +317,18 @@ export async function recentTopics(accountId: string, limit = 20): Promise<strin
   const rows = await db
     .select({ topic: personalPosts.topic })
     .from(personalPosts)
-    .where(eq(personalPosts.accountId, accountId))
+    .where(
+      and(
+        eq(personalPosts.accountId, accountId),
+        ne(personalPosts.topic, PERSONAL_QUEUE_TOPIC_PLACEHOLDER),
+      ),
+    )
     .orderBy(desc(personalPosts.createdAt))
     .limit(limit);
   return rows.map((r) => r.topic);
 }
 
-/** Titles from recent posts' `script` JSON — used to avoid duplicate video titles. */
+/** Titles from posts that actually shipped (or are queued for publish) — excludes in-flight rows so a second Generate is not compared against a storyboard still being rendered. */
 export async function recentVideoTitles(accountId: string, limit = 40): Promise<string[]> {
   if (!isDbConfigured()) return [];
   const db = getDb();
@@ -316,7 +336,12 @@ export async function recentVideoTitles(accountId: string, limit = 40): Promise<
   const rows = await db
     .select({ script: personalPosts.script })
     .from(personalPosts)
-    .where(eq(personalPosts.accountId, accountId))
+    .where(
+      and(
+        eq(personalPosts.accountId, accountId),
+        inArray(personalPosts.status, ['ready', 'scheduled', 'published']),
+      ),
+    )
     .orderBy(desc(personalPosts.createdAt))
     .limit(cap);
   const seen = new Set<string>();
@@ -330,6 +355,19 @@ export async function recentVideoTitles(accountId: string, limit = 40): Promise<
     out.push(t);
   }
   return out;
+}
+
+/** How many generation-log lines {@link listPosts} returns (rolling tail of the server buffer). */
+const PERSONAL_POST_ACTIVITY_LOG_TAIL = 200;
+
+function pickGenerationSummary(script: unknown): PersonalGenerationInfo | null {
+  if (!script || typeof script !== 'object') return null;
+  const raw = (script as Record<string, unknown>).generationInfo;
+  if (!raw || typeof raw !== 'object') return null;
+  const o = raw as Record<string, unknown>;
+  if (o.pipeline !== 'director' && o.pipeline !== 'legacy') return null;
+  if (typeof o.completedAt !== 'string') return null;
+  return raw as PersonalGenerationInfo;
 }
 
 /* ─── Post listing ───────────────────────────────────────────────── */
@@ -350,6 +388,11 @@ export interface PersonalPostPayload {
   caption: string | null;
   hashtags: string[];
   durationSeconds: number | null;
+  /**
+   * Storyboard-estimated runtime (director JSON) when the DB column is still null.
+   * Optional — used for in-progress UI hints only; final `durationSeconds` wins once set.
+   */
+  plannedDurationSeconds?: number | null;
   qualityScore: number | null;
   status: string;
   errorMessage: string | null;
@@ -358,6 +401,8 @@ export interface PersonalPostPayload {
   publishUrl: string | null;
   mediaAssets: PersonalPostMediaAsset[];
   costCents: number;
+  /** Models / TTS / music snapshot when the post finished (`script.generationInfo`). */
+  generationSummary: PersonalGenerationInfo | null;
   createdAt: string;
   /** 0–100 while final video encode runs; null otherwise. */
   renderProgress: number | null;
@@ -382,6 +427,11 @@ export async function listPosts(accountId: string, limit = 250): Promise<Persona
     const ar = script.outputAspectRatio as string | undefined;
     const aspectRatio: '9:16' | '1:1' | '16:9' | '4:5' =
       ar === '16:9' || ar === '1:1' || ar === '4:5' || ar === '9:16' ? ar : '9:16';
+    const plannedRaw = script.estimatedDurationSeconds;
+    const plannedDurationSeconds =
+      typeof plannedRaw === 'number' && Number.isFinite(plannedRaw) && plannedRaw > 1
+        ? Math.round(plannedRaw)
+        : null;
     return {
       id: r.id,
       accountId: r.accountId,
@@ -397,6 +447,8 @@ export async function listPosts(accountId: string, limit = 250): Promise<Persona
       caption: r.caption,
       hashtags: r.hashtags ?? [],
       durationSeconds: r.durationSeconds,
+      plannedDurationSeconds:
+        r.durationSeconds == null && plannedDurationSeconds != null ? plannedDurationSeconds : null,
       qualityScore: r.qualityScore,
       status: r.status,
       errorMessage: r.errorMessage,
@@ -409,8 +461,11 @@ export async function listPosts(accountId: string, limit = 250): Promise<Persona
       renderProgress: r.renderProgress ?? null,
       renderProgressLabel: r.renderProgressLabel ?? null,
       renderActivityLog: Array.isArray(r.renderActivityLog)
-        ? (r.renderActivityLog as PersonalPostRenderActivityEntry[])
+        ? (r.renderActivityLog as PersonalPostRenderActivityEntry[]).slice(
+            -PERSONAL_POST_ACTIVITY_LOG_TAIL,
+          )
         : [],
+      generationSummary: pickGenerationSummary(script),
     };
   });
 }
@@ -431,6 +486,66 @@ export async function deleteFailedPosts(
     .where(and(eq(personalPosts.accountId, accountId), eq(personalPosts.status, 'failed')))
     .returning({ id: personalPosts.id });
   return removed.length;
+}
+
+/**
+ * Inserts a `queued` personal post row immediately so the dashboard shows the
+ * job while {@link enqueuePersonalGenerateForAccount} waits behind another run.
+ */
+export async function createReservedQueuedPersonalPost(args: {
+  userId: string;
+  accountId: string;
+}): Promise<{ id: string }> {
+  assertDb();
+  const account = await getAccount(args.userId, args.accountId);
+  if (!account) throw new Error('Personal account not found');
+  if (account.status === 'archived') {
+    throw new Error('Cannot queue generation for an archived channel.');
+  }
+  const theme =
+    getTheme(account.themeId) ?? (await findThemeForUser(args.userId, account.themeId));
+  if (!theme) throw new Error(`Theme not found: ${account.themeId}`);
+  const genConfig: PersonalGeneratorConfig =
+    (account.generatorConfig as PersonalGeneratorConfig) ?? {};
+  const useDirector = genConfig.useDirector ?? true;
+  const templateId = useDirector ? `director:${theme.template}` : theme.template;
+  const db = getDb();
+  const [row] = await db
+    .insert(personalPosts)
+    .values({
+      accountId: account.id,
+      templateId,
+      postKind:
+        (account.formatKind as 'video' | 'slideshow' | 'static_image') ??
+        theme.defaultFormat ??
+        'video',
+      topic: PERSONAL_QUEUE_TOPIC_PLACEHOLDER,
+      script: { __personalQueueSlot: true } as any,
+      status: 'queued',
+    })
+    .returning({ id: personalPosts.id });
+  if (!row) throw new Error('Failed to create queued personal post');
+  return { id: row.id };
+}
+
+/** If the row is still `queued`, mark it failed (e.g. pipeline threw before claiming the slot). */
+export async function markPersonalPostQueuedFailedIfStillQueued(
+  postId: string,
+  errorMessage: string,
+): Promise<void> {
+  assertDb();
+  const db = getDb();
+  await db
+    .update(personalPosts)
+    .set({
+      status: 'failed',
+      errorMessage: errorMessage.slice(0, 500),
+      renderProgress: null,
+      renderProgressLabel: null,
+      renderActivityLog: [],
+      updatedAt: new Date(),
+    })
+    .where(and(eq(personalPosts.id, postId), eq(personalPosts.status, 'queued')));
 }
 
 const GEN_STOPPED_MSG = 'Stopped by user.';
@@ -469,25 +584,214 @@ export async function cancelPersonalPostGeneration(
   return { ok: true };
 }
 
-/** True when the post row is `failed` (e.g. user cancelled or pipeline error). */
-export async function personalPostIsFailed(postId: string): Promise<boolean> {
-  assertDb();
+/**
+ * Re-builds the poster: same director image path as in-video stills (inspiration
+ * refs + shotToPrompt + account image model), with a new variation each call;
+ * falls back to a video frame when AI is unavailable or the theme is grounded-only.
+ */
+export async function regeneratePersonalPostThumbnail(
+  userId: string,
+  accountId: string,
+  postId: string,
+): Promise<
+  | { ok: true; thumbnailUrl: string }
+  | { ok: false; error: 'not_found' | 'no_video' | 'thumbnail_failed' }
+> {
+  const account = await getAccount(userId, accountId);
+  if (!account) return { ok: false, error: 'not_found' };
+  if (!isDbConfigured()) return { ok: false, error: 'not_found' };
   const db = getDb();
-  const [r] = await db
-    .select({ status: personalPosts.status })
+  const [post] = await db
+    .select({
+      id: personalPosts.id,
+      videoUrl: personalPosts.videoUrl,
+      durationSeconds: personalPosts.durationSeconds,
+      topic: personalPosts.topic,
+      script: personalPosts.script,
+    })
     .from(personalPosts)
+    .where(and(eq(personalPosts.id, postId), eq(personalPosts.accountId, accountId)));
+  if (!post) return { ok: false, error: 'not_found' };
+  const videoUrl = (post.videoUrl ?? '').trim();
+  if (!videoUrl) return { ok: false, error: 'no_video' };
+
+  const script = (post.script as { title?: string; outputAspectRatio?: string }) ?? {};
+  const title = String(script.title ?? '').trim();
+  const ar = script.outputAspectRatio;
+  const aspectRatio: '9:16' | '1:1' | '16:9' | '4:5' =
+    ar === '16:9' || ar === '1:1' || ar === '4:5' || ar === '9:16' ? ar : '9:16';
+  const genCfg = (account.generatorConfig as PersonalGeneratorConfig) ?? {};
+
+  const theme = getTheme(account.themeId) ?? (await findThemeForUser(userId, account.themeId));
+  if (!theme) return { ok: false, error: 'not_found' };
+
+  const storyboard = stripDirectorResumeKeys(post.script as Record<string, unknown>) as unknown as Storyboard;
+
+  const shotAlign = await buildPersonalThumbnailShotAlign({
+    accountId,
+    characterId: account.characterId ?? null,
+    styleBible: account.styleBible,
+    theme,
+    storyboard,
+    genCfg,
+  });
+
+  const topicSafe = (post.topic ?? '').trim();
+  const thumb = await createPersonalPostThumbnail({
+    accountId,
+    postId,
+    videoUrl,
+    videoDurationSeconds: post.durationSeconds ?? undefined,
+    aspectRatio,
+    overlayLine: shortThumbnailOverlayLine(title, topicSafe),
+    topic: topicSafe || 'Video',
+    variationKey: randomUUID(),
+    shotAlign,
+  });
+  if (!thumb.url) return { ok: false, error: 'thumbnail_failed' };
+
+  await db
+    .update(personalPosts)
+    .set({
+      thumbnailUrl: thumb.url,
+      costCents: sql`coalesce(${personalPosts.costCents}, 0) + ${thumb.costCents}`,
+      updatedAt: new Date(),
+    })
     .where(eq(personalPosts.id, postId));
-  return r?.status === 'failed';
+  return { ok: true, thumbnailUrl: thumb.url };
 }
 
-/** Posts stuck in an in-flight pipeline phase longer than this are marked failed (crash, hung LLM, lost worker). */
-const STALE_PERSONAL_PIPELINE_MS = 3 * 60 * 60 * 1000; // 3 hours
+/** True when post row is `failed` (e.g. user cancelled). On transient DB errors, returns false so generation is not aborted. */
+export async function personalPostIsFailed(postId: string): Promise<boolean> {
+  try {
+    assertDb();
+    const db = getDb();
+    const [r] = await db
+      .select({ status: personalPosts.status })
+      .from(personalPosts)
+      .where(eq(personalPosts.id, postId));
+    return r?.status === 'failed';
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    const transient =
+      /ECONNRESET|ECONNREFUSED|ETIMEDOUT|socket hang up|Connection terminated|read ECONNRESET/i.test(msg) ||
+      (typeof e === 'object' &&
+        e !== null &&
+        'cause' in e &&
+        typeof (e as { cause?: { code?: string } }).cause === 'object' &&
+        (e as { cause?: { code?: string } }).cause?.code === 'ECONNRESET');
+    if (transient) {
+      console.warn('[personal] personalPostIsFailed: transient DB error (ignored):', msg.slice(0, 200));
+    } else {
+      console.warn('[personal] personalPostIsFailed:', msg.slice(0, 300));
+    }
+    return false;
+  }
+}
 
+/**
+ * Thrown from {@link withAbortWhenPersonalPostFailed} when the post row was
+ * marked `failed` (e.g. user pressed Stop) while a long async call was in flight.
+ */
+export const PERSONAL_POST_CANCELLED_MESSAGE = 'PERSONAL_POST_CANCELLED';
+
+export function isPersonalPostCancelledError(e: unknown): boolean {
+  return e instanceof Error && e.message === PERSONAL_POST_CANCELLED_MESSAGE;
+}
+
+/**
+ * Races `work` against a short poll of {@link personalPostIsFailed} so Stop
+ * can break out of long fal/scraper/TTS waits and let the per-account generate
+ * queue advance to the next job.
+ */
+export async function withAbortWhenPersonalPostFailed<T>(postId: string, work: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setInterval> | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<T>((_, reject) => {
+        timer = setInterval(() => {
+          void personalPostIsFailed(postId)
+            .then((failed) => {
+              if (failed) {
+                reject(new Error(PERSONAL_POST_CANCELLED_MESSAGE));
+              }
+            })
+            .catch((err) => {
+              console.warn(
+                '[personal] withAbortWhenPersonalPostFailed poll error (ignored):',
+                err instanceof Error ? err.message : String(err),
+              );
+            });
+        }, 1500);
+      }),
+    ]);
+  } finally {
+    if (timer) clearInterval(timer);
+  }
+}
+
+const MAX_GENERATION_ACTIVITY_LOG = 220;
+
+/**
+ * Appends one line to `render_activity_log` for dashboard debugging (sourcing,
+ * stitch, etc.). Does **not** update `updated_at` so heartbeat / stale-job
+ * logic still reflects real pipeline progress.
+ */
+export async function appendPersonalGenerationLog(postId: string, message: string): Promise<void> {
+  if (!isDbConfigured()) return;
+  const line = message.trim().slice(0, 500);
+  if (!line) return;
+  const db = getDb();
+  const [row] = await db
+    .select({ log: personalPosts.renderActivityLog })
+    .from(personalPosts)
+    .where(eq(personalPosts.id, postId));
+  const prev = Array.isArray(row?.log) ? (row!.log as PersonalPostRenderActivityEntry[]) : [];
+  const entry: PersonalPostRenderActivityEntry = {
+    at: new Date().toISOString(),
+    m: line,
+  };
+  const next = [...prev, entry].slice(-MAX_GENERATION_ACTIVITY_LOG);
+  await db
+    .update(personalPosts)
+    .set({ renderActivityLog: next })
+    .where(eq(personalPosts.id, postId));
+}
+
+/**
+ * How long an in-flight personal post may sit without finishing before cron
+ * marks it failed. Override with `PERSONAL_STALE_PIPELINE_MS` (milliseconds, min 60000).
+ * Default: 3h in production, 45m in non-production (laptop sleep / hung jobs recover sooner).
+ */
+export function stalePersonalPipelineMs(): number {
+  const raw = process.env.PERSONAL_STALE_PIPELINE_MS?.trim();
+  if (raw && /^\d+$/.test(raw)) {
+    const n = parseInt(raw, 10);
+    if (n >= 60_000) return n;
+  }
+  return process.env.NODE_ENV === 'production'
+    ? 3 * 60 * 60 * 1000
+    : 45 * 60 * 1000;
+}
+
+/** Shown when boot sweep fails a post that was `rendering` from a prior process. */
 const BOOT_RENDERING_RESET_MSG =
-  'Encoding was interrupted when the server restarted (for example the dev server was stopped). Generate again to retry.';
+  'The API restarted during video encoding (Ctrl+C, deploy, or the process exiting). That encode session ended. Press Generate again.';
 
+/** Shown when boot sweep fails queued / scripting / non-resumable sourcing from a prior process. */
 const BOOT_EARLY_PHASE_RESET_MSG =
-  'Generation was interrupted while planning or sourcing media (for example the dev server was stopped, or the job hung). Generate again to retry.';
+  'The API restarted while this post was queued, writing the script, or sourcing media (Ctrl+C, deploy, or a second API on the same port). Work from the old process is not carried over. Press Generate again.';
+
+/**
+ * Director `sourcing_media` with a storyboard survives the first boot query, but when
+ * {@link personalDirectorResumeOnBootEnabled} is false we deliberately fail those rows so
+ * they do not sit "in progress" forever—must match user expectation vs a hung job.
+ */
+const BOOT_DIRECTOR_SOURCING_NO_RESUME_MSG =
+  'Director post was in media sourcing when the API restarted. PERSONAL_RESUME_DIRECTOR_ON_BOOT is off, so this run was not auto-resumed and the row was marked failed. Press Generate again, or set PERSONAL_RESUME_DIRECTOR_ON_BOOT=true on a single API host. The Generation log on this card was kept so you can still read prior steps (e.g. provider errors).';
+
+const BOOT_ERR_DISPLAY_MAX = 1200;
 
 /**
  * When true, the first API boot after a crash/stop marks in-flight personal
@@ -538,8 +842,10 @@ export function personalDirectorResumeOnBootEnabled(): boolean {
  * Director-mode exceptions (still old `updatedAt`, but resumable from DB):
  * - `rendering` with `__pipelineCheckpoint.phase === 'pre_stitch'` — FFmpeg
  *   can restart from the saved stitch payload.
- * - `sourcing_media` with a storyboard (`editPlan` in `script`) — shot work
- *   can continue after `resumeInterruptedDirectorPersonalPostsOnBoot` runs.
+ * - `sourcing_media` with a storyboard (`editPlan` in `script`) — **only**
+ *   when {@link personalDirectorResumeOnBootEnabled} is true will sourcing
+ *   continue after boot; otherwise a follow-up update marks that row failed
+ *   so the UI does not stay stuck.
  */
 export async function failInterruptedRenderingPersonalPostsOnBoot(): Promise<number> {
   if (!personalRenderingBootResetEnabled()) return 0;
@@ -549,10 +855,9 @@ export async function failInterruptedRenderingPersonalPostsOnBoot(): Promise<num
     .update(personalPosts)
     .set({
       status: 'failed',
-      errorMessage: BOOT_RENDERING_RESET_MSG.slice(0, 500),
+      errorMessage: BOOT_RENDERING_RESET_MSG.slice(0, BOOT_ERR_DISPLAY_MAX),
       renderProgress: null,
       renderProgressLabel: null,
-      renderActivityLog: [],
       updatedAt: new Date(),
     })
     .where(
@@ -570,10 +875,9 @@ export async function failInterruptedRenderingPersonalPostsOnBoot(): Promise<num
     .update(personalPosts)
     .set({
       status: 'failed',
-      errorMessage: BOOT_EARLY_PHASE_RESET_MSG.slice(0, 500),
+      errorMessage: BOOT_EARLY_PHASE_RESET_MSG.slice(0, BOOT_ERR_DISPLAY_MAX),
       renderProgress: null,
       renderProgressLabel: null,
-      renderActivityLog: [],
       updatedAt: new Date(),
     })
     .where(
@@ -590,6 +894,52 @@ export async function failInterruptedRenderingPersonalPostsOnBoot(): Promise<num
     .returning({ id: personalPosts.id });
   const nRender = updatedRendering.length;
   const nEarly = updatedEarly.length;
+  let nDirectorResumeOff = 0;
+  if (!personalDirectorResumeOnBootEnabled()) {
+    const extraRendering = await db
+      .update(personalPosts)
+      .set({
+        status: 'failed',
+        errorMessage: BOOT_RENDERING_RESET_MSG.slice(0, BOOT_ERR_DISPLAY_MAX),
+        renderProgress: null,
+        renderProgressLabel: null,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(personalPosts.status, 'rendering'),
+          lt(personalPosts.updatedAt, PERSONAL_PROCESS_BOOT_AT),
+          like(personalPosts.templateId, 'director:%'),
+          sql`coalesce((${personalPosts.script})::jsonb #>> '{__pipelineCheckpoint,phase}', '') = 'pre_stitch'`,
+        ),
+      )
+      .returning({ id: personalPosts.id });
+    nDirectorResumeOff += extraRendering.length;
+    const extraSourcing = await db
+      .update(personalPosts)
+      .set({
+        status: 'failed',
+        errorMessage: BOOT_DIRECTOR_SOURCING_NO_RESUME_MSG.slice(0, BOOT_ERR_DISPLAY_MAX),
+        renderProgress: null,
+        renderProgressLabel: null,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(personalPosts.status, 'sourcing_media'),
+          lt(personalPosts.updatedAt, PERSONAL_PROCESS_BOOT_AT),
+          like(personalPosts.templateId, 'director:%'),
+          sql`(${personalPosts.script})::jsonb ? 'editPlan'`,
+        ),
+      )
+      .returning({ id: personalPosts.id });
+    nDirectorResumeOff += extraSourcing.length;
+    if (nDirectorResumeOff > 0) {
+      console.warn(
+        `[personal] failInterruptedRenderingPersonalPostsOnBoot: marked ${nDirectorResumeOff} director checkpoint row(s) as failed (PERSONAL_RESUME_DIRECTOR_ON_BOOT is off)`,
+      );
+    }
+  }
   if (nRender > 0) {
     console.warn(
       `[personal] failInterruptedRenderingPersonalPostsOnBoot: marked ${nRender} rendering row(s) as failed`,
@@ -600,7 +950,7 @@ export async function failInterruptedRenderingPersonalPostsOnBoot(): Promise<num
       `[personal] failInterruptedRenderingPersonalPostsOnBoot: marked ${nEarly} queued/scripting/sourcing row(s) as failed`,
     );
   }
-  return nRender + nEarly;
+  return nRender + nEarly + nDirectorResumeOff;
 }
 
 /**
@@ -612,7 +962,7 @@ export async function failInterruptedRenderingPersonalPostsOnBoot(): Promise<num
 export async function failStaleRenderingPersonalPosts(): Promise<number> {
   if (!isDbConfigured()) return 0;
   const db = getDb();
-  const cutoff = new Date(Date.now() - STALE_PERSONAL_PIPELINE_MS);
+  const cutoff = new Date(Date.now() - stalePersonalPipelineMs());
   const rows = await db
     .select({ id: personalPosts.id })
     .from(personalPosts)
@@ -634,10 +984,9 @@ export async function failStaleRenderingPersonalPosts(): Promise<number> {
       .set({
         status: 'failed',
         errorMessage:
-          'Video encoding did not finish within a few hours (server restart, stalled network, or overload). Try generating again.',
+          'Video encoding had no progress for many hours (stalled encode, sleep, or overload). Try generating again.',
         renderProgress: null,
         renderProgressLabel: null,
-        renderActivityLog: [],
         updatedAt: new Date(),
       })
       .where(eq(personalPosts.id, r.id));
@@ -645,6 +994,39 @@ export async function failStaleRenderingPersonalPosts(): Promise<number> {
   }
   if (n > 0) {
     console.warn(`[personal] failStaleRenderingPersonalPosts: marked ${n} stale row(s) as failed`);
+  }
+  if (!personalDirectorResumeOnBootEnabled()) {
+    const rowsPreStitch = await db
+      .select({ id: personalPosts.id })
+      .from(personalPosts)
+      .where(
+        and(
+          eq(personalPosts.status, 'rendering'),
+          lt(personalPosts.updatedAt, cutoff),
+          like(personalPosts.templateId, 'director:%'),
+          sql`coalesce((${personalPosts.script})::jsonb #>> '{__pipelineCheckpoint,phase}', '') = 'pre_stitch'`,
+        ),
+      )
+      .limit(80);
+    for (const r of rowsPreStitch) {
+      await db
+        .update(personalPosts)
+        .set({
+          status: 'failed',
+          errorMessage:
+            'Video encoding had no progress for many hours (stalled encode, sleep, or overload). Try generating again.',
+          renderProgress: null,
+          renderProgressLabel: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(personalPosts.id, r.id));
+      n++;
+    }
+    if (rowsPreStitch.length > 0) {
+      console.warn(
+        `[personal] failStaleRenderingPersonalPosts: marked ${rowsPreStitch.length} stale director pre_stitch row(s) as failed (resume on boot is off)`,
+      );
+    }
   }
   return n;
 }
@@ -657,7 +1039,7 @@ export async function failStaleRenderingPersonalPosts(): Promise<number> {
 export async function failStaleEarlyPhasePersonalPosts(): Promise<number> {
   if (!isDbConfigured()) return 0;
   const db = getDb();
-  const cutoff = new Date(Date.now() - STALE_PERSONAL_PIPELINE_MS);
+  const cutoff = new Date(Date.now() - stalePersonalPipelineMs());
   const rows = await db
     .select({ id: personalPosts.id })
     .from(personalPosts)
@@ -680,10 +1062,9 @@ export async function failStaleEarlyPhasePersonalPosts(): Promise<number> {
       .set({
         status: 'failed',
         errorMessage:
-          'Generation did not finish within a few hours (server restart, stalled AI request, or overload). Try generating again.',
+          'Generation had no progress for many hours (stalled AI, sleep, or overload). Try generating again.',
         renderProgress: null,
         renderProgressLabel: null,
-        renderActivityLog: [],
         updatedAt: new Date(),
       })
       .where(eq(personalPosts.id, r.id));
@@ -691,6 +1072,38 @@ export async function failStaleEarlyPhasePersonalPosts(): Promise<number> {
   }
   if (n > 0) {
     console.warn(`[personal] failStaleEarlyPhasePersonalPosts: marked ${n} stale row(s) as failed`);
+  }
+  if (!personalDirectorResumeOnBootEnabled()) {
+    const rowsDirectorSourcing = await db
+      .select({ id: personalPosts.id })
+      .from(personalPosts)
+      .where(
+        and(
+          eq(personalPosts.status, 'sourcing_media'),
+          lt(personalPosts.updatedAt, cutoff),
+          like(personalPosts.templateId, 'director:%'),
+          sql`(${personalPosts.script})::jsonb ? 'editPlan'`,
+        ),
+      )
+      .limit(80);
+    for (const r of rowsDirectorSourcing) {
+      await db
+        .update(personalPosts)
+        .set({
+          status: 'failed',
+          errorMessage: BOOT_DIRECTOR_SOURCING_NO_RESUME_MSG.slice(0, BOOT_ERR_DISPLAY_MAX),
+          renderProgress: null,
+          renderProgressLabel: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(personalPosts.id, r.id));
+      n++;
+    }
+    if (rowsDirectorSourcing.length > 0) {
+      console.warn(
+        `[personal] failStaleEarlyPhasePersonalPosts: marked ${rowsDirectorSourcing.length} stale director sourcing row(s) as failed (resume on boot is off)`,
+      );
+    }
   }
   return n;
 }
@@ -717,6 +1130,18 @@ export function computeNextRunAt(args: {
     next.setUTCDate(next.getUTCDate() + 1);
   }
   return next;
+}
+
+const REMOVED_STYLE_BIBLE_KEYS = ['motifs', 'copySamples', 'exampleScriptSnippets', 'bannedPhrases'] as const;
+
+/** Drops removed style-bible fields so JSONB and API payloads stay clean. */
+function stripRemovedStyleBibleKeys(
+  raw: PersonalAccountStyleBible | null,
+): PersonalAccountStyleBible | null {
+  if (raw == null) return null;
+  const o = { ...(raw as Record<string, unknown>) };
+  for (const k of REMOVED_STYLE_BIBLE_KEYS) delete o[k];
+  return o as PersonalAccountStyleBible;
 }
 
 function toPayload(
@@ -754,7 +1179,7 @@ function toPayload(
     lastGeneratedAt: row.lastGeneratedAt?.toISOString() ?? null,
     nextRunAt: row.nextRunAt?.toISOString() ?? null,
     totalPosts: row.totalPosts,
-    styleBible: (row.styleBible as PersonalAccountStyleBible) ?? null,
+    styleBible: stripRemovedStyleBibleKeys((row.styleBible as PersonalAccountStyleBible) ?? null),
     generatorConfig: (row.generatorConfig as PersonalGeneratorConfig) ?? null,
     characterId: row.characterId ?? null,
     formatKind: (row.formatKind ?? 'video') as 'video' | 'slideshow' | 'static_image',

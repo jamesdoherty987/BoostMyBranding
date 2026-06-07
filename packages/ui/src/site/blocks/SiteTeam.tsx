@@ -358,7 +358,7 @@ function QuoteCard({ member, index, photo, brand }: CardProps) {
         </figcaption>
       </div>
       <blockquote className="mt-4 text-sm leading-relaxed text-slate-700">
-        <span aria-hidden>&ldquo;</span>
+        <span aria-hidden>“</span>
         <InlineEditable
           path={`team.members.${index}.bio`}
           value={member.bio ?? ''}
@@ -366,7 +366,7 @@ function QuoteCard({ member, index, photo, brand }: CardProps) {
           multiline
           placeholder="Short quote or bio…"
         />
-        <span aria-hidden>&rdquo;</span>
+        <span aria-hidden>”</span>
       </blockquote>
       <SpecialtyChips member={member} limit={3} />
     </figure>

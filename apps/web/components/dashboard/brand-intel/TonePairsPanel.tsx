@@ -11,6 +11,7 @@ import {
   Spinner,
   Badge,
   toast,
+  confirmDialog,
 } from '@boost/ui';
 import {
   Plus,
@@ -225,7 +226,16 @@ function PairCard({
   }
 
   async function remove() {
-    if (!confirm('Remove this voice example?')) return;
+    if (
+      !(await confirmDialog({
+        title: 'Remove this voice example?',
+        description: 'This deletes the saved tone pair from brand intel.',
+        confirmLabel: 'Remove',
+        danger: true,
+      }))
+    ) {
+      return;
+    }
     setBusy(true);
     try {
       await api.deleteTonePair(clientId, pair.id);

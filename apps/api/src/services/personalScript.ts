@@ -15,6 +15,7 @@
  * own image search query, narrated text, and burned-in caption.
  */
 
+import { randomInt, randomUUID } from 'node:crypto';
 import { generateJSON } from './claude.js';
 import { withRetry } from './retry.js';
 import type { PersonalTheme } from './personalThemes.js';
@@ -23,7 +24,8 @@ import {
   buildStyleExamplesPrompt,
   buildTitleFirstWorkflowPrompt,
 } from './personalContentHints.js';
-import { generateChannelVideoTitle } from './personalChannelTitle.js';
+import { resolveLockedChannelVideoTitle } from './personalChannelTitle.js';
+import { clampLongformTargetSeconds } from './personalLongform.js';
 
 export interface PersonalScript {
   title: string;
@@ -89,8 +91,12 @@ export interface GenerateScriptArgs {
   /** Recent `script.title` values on this channel — avoid duplicate headlines. */
   recentVideoTitles?: string[];
   /**
+   * Long-form flag — forwarded to the same title pass as {@link planStoryboard} / isolated test.
+   */
+  longform?: boolean;
+  /**
    * When set, script JSON `title` must match exactly (normally from
-   * {@link generateChannelVideoTitle} inside {@link generateScript}).
+   * {@link resolveLockedChannelVideoTitle} inside {@link generateScript}).
    */
   lockedVideoTitle?: string;
 }
@@ -100,17 +106,20 @@ export async function generateScript(
 ): Promise<PersonalScript> {
   const exampleTitles = (args.styleBible?.exampleVideoTitles ?? []).map((t) => t.trim()).filter(Boolean);
 
-  const lockedVideoTitle =
-    args.lockedVideoTitle?.trim() ||
-    (exampleTitles.length > 0
-      ? await generateChannelVideoTitle({
-          topic: args.topic,
-          language: args.language,
-          styleBible: args.styleBible,
-          recentVideoTitles: args.recentVideoTitles,
-          scriptModel: args.scriptModel,
-        })
-      : undefined);
+  const lockedVideoTitle = await resolveLockedChannelVideoTitle({
+    topic: args.topic,
+    language: args.language,
+    styleBible: args.styleBible,
+    recentVideoTitles: args.recentVideoTitles,
+    longform: args.longform === true,
+    lockedVideoTitle: args.lockedVideoTitle,
+  });
+
+  if (exampleTitles.length > 0 && !lockedVideoTitle?.trim()) {
+    throw new Error(
+      '[personal_script] Example video titles are configured but no locked title was produced.',
+    );
+  }
 
   const prompt = buildScriptPrompt({
     ...args,
@@ -120,16 +129,19 @@ export async function generateScript(
     () =>
       generateJSON<PersonalScript>(prompt, {
         model: args.scriptModel ?? 'sonnet',
-        maxTokens: 2048,
+        maxTokens: args.longform === true ? 4096 : 2048,
       }),
     { label: `personal_script:${args.theme.id}:${args.topic.slice(0, 40)}`, attempts: 2 },
   );
 
-  if (lockedVideoTitle) {
+  if (exampleTitles.length > 0) {
+    script.title = lockedVideoTitle!.trim();
+  } else if (lockedVideoTitle) {
     script.title = lockedVideoTitle;
   }
 
   // Sanity defaults — Claude very occasionally omits fields.
+  const maxBeats = args.longform === true ? 48 : 8;
   script.beats = (script.beats ?? [])
     .map((b, i) => ({
       order: b.order ?? i,
@@ -137,10 +149,10 @@ export async function generateScript(
       onScreen: (b.onScreen ?? '').trim(),
       imageQuery: (b.imageQuery ?? args.topic).trim(),
       eyebrow: b.eyebrow?.trim() || undefined,
-      durationSeconds: clampDuration(b.durationSeconds, args.averageClipSeconds),
+      durationSeconds: clampDuration(b.durationSeconds, args.averageClipSeconds, args.longform === true),
     }))
     .filter((b) => b.voiceover.length > 0 || b.onScreen.length > 0)
-    .slice(0, 8);
+    .slice(0, maxBeats);
 
   if (script.beats.length === 0) {
     throw new Error('Script came back with no beats');
@@ -149,19 +161,27 @@ export async function generateScript(
   return script;
 }
 
-function clampDuration(n: number | undefined, averageSeconds?: number): number {
-  const lo = 1.5;
-  const hi = 8;
+function clampDuration(n: number | undefined, averageSeconds?: number, longform = false): number {
+  const lo = longform ? 2 : 1.5;
+  const hi = longform ? 14 : 8;
+  const defaultCenter = longform ? 5 : 3;
   const center =
     averageSeconds != null && Number.isFinite(averageSeconds)
-      ? Math.min(hi, Math.max(lo, Math.min(7, Math.max(2, averageSeconds))))
-      : 3;
+      ? Math.min(hi, Math.max(lo, Math.min(longform ? 12 : 7, Math.max(2, averageSeconds))))
+      : defaultCenter;
   if (n == null || Number.isNaN(n)) return center;
   return Math.max(lo, Math.min(hi, n));
 }
 
 function buildScriptPrompt(args: GenerateScriptArgs): string {
-  const target = args.targetDurationSeconds ?? args.theme.targetDurationSeconds;
+  const target =
+    args.longform === true
+      ? clampLongformTargetSeconds(args.targetDurationSeconds ?? args.theme.targetDurationSeconds)
+      : (args.targetDurationSeconds ?? args.theme.targetDurationSeconds);
+  const longformBlock =
+    args.longform === true
+      ? `\n\nLONG-FORM MODE (~${target}s total runtime, about ${Math.floor(target / 60)} min):\n- Output **12–48 beats** (not 4–7). Each beat is one on-screen segment with its own imageQuery.\n- The **sum** of every beat's \`durationSeconds\` must land within **±18%** of ${target} seconds — this is a hard pacing contract.\n- Keep each beat's voiceover substantive (this is a longer video), but still one clear idea per beat.\n`
+      : '';
   const blacklist =
     args.blacklist && args.blacklist.length > 0
       ? `\n\nNEVER mention or imply any of the following: ${args.blacklist.join(', ')}.`
@@ -198,18 +218,11 @@ function buildScriptPrompt(args: GenerateScriptArgs): string {
         sb.vibe ? `- Vibe: ${sb.vibe}` : '',
         sb.dos && sb.dos.length > 0 ? `- Always do: ${sb.dos.join(' · ')}` : '',
         sb.donts && sb.donts.length > 0 ? `- Never do: ${sb.donts.join(' · ')}` : '',
-        sb.motifs && sb.motifs.length > 0 ? `- Recurring motifs: ${sb.motifs.join(' · ')}` : '',
         sb.palette && sb.palette.length > 0
           ? `- Brand palette (use in imagery and mood): ${sb.palette.join(', ')}`
           : '',
         sb.typography?.trim()
           ? `- Typography / on-screen text: ${sb.typography.trim()}`
-          : '',
-        sb.bannedPhrases && sb.bannedPhrases.length > 0
-          ? `- BANNED phrases (never write these verbatim): ${sb.bannedPhrases.join(' · ')}`
-          : '',
-        sb.copySamples && sb.copySamples.length > 0
-          ? `- Copy samples that capture the voice (mimic this rhythm and lexicon):\n${sb.copySamples.map((s) => `  • "${s}"`).join('\n')}`
           : '',
       ]
         .filter(Boolean)
@@ -237,11 +250,11 @@ function buildScriptPrompt(args: GenerateScriptArgs): string {
       : buildTitleFirstWorkflowPrompt(sb, args.recentVideoTitles);
   const lockedTitleBlock =
     locked && locked.length > 0
-      ? `\n\nLOCKED TITLE — JSON "title" must be this exact string (do not edit):\n<<< ${locked} >>>\nHook and beats must match this title.\n`
+      ? `\n\nLOCKED TITLE — JSON "title" must be this exact string (do not edit):\n<<< ${locked} >>>\nThis string matches the account’s **example video titles** (format + register). Hook and beats must match this title. VOICE GUIDE below is for narration — do not reinterpret the title.\n`
       : '';
   const scriptTitleContract =
     exampleTitleCount > 0
-      ? '<one line — MUST obey STEP 0 + STYLE REFERENCES: same headline *species* as example titles for THIS topic; MUST differ from every ALREADY-PUBLISHED title; never generic>'
+      ? '<one line — STRICT: same format and content register as STYLE example titles for THIS topic; must differ from ALREADY-PUBLISHED; theme voice is NOT a different title format>'
       : '<catchy title, 5-9 words>';
   const titleJsonLine =
     locked && locked.length > 0
@@ -269,11 +282,11 @@ ANTI-SLOP RULES (non-negotiable):
 
 OUTPUT CONTRACT:
 1. **Hook** — one-line attention grabber. ≤3 seconds of VO. Must pass the anti-slop rules above.
-2. **Beats** — 4-7 beats. Each beat:
+2. **Beats** — ${args.longform === true ? '**12–48 beats** (see LONG-FORM MODE above).' : '4-7 beats.'} Each beat:
    - \`voiceover\` — 1 short sentence, natural, conversational.
    - \`onScreen\` — shorter (3-8 words), burned-in big text.
    - \`imageQuery\` — 2-6 concrete-noun keywords for Pexels/Unsplash/etc. Prefer specific tangible things over abstract concepts.
-   - \`durationSeconds\` — usually 2-5s.
+   - \`durationSeconds\` — ${args.longform === true ? 'usually 3–10s per beat; vary pacing.' : 'usually 2-5s.'}
    - \`eyebrow\` — optional 1-3 word label.
 3. **Outro** — 1 sentence CTA in the theme's voice. Conversational, not salesy.
 4. **Caption** — 1-3 sentences, 0-3 emoji. Not a summary of the video; a hook for readers.
@@ -307,23 +320,48 @@ export interface ChooseTopicArgs {
   topicSeeds?: string[];
   recentTopics?: string[]; // avoid immediate repeats
   customDirection?: string;
+  /**
+   * When the account has no topic seeds, we infer a topic from these example
+   * titles instead of using built-in `theme.topicSeeds` (avoids Ötzi/Lascaux
+   * defaults on Ancient Origins, etc.).
+   */
+  styleBible?: PersonalAccountStyleBible;
 }
 
 /**
- * Picks the next topic for an account. Prefers topicSeeds when the
- * user provided them, otherwise falls back to theme defaults. Always
- * sends a short prompt to Claude to rotate + refresh the angle so
- * viewers don't see identical titles twice.
+ * Picks the next topic for a personal account.
+ *
+ * 1. Uses **account topic seeds** when the operator configured any.
+ * 2. Otherwise, if **example video titles** exist on the style bible, invents
+ *    a fresh factual topic seed from that list (same idea as the isolated
+ *    title test) — never silently falls back to built-in `theme.topicSeeds`
+ *    when examples exist.
+ * 3. Otherwise falls back to `theme.topicSeeds` (e.g. slideshow / accounts
+ *    with no examples yet), then the usual refresh LLM pass.
  */
 export async function chooseTopic(args: ChooseTopicArgs): Promise<string> {
-  const pool =
-    args.topicSeeds && args.topicSeeds.length > 0
-      ? args.topicSeeds
-      : args.theme.topicSeeds;
-
-  // If we have a rich seed pool, rotate through it deterministically.
-  // Otherwise ask Claude for a fresh angle to keep variety high.
   const recent = new Set(args.recentTopics ?? []);
+  const accountSeeds = (args.topicSeeds ?? []).map((t) => t.trim()).filter(Boolean);
+
+  if (accountSeeds.length === 0) {
+    const examples = (args.styleBible?.exampleVideoTitles ?? [])
+      .map((t) => String(t).trim())
+      .filter(Boolean);
+    if (examples.length > 0) {
+      return await inventTopicSeedFromExampleTitles(examples, args.theme, args.customDirection, recent);
+    }
+  }
+
+  const pool =
+    accountSeeds.length > 0
+      ? accountSeeds
+      : (args.theme.topicSeeds ?? []).filter((t) => t.trim().length > 0);
+  if (pool.length === 0) {
+    throw new Error(
+      '[chooseTopic] No topic seeds and no example video titles on this account. Add topic seeds (one per line) or example titles under Style & config.',
+    );
+  }
+
   const freshSeeds = pool.filter((t) => !recent.has(t));
   const seedChoice =
     freshSeeds.length > 0
@@ -351,4 +389,65 @@ Return JSON only: { "topic": "..." }`;
   } catch {
     return seedChoice;
   }
+}
+
+const TOPIC_INVENT_SPIN_AXES = [
+  'food, hunger, digestion, or feasts',
+  'stone tools, fire, clothing, or shelter',
+  'migration, coasts, boats, or getting lost',
+  'families, elders, kids, or social tension',
+  'night, sleep, dreams, fear, or boredom',
+  'hunting, animals, dogs, or dangerous wildlife',
+  'weather extremes: cold, heat, storms, drought',
+  'art, caves, pigments, ornaments, music',
+  'burials, grief, bodies, or afterlife beliefs',
+] as const;
+
+async function inventTopicSeedFromExampleTitles(
+  examples: string[],
+  theme: PersonalTheme,
+  customDirection: string | undefined,
+  recent: Set<string>,
+): Promise<string> {
+  const list = examples.map((e, i) => `${i + 1}. ${e}`).join('\n');
+  const rid = randomUUID();
+  const spin = TOPIC_INVENT_SPIN_AXES[randomInt(0, TOPIC_INVENT_SPIN_AXES.length)]!;
+  const modelRaw = process.env.PERSONAL_TOPIC_INVENT_MODEL?.trim().toLowerCase();
+  const model = modelRaw === 'opus' || modelRaw === 'sonnet' ? modelRaw : 'sonnet';
+
+  const avoid =
+    recent.size > 0
+      ? `\n- Do **not** re-use the same core story as any of these recent topics (new angle only): ${[...recent].slice(0, 12).join(' | ')}`
+      : '';
+
+  const prompt = `(Ignore: request_id=${rid})
+
+Channel theme (context only — do not copy theme marketing as the topic): ${theme.name} — ${theme.tagline}
+
+These are real video titles from one channel (tone + subject-matter hints only):
+
+${list}
+
+TASK
+- Infer what kinds of stories this channel covers.
+- Invent **one** new video **topic seed**: 1–3 short sentences naming a concrete angle (place, era, behavior, or mystery) that would still fit this channel.
+- Do **not** copy the exact question or subject of any line above.
+- Plain factual seed text only (not a clickbait title).
+- **This run:** lean toward material about: **${spin}** (do not paste this bullet into the JSON verbatim).
+${customDirection ? `- Respect operator direction when it fits: ${customDirection}\n` : ''}${avoid}
+
+Return ONLY valid JSON: {"topic":"..."}`;
+
+  const raw = await generateJSON<{ topic?: string }>(prompt, {
+    model,
+    maxTokens: 260,
+    temperature: Math.min(1, 0.94 + Math.random() * 0.06),
+  });
+  const topic = String(raw.topic ?? '')
+    .trim()
+    .replace(/\s+/g, ' ');
+  if (!topic) {
+    throw new Error('[chooseTopic] Topic invention from example titles returned an empty topic.');
+  }
+  return topic;
 }

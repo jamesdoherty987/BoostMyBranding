@@ -1222,10 +1222,12 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
     } else {
       // Static slide (Ken Burns off): loop input + output -t (see args below).
       // Do not use select=eq(n\,0) here — one decoded frame + fps produced ~1/fps s clips.
+      // Frame rate: use `-framerate` before `-i` (see args below), not `fps=` here — on some
+      // Windows FFmpeg builds, `fps` after `-loop 1` on PNG (demuxer default 25fps) fails with
+      // "Error initializing filters" / EINVAL when opening the segment encoder.
       filters.push(
         `scale=${a.width}:${a.height}:force_original_aspect_ratio=increase:flags=lanczos`,
         `crop=${a.width}:${a.height}`,
-        `fps=${a.fps}`,
       );
     }
   } else {
@@ -1334,12 +1336,18 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
     }
   }
 
+  // RGB stills (PNG) through scale/crop + overlays must end in yuv420p before libx264; avoids
+  // fragile filtergraph / encoder init on Windows when `-pix_fmt` alone is applied after `-vf`.
+  filters.push('format=yuv420p');
+
   const useKenBurnsOnImage = a.kind === 'image' && a.kenBurnsOnStills !== false;
 
   const args: string[] = [];
   // Still + no Ken Burns: loop the image so -t / trim can extend real time.
   if (a.kind === 'image' && !useKenBurnsOnImage) {
     args.push('-loop', '1');
+    // Input frame rate for the looped single image (pairs with omitted `fps=` in -vf).
+    args.push('-framerate', String(a.fps));
   }
   args.push('-i', a.input);
   if (a.kind === 'video') args.push('-t', String(a.durationSeconds));

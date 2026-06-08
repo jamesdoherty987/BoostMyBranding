@@ -1856,6 +1856,7 @@ export class BoostApi {
         googleNews: boolean;
       };
       voice: { elevenlabs: boolean; openai: boolean };
+      resend: boolean;
     }>('/api/v1/personal/features');
   }
 
@@ -1927,7 +1928,18 @@ export class BoostApi {
     return this.request<{
       configured: boolean;
       accounts: Array<{ platform: string; handle: string; id: string; label: string }>;
+      /** Present when ContentStudio returned an error (wrong workspace id, bad API key, etc.). */
+      listError: string | null;
     }>(`/api/v1/personal/contentstudio/accounts${q}`);
+  }
+
+  /** Workspaces visible to the server ContentStudio API key (for picking workspace id). */
+  listPersonalContentStudioWorkspaces() {
+    return this.request<{
+      configured: boolean;
+      workspaces: Array<{ id: string; name: string }>;
+      listError: string | null;
+    }>(`/api/v1/personal/contentstudio/workspaces`);
   }
 
   listPersonalPosts(id: string, opts?: { limit?: number }) {
@@ -2308,6 +2320,9 @@ export interface PersonalAccount {
   postSpacingMinutes: number;
   autoApprove: boolean;
   autoSchedule: boolean;
+  /** When true, server emails {@link videoDeliveryEmail} a link after each render (requires Resend). */
+  emailVideoOnReady?: boolean;
+  videoDeliveryEmail?: string | null;
   autoGenerateOnSchedule: boolean;
   accentColor: string | null;
   logoUrl: string | null;
@@ -2345,6 +2360,8 @@ export interface CreatePersonalAccountBody {
   postSpacingMinutes?: number;
   autoApprove?: boolean;
   autoSchedule?: boolean;
+  emailVideoOnReady?: boolean;
+  videoDeliveryEmail?: string | null;
   autoGenerateOnSchedule?: boolean;
   accentColor?: string;
   logoUrl?: string;
@@ -2522,6 +2539,59 @@ export interface PersonalGeneratorConfig {
   mediaPreference?: 'mixed' | 'stills_only' | 'motion_preferred' | 'video_only';
   cutPace?: 'relaxed' | 'normal' | 'rapid';
   keywordPopStyle?: 'off' | 'subtle' | 'bold';
+  keywordOverlayFontPreset?:
+    | 'inter'
+    | 'lora'
+    | 'source_serif'
+    | 'jetbrains_mono'
+    | 'oswald'
+    | 'dm_sans'
+    | 'clean_sans'
+    | 'clean_serif';
+  keywordOverlayFontScale?: number;
+  keywordOverlayTextBackground?: boolean;
+  /**
+   * Where keyword / slate lower-thirds sit on frame (FFmpeg drawtext). Default bottom_center.
+   */
+  keywordOverlayTextAnchor?:
+    | 'top_left'
+    | 'top_center'
+    | 'top_right'
+    | 'middle_left'
+    | 'center'
+    | 'middle_right'
+    | 'bottom_left'
+    | 'bottom_center'
+    | 'bottom_right';
+  /**
+   * Per-output-aspect overrides for keyword pops (merged with the fields above).
+   * Lets e.g. YouTube 16:9 use a different size than Shorts 9:16.
+   */
+  keywordOverlayByAspect?: Partial<
+    Record<'9:16' | '1:1' | '16:9' | '4:5', {
+      fontPreset?:
+        | 'inter'
+        | 'lora'
+        | 'source_serif'
+        | 'jetbrains_mono'
+        | 'oswald'
+        | 'dm_sans'
+        | 'clean_sans'
+        | 'clean_serif';
+      fontScale?: number;
+      textBackground?: boolean;
+      textAnchor?:
+        | 'top_left'
+        | 'top_center'
+        | 'top_right'
+        | 'middle_left'
+        | 'center'
+        | 'middle_right'
+        | 'bottom_left'
+        | 'bottom_center'
+        | 'bottom_right';
+    }>
+  >;
   allowSparseImageText?: boolean;
   ttsSpeed?: number;
   musicDuckUnderVoice?: number;
@@ -2636,3 +2706,20 @@ export interface CreateCustomThemeBody {
   defaultFormat?: 'video' | 'slideshow' | 'static_image';
   overridesBuiltin?: boolean;
 }
+
+export {
+  resolveKeywordOverlayForAspect,
+  keywordOverlayHeightMulForAspect,
+  KEYWORD_OVERLAY_FONT_IDS,
+  KEYWORD_OVERLAY_FONT_SCALE_MIN,
+  KEYWORD_OVERLAY_FONT_SCALE_MAX,
+  KEYWORD_OVERLAY_TEXT_ANCHORS,
+  isKeywordOverlayFontId,
+  isKeywordOverlayTextAnchor,
+  normalizeKeywordOverlayFontPreset,
+  type KeywordOverlayAspectKey,
+  type KeywordOverlayAspectOverride,
+  type KeywordOverlayFontId,
+  type KeywordOverlayTextAnchor,
+  type PersonalGenKeywordOverlayFields,
+} from './personalKeywordOverlay';

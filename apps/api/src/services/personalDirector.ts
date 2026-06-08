@@ -545,10 +545,14 @@ function defaultPacing(theme: PersonalTheme): 'slow' | 'medium' | 'fast' {
 function parseKeywordCards(raw: unknown): DirectorShot['keywordCards'] {
   if (!Array.isArray(raw) || raw.length < 1) return undefined;
   const out: NonNullable<DirectorShot['keywordCards']> = [];
+  const seen = new Set<string>();
   for (const x of raw.slice(0, 4)) {
     if (!x || typeof x !== 'object') continue;
     const text = String((x as { text?: unknown }).text ?? '').trim();
     if (!text || text.length > 48) continue;
+    const dedupeKey = text.toLowerCase().replace(/\s+/g, ' ');
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
     const tStart = (x as { tStart?: unknown }).tStart;
     const tEnd = (x as { tEnd?: unknown }).tEnd;
     out.push({
@@ -558,6 +562,114 @@ function parseKeywordCards(raw: unknown): DirectorShot['keywordCards'] {
     });
   }
   return out.length ? out : undefined;
+}
+
+/**
+ * Drop keyword cards whose text is not grounded in this shot's `voiceover`.
+ * The model often adds proper nouns from context that are not spoken on this beat.
+ */
+export function filterKeywordCardsByVoiceover(
+  cards: Array<{ text: string; tStart?: number; tEnd?: number }> | undefined,
+  voiceover: string,
+): Array<{ text: string; tStart?: number; tEnd?: number }> | undefined {
+  if (!cards?.length) return undefined;
+  const vo = voiceover.trim();
+  if (!vo) return undefined;
+  const kept = cards.filter((c) => keywordCardGroundedInVoiceover(c.text.trim(), vo));
+  return kept.length ? kept : undefined;
+}
+
+function alnumCollapsed(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+/** Two-letter English words that must not match via bare substring inside other words. */
+const TWO_LETTER_NOISE = new Set([
+  'it',
+  'is',
+  'at',
+  'in',
+  'on',
+  'an',
+  'am',
+  'as',
+  'or',
+  'if',
+  'we',
+  'he',
+  'be',
+  'to',
+  'of',
+  'do',
+  'go',
+  'no',
+  'so',
+  'up',
+  'me',
+  'my',
+  'by',
+  'ok',
+]);
+
+function keywordTokenInVoiceover(token: string, vo: string): boolean {
+  const t = token.toLowerCase();
+  if (!t) return true;
+  if (/^[0-9.,$€£%+]+$/i.test(t)) {
+    const norm = t.replace(/,/g, '');
+    return vo.toLowerCase().replace(/,/g, '').includes(norm);
+  }
+  const esc = t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(^|[^a-z0-9])${esc}([^a-z0-9]|$)`, 'i').test(vo);
+}
+
+function keywordCardGroundedInVoiceover(cardText: string, voiceover: string): boolean {
+  const voRaw = voiceover.trim();
+  const cardRaw = cardText.trim();
+  if (!voRaw || !cardRaw) return false;
+  const voLo = voRaw.toLowerCase();
+  const cardLo = cardRaw.toLowerCase().replace(/\u2019/g, "'");
+  const voSp = voLo.replace(/\s+/g, ' ');
+  const cardSp = cardLo.replace(/\s+/g, ' ');
+  /** Phrase / label appears as contiguous substring (handles "New York", "June 6, 1944"). */
+  if (cardSp.length >= 2 && voSp.includes(cardSp)) return true;
+  /** Ignore light punctuation between letters so "U.S." / "covid-19" match spoken forms. */
+  const voFold = voLo.replace(/[^a-z0-9]+/g, ' ');
+  const cardFold = cardLo.replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (cardFold.length >= 2 && voFold.replace(/\s+/g, ' ').includes(cardFold)) return true;
+
+  const cA = alnumCollapsed(cardRaw);
+  const vA = alnumCollapsed(voRaw);
+  if (cA.length >= 3 && vA.includes(cA)) return true;
+  if (
+    cA.length === 2 &&
+    /^[a-z]{2}$/i.test(cA) &&
+    keywordTokenInVoiceover(cA, voRaw) &&
+    (!TWO_LETTER_NOISE.has(cA) || /^[A-Z]{2}$/.test(cardRaw.trim()))
+  ) {
+    return true;
+  }
+
+  const digitsC = cardRaw.replace(/[^\d]/g, '');
+  const digitsV = voRaw.replace(/[^\d]/g, '');
+  if (digitsC.length >= 2 && digitsV.includes(digitsC)) return true;
+  if (digitsC.length === 1 && /\d/.test(voRaw)) {
+    const d = digitsC;
+    if (new RegExp(`(^|[^\\d])${d}([^\\d]|$)`).test(voRaw)) return true;
+  }
+
+  /** Tokens: drop apostrophes so "O'Brien" → obrien / obrien split → one token obrien */
+  const cardForTokens = cardLo.replace(/'/g, '');
+  const tokens = cardForTokens.split(/[^a-z0-9%$€£]+/).filter((w) => w.length >= 2);
+  if (tokens.length === 0) {
+    if (cA.length >= 2 && vA.includes(cA) && !TWO_LETTER_NOISE.has(cA)) return true;
+    return false;
+  }
+  return tokens.every((tok) => keywordTokenInVoiceover(tok, voRaw));
+}
+
+/** Same rules as keyword cards — on-image fact labels must match spoken VO. */
+export function overlayFactLabelGroundedInVoiceover(label: string, voiceover: string): boolean {
+  return keywordCardGroundedInVoiceover(label.trim(), voiceover.trim());
 }
 
 function normaliseActs(
@@ -658,7 +770,8 @@ function normaliseShot(
         tEnd: k.tEnd,
       }))
       .filter((k) => k.text.length > 0);
-    if (keywordCards.length === 0) keywordCards = undefined;
+    keywordCards = filterKeywordCardsByVoiceover(keywordCards, (s.voiceover ?? '').trim());
+    if (!keywordCards?.length) keywordCards = undefined;
   }
 
   let imageCaption: string | undefined =
@@ -667,6 +780,12 @@ function normaliseShot(
       : undefined;
   if (!opts?.allowSparseImageText) imageCaption = undefined;
   else if (imageCaption && imageCaption.length > 48) imageCaption = imageCaption.slice(0, 48);
+  if (
+    imageCaption &&
+    !overlayFactLabelGroundedInVoiceover(imageCaption, (s.voiceover ?? '').trim())
+  ) {
+    imageCaption = undefined;
+  }
 
   return {
     id: s.id ?? `shot_${id}`,
@@ -842,9 +961,12 @@ function buildDirectorPrompt(args: DirectArgs): string {
     args.namesNumbersTitleCard === true
       ? `\n\nNAMES & NUMBERS SLATE POPUPS (**enabled** — small **lower-third** cards only: light panel + dark type in post via FFmpeg, **not** burned into AI pixels; never full-screen, never paragraphs):\n` +
         `- Add \`keywordCards\` only when a **high-signal** proper noun, date, year, place, headline figure, currency, %, or age appears in this shot's \`voiceover\` and seeing it briefly helps comprehension.\n` +
+        `- **Hard rule:** each \`keywordCards[].text\` MUST be **spoken in this shot's \`voiceover\`** — copy the exact words or digit string from that line (same spelling). The render pipeline **discards** cards that do not match the VO; never add names, stats, or dates the narrator does not say on this beat.\n` +
+        `- **People, places, numbers:** mirror how that line is spoken — same **digits** if you read numbers aloud (\`2024\` not \`twenty twenty-four\` unless the VO literally says the words), same **place/person** wording (light punctuation differences are OK). Do not use a synonym the VO never says on this shot (e.g. card \`America\` when the line only says \`United States\`).\n` +
         `- **Each card:** **1–3 words** (Title Case for names) OR one compact stat (\`"76%"\`, \`"$4.2T"\`). Never a phrase longer than three words; never duplicate the full hook/title.\n` +
-        `- **Max 2 cards per shot.** Do not repeat the same token on the next shot unless the VO reframes it materially.\n` +
-        `- **Timing (mandatory):** \`tStart\` / \`tEnd\` = seconds from **this shot's** start (0 = first frame). Keep each flash **~0.35–0.95s** — snappy. Windows must **not overlap**.\n` +
+        `- **Max 2 cards per shot.** Do not repeat the same token on the **next** shot unless the VO reframes it materially.\n` +
+        `- **Global dedupe:** do not flash the **same** \`keywordCards.text\` again on a later shot unless **at least ~5 shots** have passed **and** the fact is genuinely new context — otherwise repeats read like a rendering bug.\n` +
+        `- **Timing:** \`tStart\` / \`tEnd\` = seconds from **this shot's** start (0 = first frame). Prefer the **middle half** of the shot (when the fact is spoken); avoid hugging the first/last 12% of the shot body. Each flash **~0.35–0.9s** — snappy. Windows must **not overlap**. If unsure, omit timings and the stitcher auto-centres flashes.\n` +
         `- **Look:** concise sans-serif feel consistent with the edit's \`editPlan.colourGrade\` mood (neutral documentary — not neon, not meme fonts).\n` +
         `- **Skip** low-value tokens, filler, opinion with no figure, and anything already obvious from the picture.\n` +
         `- **Density:** ${args.keywordPopStyle === 'bold' ? 'Bold — fewer pops, only the sharpest anchors.' : 'Subtle — default to one card or none unless the VO is dense with facts.'}`
@@ -854,11 +976,17 @@ function buildDirectorPrompt(args: DirectArgs): string {
     args.namesNumbersTitleCard === true
       ? namesNumbersSlateBlock
       : args.keywordPopStyle && args.keywordPopStyle !== 'off'
-        ? `\n\nKEYWORD POP-UPS (premium lower-thirds — NOT full captions):\n- On roughly 30-45% of shots, add optional \`keywordCards\`: max 3 entries; each \`text\` is 1-3 words OR a compact stat (e.g. "Kyoto" or "$4.2T"). Never sentences.\n- Optional \`tStart\` / \`tEnd\` in seconds within that shot (must stay inside the shot duration). Omit for auto-timing.\n- Do not repeat words already in \`onScreen\` or the VO line.\n- Visual tier: ${args.keywordPopStyle === 'bold' ? 'BOLD — high contrast, occasional single-word punch.' : 'SUBTLE — refined documentary / broadcast look.'}`
+        ? `\n\nKEYWORD POP-UPS (premium lower-thirds — NOT full captions):\n- On roughly **25–40%** of shots, add optional \`keywordCards\`: max **2** entries; each \`text\` is 1–3 words OR a compact stat (e.g. "Kyoto" or "$4.2T"). Never sentences.\n` +
+        `- **Hard rule:** \`keywordCards[].text\` MUST be **spoken in that shot's \`voiceover\`** (same words/digits). The server **drops** cards that are not grounded in the VO — never flash context the narrator does not say on this beat.\n` +
+        `- **People, places, numbers:** mirror that line's VO (digits if you read digits aloud; same city/person wording). Light punctuation differences are OK; synonyms the VO never says on this shot are not.\n` +
+        `- \`tStart\` / \`tEnd\`: seconds **from this shot's start only** (never cumulative time from the start of the whole video). Prefer the **middle half** of the shot when the fact is spoken; avoid the first/last ~12% of the shot unless the fact truly lands there. Each flash **~0.35–0.85s**, non-overlapping. If unsure, omit timings — the stitcher auto-places.\n- **Global dedupe:** never repeat the **same** \`text\` on a later shot unless **≥ ~5 shots** later and the label is clearly a new context — duplicate labels feel broken.\n- Do not repeat words already in \`onScreen\` or duplicate tokens already in the same shot's \`voiceover\` line.\n- Visual tier: ${args.keywordPopStyle === 'bold' ? 'BOLD — high contrast, occasional single-word punch.' : 'SUBTLE — refined documentary / broadcast look.'}`
         : '';
 
   const sparseTextBlock = args.allowSparseImageText
-    ? `\n\nON-IMAGE INFORMATION LABELS (\`imageCaption\` — **enabled** for this account):\n- Only when **this shot's** voiceover states a memorable **proper noun or number** viewers must retain — **dates, years, people's names, places, money, %, ages** — set \`imageCaption\` on that **\`ai_image\`** shot (max **4 words**). Examples of valid labels: "June 6, 1944", "Marie Curie", "Lagos", "$4.2T", "76%".\n- **Never** put the video JSON \`title\`, hook line, channel name, or **any** style-bible example headline/script line into \`imageCaption\` — those are not spoken facts and become random on-screen junk.\n- Omit \`imageCaption\` on most shots; use sparingly when VO is fact-dense. Omit when the frame already shows the same text, or the shot is not \`ai_image\`.`
+    ? `\n\nON-IMAGE INFORMATION LABELS (\`imageCaption\` — **enabled** for this account):\n- Only when **this shot's** voiceover states a memorable **proper noun or number** viewers must retain — **dates, years, people's names, places, money, %, ages** — set \`imageCaption\` on that **\`ai_image\`** shot (max **4 words**). Examples of valid labels: "June 6, 1944", "Marie Curie", "Lagos", "$4.2T", "76%".\n` +
+        `- **Hard rule:** \`imageCaption\` MUST repeat **words or digits actually spoken in that shot's \`voiceover\`** (same line). The server **strips** labels that are not in the VO.\n` +
+        `- **Never** put the video JSON \`title\`, hook line, channel name, or **any** style-bible example headline/script line into \`imageCaption\` — those are not spoken facts and become random on-screen junk.\n` +
+        `- Omit \`imageCaption\` on most shots; use sparingly when VO is fact-dense. Omit when the frame already shows the same text, or the shot is not \`ai_image\`.`
     : '';
 
   const sparseDirectingRule = args.allowSparseImageText

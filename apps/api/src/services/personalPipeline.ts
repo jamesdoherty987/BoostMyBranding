@@ -69,6 +69,7 @@ import {
   appendPersonalGenerationLog,
 } from './personalAccounts.js';
 import { features } from '../env.js';
+import { maybeEmailPersonalVideoReady } from './personalVideoDeliveryEmail.js';
 import { withRetry } from './retry.js';
 import { checkScriptRules } from './personalQuality.js';
 import { assertPersonalVideoExampleTitlesOrThrow } from './personalTitlePolicy.js';
@@ -593,6 +594,8 @@ async function generateForAccountScript(
     });
     totalCostCents += 3; // rough render cost (compute)
 
+    const finalCaption = composeCaption(script);
+
     /* ── 6. Schedule ─────────────────────────────────────────── */
     let contentStudioPostId: string | null = null;
     let scheduledAt: Date | null = null;
@@ -605,7 +608,7 @@ async function generateForAccountScript(
       try {
         const res = await schedulePost({
           platform: account.platform,
-          caption: composeCaption(script),
+          caption: finalCaption,
           // For slideshow / static_image accounts, ContentStudio will post
           // the rendered MP4 as a short — Reels/Shorts handle it the same
           // way they would a video. If we ever want to post a true image
@@ -641,7 +644,7 @@ async function generateForAccountScript(
       .set({
         videoUrl: rendered.videoUrl,
         durationSeconds: Math.round(rendered.durationSeconds),
-        caption: composeCaption(script),
+        caption: finalCaption,
         hashtags: script.hashtags ?? theme.defaultHashtags,
         contentStudioPostId,
         scheduledAt,
@@ -665,6 +668,16 @@ async function generateForAccountScript(
         updatedAt: new Date(),
       })
       .where(eq(personalAccounts.id, account.id));
+
+    void maybeEmailPersonalVideoReady({
+      accountName: account.accountName,
+      emailVideoOnReady: account.emailVideoOnReady,
+      videoDeliveryEmail: account.videoDeliveryEmail,
+      postId,
+      videoUrl: rendered.videoUrl,
+      topic,
+      captionPreview: finalCaption,
+    }).catch((e) => console.warn('[personal] video delivery email:', (e as Error).message));
 
     broadcastEvent(account.id, postId, 'done', { videoUrl: rendered.videoUrl });
 

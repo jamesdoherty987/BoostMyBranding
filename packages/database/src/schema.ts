@@ -770,6 +770,13 @@ export const personalAccounts = pgTable(
      */
     autoSchedule: boolean('auto_schedule').default(false).notNull(),
     /**
+     * When true and Resend is configured on the API, sends {@link videoDeliveryEmail}
+     * a message with a download link when a new render finishes (ready / scheduled).
+     */
+    emailVideoOnReady: boolean('email_video_on_ready').default(false).notNull(),
+    /** Recipient for {@link emailVideoOnReady}. */
+    videoDeliveryEmail: text('video_delivery_email'),
+    /**
      * When true, the API scheduler may call `generateForAccount` when
      * `next_run_at` is due. When false, new videos only start from Generate.
      */
@@ -1217,6 +1224,60 @@ export interface PersonalGeneratorConfig {
    * `off` disables; `subtle` / `bold` tune director + overlay styling.
    */
   keywordPopStyle?: 'off' | 'subtle' | 'bold';
+  /** Bundled keyword font for FFmpeg drawtext (see `KEYWORD_OVERLAY_FONT_IDS` in `@boost/api-client`). */
+  keywordOverlayFontPreset?:
+    | 'inter'
+    | 'lora'
+    | 'source_serif'
+    | 'jetbrains_mono'
+    | 'oswald'
+    | 'dm_sans'
+    | 'clean_sans'
+    | 'clean_serif';
+  /** Scales keyword font size vs default (0.72–2.25). Default 1. */
+  keywordOverlayFontScale?: number;
+  /** When true, boxed chip behind keyword text (legacy). Default false = outline text only. */
+  keywordOverlayTextBackground?: boolean;
+  /** Where keyword / slate lower-thirds sit on the frame. Default bottom_center. */
+  keywordOverlayTextAnchor?:
+    | 'top_left'
+    | 'top_center'
+    | 'top_right'
+    | 'middle_left'
+    | 'center'
+    | 'middle_right'
+    | 'bottom_left'
+    | 'bottom_center'
+    | 'bottom_right';
+  /**
+   * Per-output-aspect overrides for keyword lower-thirds (merged with the fields above).
+   * E.g. tune 16:9 YouTube separately from 9:16 Shorts.
+   */
+  keywordOverlayByAspect?: Partial<
+    Record<'9:16' | '1:1' | '16:9' | '4:5', {
+      fontPreset?:
+        | 'inter'
+        | 'lora'
+        | 'source_serif'
+        | 'jetbrains_mono'
+        | 'oswald'
+        | 'dm_sans'
+        | 'clean_sans'
+        | 'clean_serif';
+      fontScale?: number;
+      textBackground?: boolean;
+      textAnchor?:
+        | 'top_left'
+        | 'top_center'
+        | 'top_right'
+        | 'middle_left'
+        | 'center'
+        | 'middle_right'
+        | 'bottom_left'
+        | 'bottom_center'
+        | 'bottom_right';
+    }>
+  >;
   /** When true, the director must add `imageCaption` on many ai_image shots for spoken dates, names, places, and key stats (≤4 words each). */
   allowSparseImageText?: boolean;
   /**

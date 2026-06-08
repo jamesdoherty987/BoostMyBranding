@@ -83,20 +83,20 @@ export function MediaLibrary({
   return (
     <Card>
       <CardContent className="p-6">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div>
+        <div className="mb-4 flex min-w-0 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+          <div className="min-w-0">
             <h3 className="text-sm font-bold uppercase tracking-wide text-slate-600">
               Media library
             </h3>
-            <p className="mt-0.5 text-xs text-slate-500">
+            <p className="mt-0.5 text-pretty text-xs leading-relaxed text-slate-500">
               Upload reference images, video, audio. Describe each so the AI matches your vibe.
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto">
             <select
               value={filterRole}
               onChange={(e) => setFilterRole(e.target.value as PersonalMediaRole | 'all')}
-              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs"
+              className="w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs sm:max-w-[220px] sm:shrink-0"
             >
               <option value="all">All roles</option>
               {ROLES.map((r) => (

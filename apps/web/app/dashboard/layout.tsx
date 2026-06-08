@@ -25,7 +25,7 @@ export default function DashboardLayout({
     <div className="dashboard-root min-h-screen antialiased">
       <div className="flex min-h-screen min-w-0">
         <Sidebar />
-        <main className="min-w-0 flex-1 overflow-x-hidden md:pl-64">
+        <main className="min-w-0 flex-1 overflow-x-hidden pt-[calc(3.5rem+env(safe-area-inset-top,0px))] md:pt-0 md:pl-64">
           <PageTransition>{children}</PageTransition>
         </main>
       </div>

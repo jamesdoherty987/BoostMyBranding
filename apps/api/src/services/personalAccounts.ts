@@ -68,6 +68,10 @@ export interface PersonalAccountPayload {
   postSpacingMinutes: number;
   autoApprove: boolean;
   autoSchedule: boolean;
+  /** Email download link when a render finishes (requires Resend on API). */
+  emailVideoOnReady: boolean;
+  /** Recipient for {@link emailVideoOnReady}. */
+  videoDeliveryEmail: string | null;
   /** When true, scheduler runs `generateForAccount` when `nextRunAt` is due. */
   autoGenerateOnSchedule: boolean;
   accentColor: string | null;
@@ -109,6 +113,8 @@ export interface CreateAccountArgs {
   postSpacingMinutes?: number;
   autoApprove?: boolean;
   autoSchedule?: boolean;
+  emailVideoOnReady?: boolean;
+  videoDeliveryEmail?: string | null;
   autoGenerateOnSchedule?: boolean;
   accentColor?: string;
   logoUrl?: string;
@@ -150,6 +156,8 @@ export async function createAccount(args: CreateAccountArgs) {
       postSpacingMinutes: args.postSpacingMinutes ?? 240,
       autoApprove: args.autoApprove ?? true,
       autoSchedule: args.autoSchedule ?? false,
+      emailVideoOnReady: args.emailVideoOnReady ?? false,
+      videoDeliveryEmail: args.videoDeliveryEmail?.trim() || null,
       autoGenerateOnSchedule: args.autoGenerateOnSchedule ?? false,
       accentColor: args.accentColor ?? theme.accentColor,
       logoUrl: args.logoUrl,
@@ -228,6 +236,45 @@ export type UpdateAccountPatch = Partial<
   }
 >;
 
+/**
+ * Merge dashboard `generatorConfig` patches into existing JSONB without wiping
+ * nested `keywordOverlayByAspect` keys (shallow `{...ex, ...patch}` replaced the
+ * whole per-aspect map when only one ratio was PATCHed).
+ */
+function mergeGeneratorConfigJson(
+  existing: PersonalGeneratorConfig | null | undefined,
+  patch: Partial<PersonalGeneratorConfig>,
+): PersonalGeneratorConfig {
+  const ex = { ...(existing ?? {}) } as Record<string, unknown>;
+  const p = patch as Record<string, unknown>;
+  for (const [k, v] of Object.entries(p)) {
+    if (v === undefined) continue;
+    if (
+      k === 'keywordOverlayByAspect' &&
+      typeof v === 'object' &&
+      v !== null &&
+      !Array.isArray(v)
+    ) {
+      const prev = (ex[k] as Record<string, unknown> | undefined) ?? {};
+      const mergedAsp: Record<string, unknown> = { ...prev };
+      for (const [asp, spec] of Object.entries(v as Record<string, unknown>)) {
+        if (spec && typeof spec === 'object' && !Array.isArray(spec)) {
+          mergedAsp[asp] = {
+            ...((prev[asp] as Record<string, unknown> | undefined) ?? {}),
+            ...(spec as Record<string, unknown>),
+          };
+        } else if (spec === null) {
+          delete mergedAsp[asp];
+        }
+      }
+      ex[k] = mergedAsp;
+    } else {
+      ex[k] = v;
+    }
+  }
+  return ex as PersonalGeneratorConfig;
+}
+
 export async function updateAccount(
   userId: string,
   accountId: string,
@@ -253,10 +300,10 @@ export async function updateAccount(
     } as PersonalAccountStyleBible);
   }
   if (patch.generatorConfig !== undefined) {
-    updates.generatorConfig = {
-      ...(existing.generatorConfig ?? {}),
-      ...patch.generatorConfig,
-    };
+    updates.generatorConfig = mergeGeneratorConfigJson(
+      existing.generatorConfig as PersonalGeneratorConfig | null | undefined,
+      patch.generatorConfig as Partial<PersonalGeneratorConfig>,
+    );
   }
 
   // Keep `next_run_at` aligned with scheduled autopilot + account status.
@@ -1190,6 +1237,8 @@ function toPayload(
     postSpacingMinutes: row.postSpacingMinutes,
     autoApprove: row.autoApprove,
     autoSchedule: row.autoSchedule,
+    emailVideoOnReady: row.emailVideoOnReady,
+    videoDeliveryEmail: row.videoDeliveryEmail ?? null,
     autoGenerateOnSchedule: row.autoGenerateOnSchedule,
     accentColor: row.accentColor,
     logoUrl: row.logoUrl,

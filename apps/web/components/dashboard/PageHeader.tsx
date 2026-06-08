@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 
 interface PageHeaderProps {
   title: string;
-  subtitle?: string;
+  subtitle?: ReactNode;
   action?: ReactNode;
 }
 
@@ -13,7 +13,7 @@ export function PageHeader({ title, subtitle, action }: PageHeaderProps) {
         <div className="min-w-0 md:pr-4">
           <h1 className="break-words text-2xl font-bold tracking-tight text-slate-900">{title}</h1>
           {subtitle ? (
-            <p className="mt-1 break-words text-sm text-slate-600">{subtitle}</p>
+            <div className="mt-1 break-words text-sm leading-relaxed text-slate-600">{subtitle}</div>
           ) : null}
         </div>
         {action ? <div className="w-full min-w-0 md:w-auto md:shrink-0">{action}</div> : null}

@@ -25,6 +25,7 @@ import {
   CalendarPlus,
   RefreshCw,
   Share2,
+  Download,
   Info,
 } from 'lucide-react';
 import { Badge, Button, Card, CardContent, Input, Textarea, Spinner, toast, Dialog, confirmDialog } from '@boost/ui';
@@ -78,12 +79,23 @@ export default function PersonalDashboardPage() {
   const selected = accounts?.find((a) => a.id === selectedId) ?? null;
 
   const accountsUnauthorized = accountsError instanceof ApiError && accountsError.status === 401;
+  const accountsNetworkError =
+    accountsError instanceof ApiError ? accountsError.isNetworkError : false;
 
   return (
     <div className="min-h-screen bg-slate-50 pb-20">
       <PageHeader
         title="Personal channels"
-        subtitle="Automated pipeline for your own social accounts: themes, schedule, and generation. Use the sidebar or ⌘K → Personal (g, p)."
+        subtitle={
+          <>
+            <span className="block text-pretty">
+              Automated pipeline for your own social accounts: themes, schedule, and generation.
+            </span>
+            <span className="mt-1.5 hidden text-pretty text-slate-500 sm:block">
+              Use the sidebar menu or ⌘K → Personal (g, p).
+            </span>
+          </>
+        }
       />
 
       <FeatureBanner features={features} />
@@ -121,11 +133,24 @@ export default function PersonalDashboardPage() {
                       <code className="font-mono">bmb_session</code> is set on <code className="font-mono">localhost</code>.
                     </p>
                   </div>
+                ) : accountsNetworkError ? (
+                  <div className="mt-3 space-y-2 text-xs leading-relaxed text-rose-800/90">
+                    <p>
+                      The browser could not reach the API (often the dev server is stopped, the URL is
+                      wrong, or CORS blocked the request). Confirm{' '}
+                      <code className="rounded bg-rose-100 px-1 font-mono text-[11px]">NEXT_PUBLIC_API_URL</code>{' '}
+                      in your web env matches a running API (default{' '}
+                      <code className="font-mono">http://localhost:4000</code>), then restart the API after
+                      pulling changes. Use either{' '}
+                      <code className="font-mono">localhost</code> or <code className="font-mono">127.0.0.1</code>{' '}
+                      consistently for both dashboard and API env URLs.
+                    </p>
+                  </div>
                 ) : (
                   <p className="mt-3 text-xs text-rose-800/80">
-                    If you just pulled code updates, run{' '}
-                    <code className="rounded bg-rose-100 px-1 py-0.5 font-mono text-[11px]">pnpm db:migrate</code> from the
-                    repo root so Postgres has the latest columns, then restart the API.
+                    If the API returned a database error after pulling code, run{' '}
+                    <code className="rounded bg-rose-100 px-1 py-0.5 font-mono text-[11px]">pnpm db:migrate</code>{' '}
+                    from the repo root, then restart the API.
                   </p>
                 )}
                 <div className="mt-3 flex flex-wrap gap-2">
@@ -674,8 +699,9 @@ function AccountDetail({
                 placeholder={`Optional topic (${theme?.topicSeedExamples[0] ?? 'auto-pick'})`}
                 className="min-w-0 flex-1 sm:min-w-[200px]"
               />
-              <div className="flex flex-wrap gap-2">
+              <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap">
                 <Button
+                  className="w-full min-w-0 sm:w-auto"
                   onClick={() => void runNow()}
                   disabled={generating || account.status === 'archived'}
                   title={
@@ -690,6 +716,7 @@ function AccountDetail({
                   {generating ? 'Starting…' : 'Generate post'}
                 </Button>
                 <Button
+                  className="w-full min-w-0 sm:w-auto"
                   variant="secondary"
                   onClick={() => void generateAndSchedulePost()}
                   disabled={
@@ -724,8 +751,9 @@ function AccountDetail({
             </p>
           </div>
 
-          {/* ── Tabs ────────────────────────────────────────── */}
-          <div className="mt-6 flex flex-wrap gap-1 border-b border-slate-200">
+          {/* ── Tabs (horizontal scroll on narrow screens — many tabs) ── */}
+          <div className="relative -mx-2 mt-6 min-w-0 border-b border-slate-200 px-2 sm:mx-0 sm:px-0">
+            <div className="-mb-px flex gap-0 overflow-x-auto overflow-y-hidden pb-px [-ms-overflow-style:none] [scrollbar-width:none] sm:flex-wrap sm:overflow-visible [&::-webkit-scrollbar]:hidden">
             <TabButton active={tab === 'overview'} onClick={() => setTab('overview')}>
               Overview
             </TabButton>
@@ -750,6 +778,7 @@ function AccountDetail({
             <TabButton active={tab === 'longform'} onClick={() => setTab('longform')}>
               Long-form
             </TabButton>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -853,9 +882,15 @@ function PublishingCard({
   const [loadBusy, setLoadBusy] = useState(false);
   const [saveBusy, setSaveBusy] = useState(false);
   const [listBanner, setListBanner] = useState<'empty' | 'mismatch' | null>(null);
+  const [contentStudioListError, setContentStudioListError] = useState<string | null>(null);
+  const [workspacesList, setWorkspacesList] = useState<Array<{ id: string; name: string }> | null>(null);
+  const [workspacesBusy, setWorkspacesBusy] = useState(false);
+  const [emailVideoOnReady, setEmailVideoOnReady] = useState(account.emailVideoOnReady ?? false);
+  const [videoDeliveryEmail, setVideoDeliveryEmail] = useState(account.videoDeliveryEmail ?? '');
 
   const csOk = Boolean(features?.contentStudio);
   const envDefaultWorkspace = Boolean(features?.contentStudioDefaultWorkspace);
+  const resendOk = Boolean(features?.resend);
 
   useEffect(() => {
     setWorkspaceId(account.contentStudioWorkspaceId ?? '');
@@ -866,11 +901,17 @@ function PublishingCard({
   useEffect(() => {
     setConnected([]);
     setListBanner(null);
+    setContentStudioListError(null);
   }, [account.id, account.contentStudioWorkspaceId]);
 
   useEffect(() => {
     setPostToContentStudio(account.autoSchedule);
   }, [account.autoSchedule]);
+
+  useEffect(() => {
+    setEmailVideoOnReady(account.emailVideoOnReady ?? false);
+    setVideoDeliveryEmail(account.videoDeliveryEmail ?? '');
+  }, [account.id, account.emailVideoOnReady, account.videoDeliveryEmail]);
 
   /** Load Content Studio accounts when Posting opens so dropdown options have real ids (not only after manual refresh). */
   useEffect(() => {
@@ -879,11 +920,16 @@ function PublishingCard({
     let cancelled = false;
     void (async () => {
       try {
+        setContentStudioListError(null);
         const res = await api.listPersonalContentStudioAccounts(workspaceId.trim() || undefined);
         if (cancelled) return;
+        const err = res.listError?.trim() || null;
+        setContentStudioListError(err);
         const accounts = res.accounts ?? [];
         setConnected(accounts);
         if (!res.configured) {
+          setListBanner(null);
+        } else if (err) {
           setListBanner(null);
         } else if (accounts.length === 0) {
           setListBanner('empty');
@@ -892,7 +938,10 @@ function PublishingCard({
           setListBanner(matches.length === 0 ? 'mismatch' : null);
         }
       } catch {
-        if (!cancelled) setConnected([]);
+        if (!cancelled) {
+          setConnected([]);
+          setContentStudioListError(null);
+        }
       }
     })();
     return () => {
@@ -909,17 +958,23 @@ function PublishingCard({
   async function loadConnected() {
     setLoadBusy(true);
     try {
+      setContentStudioListError(null);
       const res = await api.listPersonalContentStudioAccounts(workspaceId.trim() || undefined);
+      const err = res.listError?.trim() || null;
+      setContentStudioListError(err);
       const accounts = res.accounts ?? [];
       setConnected(accounts);
       if (!res.configured) {
         setListBanner(null);
         toast.error('ContentStudio API key missing', 'Set CONTENTSTUDIO_API_KEY in .env and restart the API.');
+      } else if (err) {
+        setListBanner(null);
+        toast.error('ContentStudio did not return accounts', err);
       } else if (accounts.length === 0) {
         setListBanner('empty');
         toast.info(
           'No connected accounts in this workspace',
-          'Check the workspace id, server CONTENTSTUDIO_WORKSPACE_ID, and that social accounts are linked in ContentStudio.',
+          'Use “List workspaces” to verify the workspace id, or connect YouTube in the Content Studio app for that workspace.',
         );
       } else {
         const matches = accounts.filter((a) => a.platform === account.platform);
@@ -928,9 +983,40 @@ function PublishingCard({
       }
     } catch (e) {
       setListBanner(null);
+      setContentStudioListError(null);
       toast.error('Could not load accounts', (e as Error).message);
     } finally {
       setLoadBusy(false);
+    }
+  }
+
+  async function loadWorkspacesFromApi() {
+    setWorkspacesBusy(true);
+    try {
+      const res = await api.listPersonalContentStudioWorkspaces();
+      const err = res.listError?.trim() || null;
+      if (!res.configured) {
+        setWorkspacesList(null);
+        toast.error('ContentStudio API key missing', 'Set CONTENTSTUDIO_API_KEY in .env and restart the API.');
+        return;
+      }
+      if (err) {
+        setWorkspacesList(null);
+        toast.error('Could not list workspaces', err);
+        return;
+      }
+      const list = res.workspaces ?? [];
+      setWorkspacesList(list);
+      if (list.length === 0) {
+        toast.info('No workspaces', 'This API key has no workspaces, or the response shape changed.');
+      } else {
+        toast.success('Workspaces loaded', `${list.length} workspace(s). Pick the id that matches where you connected YouTube.`);
+      }
+    } catch (e) {
+      setWorkspacesList(null);
+      toast.error('Could not list workspaces', (e as Error).message);
+    } finally {
+      setWorkspacesBusy(false);
     }
   }
 
@@ -941,6 +1027,8 @@ function PublishingCard({
         contentStudioWorkspaceId: workspaceId.trim() ? workspaceId.trim() : null,
         contentStudioAccountId: accountIdPick.trim() || null,
         autoSchedule: postToContentStudio,
+        emailVideoOnReady,
+        videoDeliveryEmail: videoDeliveryEmail.trim() ? videoDeliveryEmail.trim() : null,
       });
       toast.success('Posting settings saved');
       onChanged();
@@ -954,8 +1042,8 @@ function PublishingCard({
   return (
     <Card>
       <CardContent className="p-6">
-        <h3 className="mb-1 text-sm font-bold uppercase tracking-wide text-slate-600">Posting (Content Studio)</h3>
-        <p className="mb-3 text-xs text-slate-500">
+        <h3 className="mb-1 text-sm font-bold uppercase tracking-wide text-slate-600">Posting &amp; delivery</h3>
+        <p className="mb-3 min-w-0 text-pretty break-words text-xs leading-relaxed text-slate-500">
           <strong className="text-slate-700">You cannot add YouTube or other social logins inside this dashboard</strong>{' '}
           — OAuth happens in the Content Studio product. Checklist: (1) In Content Studio, connect each network (YouTube,
           Instagram, …). (2) Put <code className="rounded bg-slate-100 px-1">CONTENTSTUDIO_API_KEY</code> and{' '}
@@ -1022,6 +1110,44 @@ function PublishingCard({
           </div>
         ) : null}
 
+        <h3 className="mt-8 mb-1 text-sm font-bold uppercase tracking-wide text-slate-600">Email when ready (Resend)</h3>
+        <p className="mb-3 min-w-0 text-pretty break-words text-xs leading-relaxed text-slate-500">
+          When enabled, each finished render triggers an email from your API&apos;s{' '}
+          <code className="rounded bg-slate-100 px-1">FROM_EMAIL</code> with a <strong>public download link</strong> to the MP4
+          (no file attachment — better for large videos and Resend limits). Requires <code className="rounded bg-slate-100 px-1">RESEND_API_KEY</code> in server <code className="rounded bg-slate-100 px-1">.env</code>.
+        </p>
+        {!resendOk ? (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+            Email delivery is unavailable — add <code className="rounded bg-amber-100 px-1">RESEND_API_KEY</code> to the API .env
+            (and verify <code className="rounded bg-amber-100 px-1">FROM_EMAIL</code> is verified in Resend), then restart the API.
+          </div>
+        ) : (
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+            <Toggle
+              label="Email me a link when a new video finishes rendering"
+              checked={emailVideoOnReady}
+              onChange={setEmailVideoOnReady}
+              disabled={!resendOk}
+            />
+            <div className="mt-3">
+              <Field label="Send to">
+                <Input
+                  type="email"
+                  value={videoDeliveryEmail}
+                  onChange={(e) => setVideoDeliveryEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  className="text-sm"
+                  disabled={!resendOk}
+                  autoComplete="email"
+                />
+              </Field>
+            </div>
+            <p className="mt-2 text-[11px] leading-snug text-slate-600">
+              Use <strong>Save posting settings</strong> below. If the toggle is on but the address is empty or invalid, the server skips sending.
+            </p>
+          </div>
+        )}
+
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
           <Field label="Workspace id (optional override)">
             <Input
@@ -1030,6 +1156,36 @@ function PublishingCard({
               placeholder="Defaults from CONTENTSTUDIO_WORKSPACE_ID"
               className="font-mono text-xs"
             />
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => void loadWorkspacesFromApi()}
+                disabled={workspacesBusy || !csOk}
+              >
+                {workspacesBusy ? <Spinner className="h-4 w-4" /> : 'List workspaces'}
+              </Button>
+              <span className="text-[11px] text-slate-500">
+                Uses your API key — copy the workspace where you connected YouTube, then Refresh list.
+              </span>
+            </div>
+            {workspacesList && workspacesList.length > 0 ? (
+              <ul className="mt-2 max-h-36 space-y-1 overflow-y-auto rounded-md border border-slate-200 bg-white p-2 text-[11px]">
+                {workspacesList.map((w) => (
+                  <li
+                    key={w.id}
+                    className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1 border-b border-slate-100 py-1 last:border-b-0"
+                  >
+                    <span className="min-w-0 font-medium text-slate-800">{w.name}</span>
+                    <code className="shrink-0 text-[10px] text-slate-600 [overflow-wrap:anywhere]">{w.id}</code>
+                    <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setWorkspaceId(w.id)}>
+                      Use id
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
           </Field>
           <Field label="Connected account for this platform">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -1063,11 +1219,18 @@ function PublishingCard({
           </Field>
         </div>
 
-        {csOk && listBanner === 'empty' ? (
+        {csOk && contentStudioListError ? (
+          <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-950">
+            <strong className="font-semibold">Content Studio API:</strong> {contentStudioListError}
+          </div>
+        ) : null}
+
+        {csOk && !contentStudioListError && listBanner === 'empty' ? (
           <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
-            The last refresh returned no accounts for this workspace. Confirm the workspace id, that{' '}
-            <code className="rounded bg-slate-200 px-1">CONTENTSTUDIO_WORKSPACE_ID</code> is set if you rely on the
-            default, and that ContentStudio has at least one connected social account.
+            The last refresh returned no accounts for this workspace. Use <strong>List workspaces</strong> to confirm
+            the id, set <code className="rounded bg-slate-200 px-1">CONTENTSTUDIO_WORKSPACE_ID</code> in the API{' '}
+            <code className="rounded bg-slate-200 px-1">.env</code> if you rely on the default, and connect YouTube (and
+            other networks) inside the Content Studio app for <em>that</em> workspace — then Refresh list again.
           </div>
         ) : null}
         {csOk && listBanner === 'mismatch' ? (
@@ -1100,7 +1263,7 @@ function TabButton({
   return (
     <button
       onClick={onClick}
-      className={`px-4 py-2 text-sm font-medium transition ${
+      className={`shrink-0 whitespace-nowrap px-3 py-2 text-sm font-medium transition sm:px-4 ${
         active
           ? 'border-b-2 border-slate-900 text-slate-900'
           : 'text-slate-500 hover:text-slate-700'
@@ -1698,6 +1861,84 @@ function PostsGrid({
 
 const IN_PROGRESS_POST_STATUSES = new Set(['queued', 'scripting', 'sourcing_media', 'rendering']);
 
+const VIDEO_FILE_READY_STATUSES = new Set(['ready', 'scheduled', 'published']);
+
+function postVideoFilename(post: PersonalPost): string {
+  const raw = ((post.title ?? '').trim() || (post.topic ?? '').trim() || 'video')
+    .replace(/[\\/:*?"<>|]+/g, '')
+    .replace(/\s+/g, '_')
+    .slice(0, 72);
+  return raw.toLowerCase().endsWith('.mp4') ? raw : `${raw || 'video'}.mp4`;
+}
+
+function canSaveOrDownloadPostVideo(post: PersonalPost): boolean {
+  return Boolean(post.videoUrl?.trim()) && VIDEO_FILE_READY_STATUSES.has(post.status);
+}
+
+/** Saves via object URL; falls back to opening the URL in a new tab if fetch fails (e.g. CORS). */
+async function downloadPostVideoFile(post: PersonalPost): Promise<void> {
+  const url = post.videoUrl!.trim();
+  const filename = postVideoFilename(post);
+  try {
+    const res = await fetch(url, { mode: 'cors', credentials: 'omit' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    try {
+      const a = document.createElement('a');
+      a.href = objectUrl;
+      a.download = filename;
+      a.rel = 'noopener';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } finally {
+      URL.revokeObjectURL(objectUrl);
+    }
+  } catch {
+    window.open(url, '_blank', 'noopener,noreferrer');
+    throw new Error(
+      'Opened the video in a new tab — if nothing downloaded, use that tab’s menu (⋯ or Share) to save the file.',
+    );
+  }
+}
+
+/**
+ * Mobile-first: Web Share with a File so iOS/Android can “Save Video” / add to Photos.
+ * Falls back to `share({ url })` when file sharing is not supported.
+ */
+async function sharePostVideoForCameraRoll(post: PersonalPost): Promise<void> {
+  const url = post.videoUrl!.trim();
+  const filename = postVideoFilename(post);
+  const title = ((post.title ?? '').trim() || (post.topic ?? '').trim() || 'Video').slice(0, 120);
+  const nav = typeof navigator !== 'undefined' ? navigator : undefined;
+  if (!nav?.share) {
+    throw new Error('Your browser does not support sharing — use Download instead.');
+  }
+  try {
+    const res = await fetch(url, { mode: 'cors', credentials: 'omit' });
+    if (!res.ok) throw new Error(`Could not load video (HTTP ${res.status})`);
+    const blob = await res.blob();
+    const type = blob.type && /^video\//i.test(blob.type) ? blob.type : 'video/mp4';
+    const file = new File([blob], filename, { type });
+    if (nav.canShare?.({ files: [file] })) {
+      await nav.share({ files: [file], title });
+      return;
+    }
+  } catch (e) {
+    if (nav.canShare?.({ url })) {
+      await nav.share({ title, text: 'Open the link, then use your browser menu to save the video.', url });
+      return;
+    }
+    throw e instanceof Error ? e : new Error(String(e));
+  }
+  if (nav.canShare?.({ url })) {
+    await nav.share({ title, text: 'Open the link, then save the video from your browser.', url });
+    return;
+  }
+  throw new Error('Could not prepare a shareable file — use Download or open the video and share from the player.');
+}
+
 /** One combined progress readout for the whole pipeline (not encode-only). */
 function postGenerationProgressUi(post: PersonalPost): { percent: number; label: string } | null {
   if (post.videoUrl) return null;
@@ -1763,6 +2004,8 @@ function PostCard({
   const [thumbBusy, setThumbBusy] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
+  const [downloadBusy, setDownloadBusy] = useState(false);
+  const [shareSaveBusy, setShareSaveBusy] = useState(false);
   useEffect(() => {
     setPlaying(false);
   }, [post.id]);
@@ -1996,6 +2239,60 @@ function PostCard({
             <Info className="h-3.5 w-3.5" />
             Details
           </Button>
+          {canSaveOrDownloadPostVideo(post) ? (
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 gap-1 px-2 text-[11px]"
+                disabled={downloadBusy || shareSaveBusy}
+                title="Saves an MP4 to your device (uses a direct fetch when your storage allows it)."
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void (async () => {
+                    setDownloadBusy(true);
+                    try {
+                      await downloadPostVideoFile(post);
+                      toast.success('Download started', 'Check your downloads folder for the MP4.');
+                    } catch (err) {
+                      toast.info('Download', (err as Error).message);
+                    } finally {
+                      setDownloadBusy(false);
+                    }
+                  })();
+                }}
+              >
+                {downloadBusy ? <Spinner className="h-3 w-3" /> : <Download className="h-3 w-3" />}
+                Download
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 gap-1 px-2 text-[11px]"
+                disabled={downloadBusy || shareSaveBusy}
+                title="Phones: opens the system share sheet — choose Save Video / Photos. Needs a browser that supports sharing files."
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void (async () => {
+                    setShareSaveBusy(true);
+                    try {
+                      await sharePostVideoForCameraRoll(post);
+                      toast.success('Done', 'If the share sheet opened, pick Save Video or Save to Photos.');
+                    } catch (err) {
+                      toast.error('Save to Photos', (err as Error).message);
+                    } finally {
+                      setShareSaveBusy(false);
+                    }
+                  })();
+                }}
+              >
+                {shareSaveBusy ? <Spinner className="h-3 w-3" /> : <Share2 className="h-3 w-3" />}
+                Save to Photos
+              </Button>
+            </>
+          ) : null}
           {canRegenerateThumb ? (
             <Button
               type="button"

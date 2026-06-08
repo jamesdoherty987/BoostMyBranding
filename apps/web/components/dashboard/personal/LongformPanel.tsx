@@ -214,21 +214,23 @@ export function LongformPanel({
       {/* ── Header ──────────────────────────────────────────── */}
       <Card>
         <CardContent className="p-6">
-          <div className="mb-4 flex items-start gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white">
-              <Film className="h-5 w-5" />
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-3">
+            <div className="flex min-w-0 flex-1 items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white">
+                <Film className="h-5 w-5" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h3 className="text-sm font-bold uppercase tracking-wide text-slate-600">
+                  Long-form animated video
+                </h3>
+                <p className="mt-0.5 text-pretty text-xs leading-relaxed text-slate-500">
+                  Chapter-structured, 1&ndash;8 minute narrations. The director matches the{' '}
+                  <strong>visual look of your inspiration and style-reference media</strong> on
+                  every AI frame — upload those under Media before generating.
+                </p>
+              </div>
             </div>
-            <div className="flex-1">
-              <h3 className="text-sm font-bold uppercase tracking-wide text-slate-600">
-                Long-form animated video
-              </h3>
-              <p className="mt-0.5 text-xs text-slate-500">
-                Chapter-structured, 1&ndash;8 minute narrations. The director matches the{' '}
-                <strong>visual look of your inspiration and style-reference media</strong> on
-                every AI frame — upload those under Media before generating.
-              </p>
-            </div>
-            <label className="flex shrink-0 cursor-pointer items-center gap-2">
+            <label className="flex shrink-0 cursor-pointer items-center gap-2 self-start sm:self-auto">
               <input
                 type="checkbox"
                 checked={enabled}

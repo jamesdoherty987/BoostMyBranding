@@ -15,14 +15,24 @@ import { useEffect, useRef, useState } from 'react';
 import useSWR from 'swr';
 import { Plus, Save, Sparkles, Info, Trash2, Zap } from 'lucide-react';
 import { Button, Card, CardContent, Input, Textarea, Spinner, toast, confirmDialog } from '@boost/ui';
-import type {
-  PersonalAccount,
-  PersonalAccountStyleBible,
-  PersonalAiModel,
-  PersonalCharacter,
-  PersonalGeneratorConfig,
+import {
+  ApiError,
+  resolveKeywordOverlayForAspect,
+  keywordOverlayHeightMulForAspect,
+  KEYWORD_OVERLAY_FONT_SCALE_MAX,
+  KEYWORD_OVERLAY_FONT_SCALE_MIN,
+  KEYWORD_OVERLAY_TEXT_ANCHORS,
+  isKeywordOverlayTextAnchor,
+  normalizeKeywordOverlayFontPreset,
+  type KeywordOverlayAspectKey,
+  type KeywordOverlayFontId,
+  type KeywordOverlayTextAnchor,
+  type PersonalAccount,
+  type PersonalAccountStyleBible,
+  type PersonalAiModel,
+  type PersonalCharacter,
+  type PersonalGeneratorConfig,
 } from '@boost/api-client';
-import { ApiError } from '@boost/api-client';
 import { api } from '@/lib/dashboard/api';
 import { TTS_VOICE_PRESETS, matchTtsPresetId, ttsPresetOptionLabel } from '@/lib/ttsVoicePresets';
 
@@ -41,24 +51,129 @@ function initExampleTitleRows(bible: PersonalAccountStyleBible): TitleExampleRow
   return titles.map((text) => ({ id: newTitleExampleRowId(), text }));
 }
 
-/** Tiny mock of in-edit slate lower-thirds (not full-screen). */
-function NamesNumbersSlatePreview() {
+/** Live mock of stitched keyword lower-thirds — font scales with frame height like FFmpeg stitch. */
+const KEYWORD_PREVIEW_FONT: Record<KeywordOverlayFontId, string> = {
+  inter: '"Inter", ui-sans-serif, system-ui, sans-serif',
+  lora: '"Lora", Georgia, "Times New Roman", serif',
+  source_serif: '"Source Serif 4", Georgia, "Times New Roman", serif',
+  jetbrains_mono: '"JetBrains Mono", ui-monospace, monospace',
+  oswald: '"Oswald", "Arial Narrow", system-ui, sans-serif',
+  dm_sans: '"DM Sans", ui-sans-serif, system-ui, sans-serif',
+};
+
+function keywordOverlayPreviewFontFamily(preset: KeywordOverlayFontId): string {
+  return KEYWORD_PREVIEW_FONT[preset];
+}
+
+function keywordOverlayPreviewAspectClass(a: KeywordOverlayAspectKey): string {
+  if (a === '9:16') return 'aspect-[9/16]';
+  if (a === '16:9') return 'aspect-video';
+  if (a === '1:1') return 'aspect-square';
+  return 'aspect-[4/5]';
+}
+
+function keywordOverlayPreviewChipWrapClass(anchor: KeywordOverlayTextAnchor): string {
+  const base = 'absolute flex w-[92%] flex-col gap-1';
+  const m: Record<KeywordOverlayTextAnchor, string> = {
+    top_left: `${base} left-[4%] top-[6%] items-start`,
+    top_center: `${base} left-1/2 top-[6%] -translate-x-1/2 items-center`,
+    top_right: `${base} right-[4%] top-[6%] items-end`,
+    middle_left: `${base} left-[4%] top-1/2 -translate-y-1/2 items-start`,
+    center: `${base} left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 items-center`,
+    middle_right: `${base} right-[4%] top-1/2 -translate-y-1/2 items-end`,
+    bottom_left: `${base} left-[4%] bottom-[8%] items-start`,
+    bottom_center: `${base} left-1/2 bottom-[8%] -translate-x-1/2 items-center`,
+    bottom_right: `${base} right-[4%] bottom-[8%] items-end`,
+  };
+  return m[anchor] ?? m.bottom_center;
+}
+
+function KeywordOverlayPreviewFrame(props: {
+  frameAspect: KeywordOverlayAspectKey;
+  frameTitle: string;
+  namesNumbers: boolean;
+  keywordStyle: 'off' | 'subtle' | 'bold';
+  merged: ReturnType<typeof resolveKeywordOverlayForAspect>;
+}) {
+  const { frameAspect, frameTitle, namesNumbers, keywordStyle, merged } = props;
+  const { fontPreset, fontScale, textBackground, textAnchor } = merged;
+  const fontFamily = keywordOverlayPreviewFontFamily(fontPreset);
+  const mul = keywordOverlayHeightMulForAspect(frameAspect);
+  const fs = Math.round(
+    10 *
+      Math.min(
+        KEYWORD_OVERLAY_FONT_SCALE_MAX,
+        Math.max(KEYWORD_OVERLAY_FONT_SCALE_MIN, fontScale || 1),
+      ) *
+      mul,
+  );
+  const chip = (label: string, bold: boolean) => (
+    <span
+      className={
+        textBackground
+          ? namesNumbers || keywordStyle === 'bold'
+            ? 'rounded-md bg-white/95 px-1.5 py-0.5 font-semibold text-slate-900 shadow-sm'
+            : 'rounded-md bg-black/55 px-1.5 py-0.5 font-semibold text-white shadow-sm'
+          : 'font-semibold text-white [text-shadow:0_0_4px_rgba(0,0,0,0.85),0_1px_2px_rgba(0,0,0,0.65)]'
+      }
+      style={{
+        fontFamily,
+        fontSize: fs,
+        lineHeight: 1.15,
+        fontWeight: bold ? 700 : 600,
+      }}
+    >
+      {label}
+    </span>
+  );
+  const wide = frameAspect === '16:9';
   return (
-    <div className="mt-1 rounded-lg border border-slate-200 bg-slate-100/70 p-3">
-      <p className="mb-2 text-xs font-semibold text-slate-600">Preview — short lower-third cards</p>
-      <div className="relative mx-auto aspect-[9/16] max-h-[200px] w-full max-w-[120px] overflow-hidden rounded-md bg-gradient-to-b from-slate-800 to-slate-950 shadow-inner">
-        <div className="absolute bottom-[12%] left-1/2 flex w-[88%] -translate-x-1/2 flex-col items-center gap-1">
-          <span className="w-full rounded-md bg-white/95 px-1.5 py-0.5 text-center text-[9px] font-semibold leading-tight tracking-tight text-slate-900 shadow-sm">
-            Marie Curie
-          </span>
-          <span className="w-full rounded-md bg-white/95 px-1.5 py-0.5 text-center text-[9px] font-semibold leading-tight tracking-tight text-slate-900 shadow-sm">
-            76%
-          </span>
+    <div className="flex flex-col items-center">
+      <p className="mb-1.5 text-center text-[11px] font-medium text-slate-600">{frameTitle}</p>
+      <div
+        className={`relative mx-auto w-full overflow-hidden rounded-md bg-gradient-to-b from-slate-800 to-slate-950 shadow-inner ${keywordOverlayPreviewAspectClass(frameAspect)} ${
+          wide ? 'max-h-[112px] max-w-[200px]' : 'max-h-[200px] max-w-[120px]'
+        }`}
+      >
+        <div className={keywordOverlayPreviewChipWrapClass(textAnchor)}>
+          {chip(namesNumbers ? 'Marie Curie' : 'Kyoto', keywordStyle === 'bold' || namesNumbers)}
+          {(namesNumbers || keywordStyle === 'bold') && chip(namesNumbers ? '76%' : '2.4M yrs', true)}
         </div>
       </div>
+    </div>
+  );
+}
+
+function KeywordOverlayDualPreview(props: {
+  gen: PersonalGeneratorConfig;
+  namesNumbers: boolean;
+  keywordStyle: 'off' | 'subtle' | 'bold';
+}) {
+  const { gen, namesNumbers, keywordStyle } = props;
+  const m916 = resolveKeywordOverlayForAspect(gen, '9:16');
+  const m169 = resolveKeywordOverlayForAspect(gen, '16:9');
+  return (
+    <div className="mt-1 rounded-lg border border-slate-200 bg-slate-100/70 p-3">
+      <p className="mb-2 text-xs font-semibold text-slate-600">Preview — lower-third pops (final render)</p>
+      <div className="flex flex-wrap items-start justify-center gap-6">
+        <KeywordOverlayPreviewFrame
+          frameAspect="9:16"
+          frameTitle="Portrait — Shorts / Reels"
+          namesNumbers={namesNumbers}
+          keywordStyle={keywordStyle}
+          merged={m916}
+        />
+        <KeywordOverlayPreviewFrame
+          frameAspect="16:9"
+          frameTitle="Landscape — YouTube / long-form"
+          namesNumbers={namesNumbers}
+          keywordStyle={keywordStyle}
+          merged={m169}
+        />
+      </div>
       <p className="mt-2 text-[11px] leading-snug text-slate-500">
-        Shown only when narration hits a high-signal name, date, or figure — each flash is brief. Keyword pop-ups → Bold
-        slightly enlarges the card.
+        Two previews use your saved settings per aspect (defaults apply everywhere unless you override a
+        ratio below). Outline vs boxed chip applies to both.
       </p>
     </div>
   );
@@ -90,9 +205,27 @@ export function GeneratorConfigPanel({
   );
 
   const [gen, setGen] = useState<PersonalGeneratorConfig>(initGen);
+  const [keywordOverlayEditScope, setKeywordOverlayEditScope] = useState<'all' | KeywordOverlayAspectKey>(
+    'all',
+  );
   const [characterId, setCharacterId] = useState<string>(account.characterId ?? '');
 
   const [busy, setBusy] = useState(false);
+
+  const kwOverlayForControls =
+    keywordOverlayEditScope === 'all'
+      ? {
+          fontPreset: normalizeKeywordOverlayFontPreset(gen.keywordOverlayFontPreset as string | undefined),
+          fontScale: gen.keywordOverlayFontScale ?? 1,
+          textBackground: gen.keywordOverlayTextBackground === true,
+          textAnchor:
+            gen.keywordOverlayTextAnchor && isKeywordOverlayTextAnchor(gen.keywordOverlayTextAnchor)
+              ? gen.keywordOverlayTextAnchor
+              : ('bottom_center' satisfies KeywordOverlayTextAnchor),
+        }
+      : resolveKeywordOverlayForAspect(gen, keywordOverlayEditScope);
+
+  const factTextMode = factTextModeFromGen(gen);
 
   // Sort keys so Postgres JSON key order does not thrash the fingerprint and reset the form mid-edit.
   const styleBibleFingerprint = stableRecordFingerprint(account.styleBible);
@@ -110,6 +243,7 @@ export function GeneratorConfigPanel({
 
   useEffect(() => {
     setGen(account.generatorConfig ?? {});
+    setKeywordOverlayEditScope('all');
   }, [account.id, generatorFingerprint]);
 
   useEffect(() => {
@@ -132,7 +266,9 @@ export function GeneratorConfigPanel({
           videoTitleGuidance: videoTitleGuidance.trim(),
           referenceFullScripts: packReferenceFullScripts(referenceScriptSlots),
         },
-        generatorConfig: omitNullShallow(gen as unknown as Record<string, unknown>) as PersonalGeneratorConfig,
+        generatorConfig: omitNullShallow(
+          applyFactTextMode(gen, factTextModeFromGen(gen)) as unknown as Record<string, unknown>,
+        ) as PersonalGeneratorConfig,
       });
       toast.success('Configuration saved');
       onChanged();
@@ -472,7 +608,6 @@ export function GeneratorConfigPanel({
                 value={gen.namesNumbersTitleCard === true}
                 onChange={(v) => setGen({ ...gen, namesNumbersTitleCard: v })}
               />
-              {gen.namesNumbersTitleCard === true ? <NamesNumbersSlatePreview /> : null}
             </div>
 
             {/* Model picker + quality */}
@@ -676,30 +811,211 @@ export function GeneratorConfigPanel({
                 </select>
               </Field>
               <Field
-                label="Keyword pop-ups"
-                hint="Short on-screen cards for names, places, stats — not full captions. When “Names & numbers on video” is on, the director uses timed slate-style cards for narration anchors; this control sets subtle vs bold sizing for those (and for classic dark lower-thirds when that mode is off)."
+                label="On-screen fact text"
+                hint="Pick one source for burned-in labels so narration is not doubled. AI keyword pops are timed lower-thirds; on-image labels are a single short line on stills. Names & numbers title cards (below) still use the same font settings when enabled."
               >
                 <select
-                  value={gen.keywordPopStyle ?? 'off'}
+                  value={factTextMode}
                   onChange={(e) =>
-                    setGen({
-                      ...gen,
-                      keywordPopStyle: e.target.value as 'off' | 'subtle' | 'bold',
-                    })
+                    setGen(applyFactTextMode(gen, e.target.value as FactTextMode))
                   }
                   className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
                 >
-                  <option value="off">Off</option>
-                  <option value="subtle">Subtle — refined documentary look</option>
-                  <option value="bold">Bold — high-contrast emphasis</option>
+                  <option value="off">Off — no AI fact overlays</option>
+                  <option value="keywords_subtle">AI keyword pops — subtle</option>
+                  <option value="keywords_bold">AI keyword pops — bold</option>
+                  <option value="image_labels">On-image fact labels only (no keyword pops)</option>
                 </select>
               </Field>
-              <Toggle
-                label="Fact labels on AI stills"
-                hint="When on, the director adds short on-image text for important spoken facts — dates, years, names, places, money, percentages — up to four words per label."
-                value={gen.allowSparseImageText ?? false}
-                onChange={(v) => setGen({ ...gen, allowSparseImageText: v })}
-              />
+              {(factTextMode === 'keywords_subtle' ||
+                factTextMode === 'keywords_bold' ||
+                factTextMode === 'image_labels' ||
+                gen.namesNumbersTitleCard === true) ? (
+                <div className="space-y-3 rounded-lg border border-slate-200 bg-white/80 p-3">
+                  <p className="text-xs font-semibold text-slate-700">Keyword font & look</p>
+                  <div className="space-y-1.5">
+                    <p className="text-xs text-slate-600">Edit for</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      <button
+                        type="button"
+                        className={`rounded-md border px-2 py-1 text-xs font-medium transition ${
+                          keywordOverlayEditScope === 'all'
+                            ? 'border-violet-500 bg-violet-50 text-violet-900'
+                            : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                        }`}
+                        onClick={() => setKeywordOverlayEditScope('all')}
+                      >
+                        All formats (default)
+                      </button>
+                      {(['9:16', '16:9', '1:1', '4:5'] as const).map((ar) => (
+                        <button
+                          key={ar}
+                          type="button"
+                          className={`rounded-md border px-2 py-1 font-mono text-[11px] font-medium transition ${
+                            keywordOverlayEditScope === ar
+                              ? 'border-violet-500 bg-violet-50 text-violet-900'
+                              : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                          }`}
+                          onClick={() => setKeywordOverlayEditScope(ar)}
+                        >
+                          {ar}
+                        </button>
+                      ))}
+                    </div>
+                    {keywordOverlayEditScope !== 'all' ? (
+                      <p className="text-[11px] text-slate-500">
+                        These controls apply only to{' '}
+                        <span className="font-mono">{keywordOverlayEditScope}</span> exports. Other ratios use
+                        “All formats” unless they have their own override.
+                      </p>
+                    ) : null}
+                  </div>
+                  <Field label="Font" hint="Bundled OFL fonts — same files FFmpeg uses on the server (no system fallbacks).">
+                    <select
+                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                      value={kwOverlayForControls.fontPreset}
+                      onChange={(e) => {
+                        const v = e.target.value as KeywordOverlayFontId;
+                        if (keywordOverlayEditScope === 'all') {
+                          setGen({ ...gen, keywordOverlayFontPreset: v });
+                        } else {
+                          const ar = keywordOverlayEditScope;
+                          setGen({
+                            ...gen,
+                            keywordOverlayByAspect: {
+                              ...(gen.keywordOverlayByAspect ?? {}),
+                              [ar]: { ...(gen.keywordOverlayByAspect?.[ar] ?? {}), fontPreset: v },
+                            },
+                          });
+                        }
+                      }}
+                    >
+                      <option value="inter">Inter</option>
+                      <option value="dm_sans">DM Sans</option>
+                      <option value="lora">Lora</option>
+                      <option value="source_serif">Source Serif</option>
+                      <option value="jetbrains_mono">JetBrains Mono</option>
+                      <option value="oswald">Oswald</option>
+                    </select>
+                  </Field>
+                  <Field
+                    label="Size"
+                    hint={`Scales keyword text relative to the video height (${KEYWORD_OVERLAY_FONT_SCALE_MIN}–${KEYWORD_OVERLAY_FONT_SCALE_MAX}).`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="range"
+                        min={KEYWORD_OVERLAY_FONT_SCALE_MIN}
+                        max={KEYWORD_OVERLAY_FONT_SCALE_MAX}
+                        step={0.05}
+                        className="min-w-0 flex-1 accent-violet-600"
+                        value={kwOverlayForControls.fontScale}
+                        onChange={(e) => {
+                          const n = Math.round(Number(e.target.value) * 100) / 100;
+                          if (keywordOverlayEditScope === 'all') {
+                            setGen({ ...gen, keywordOverlayFontScale: n });
+                          } else {
+                            const ar = keywordOverlayEditScope;
+                            setGen({
+                              ...gen,
+                              keywordOverlayByAspect: {
+                                ...(gen.keywordOverlayByAspect ?? {}),
+                                [ar]: { ...(gen.keywordOverlayByAspect?.[ar] ?? {}), fontScale: n },
+                              },
+                            });
+                          }
+                        }}
+                      />
+                      <span className="w-10 shrink-0 text-right text-sm font-semibold tabular-nums text-slate-800">
+                        {kwOverlayForControls.fontScale.toFixed(2)}×
+                      </span>
+                    </div>
+                  </Field>
+                  <Toggle
+                    label="Text background (boxed chip)"
+                    hint="Off = outline + shadow only (default). On = filled box behind text (heavier look)."
+                    value={kwOverlayForControls.textBackground}
+                    onChange={(v) => {
+                      if (keywordOverlayEditScope === 'all') {
+                        setGen({ ...gen, keywordOverlayTextBackground: v });
+                      } else {
+                        const ar = keywordOverlayEditScope;
+                        setGen({
+                          ...gen,
+                          keywordOverlayByAspect: {
+                            ...(gen.keywordOverlayByAspect ?? {}),
+                            [ar]: { ...(gen.keywordOverlayByAspect?.[ar] ?? {}), textBackground: v },
+                          },
+                        });
+                      }
+                    }}
+                  />
+                  <Field
+                    label="Text position"
+                    hint="Nine anchor points for keyword pops and names-and-numbers slate cards (final FFmpeg stitch). Bottom center is the classic lower-third."
+                  >
+                    <div className="grid max-w-[260px] grid-cols-3 gap-1.5">
+                      {KEYWORD_OVERLAY_TEXT_ANCHORS.map((anchorId) => {
+                        const short =
+                          anchorId === 'top_left'
+                            ? 'TL'
+                            : anchorId === 'top_center'
+                              ? 'TC'
+                              : anchorId === 'top_right'
+                                ? 'TR'
+                                : anchorId === 'middle_left'
+                                  ? 'ML'
+                                  : anchorId === 'center'
+                                    ? 'C'
+                                    : anchorId === 'middle_right'
+                                      ? 'MR'
+                                      : anchorId === 'bottom_left'
+                                        ? 'BL'
+                                        : anchorId === 'bottom_center'
+                                          ? 'BC'
+                                          : 'BR';
+                        const title = anchorId.replace(/_/g, ' ');
+                        return (
+                          <button
+                            key={anchorId}
+                            type="button"
+                            title={title}
+                            className={`rounded-md border py-2 text-center text-xs font-semibold tabular-nums transition ${
+                              kwOverlayForControls.textAnchor === anchorId
+                                ? 'border-violet-500 bg-violet-50 text-violet-900'
+                                : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                            }`}
+                            onClick={() => {
+                              if (keywordOverlayEditScope === 'all') {
+                                setGen({ ...gen, keywordOverlayTextAnchor: anchorId });
+                              } else {
+                                const ar = keywordOverlayEditScope;
+                                setGen({
+                                  ...gen,
+                                  keywordOverlayByAspect: {
+                                    ...(gen.keywordOverlayByAspect ?? {}),
+                                    [ar]: {
+                                      ...(gen.keywordOverlayByAspect?.[ar] ?? {}),
+                                      textAnchor: anchorId,
+                                    },
+                                  },
+                                });
+                              }
+                            }}
+                          >
+                            {short}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </Field>
+                  <KeywordOverlayDualPreview
+                    gen={gen}
+                    namesNumbers={gen.namesNumbersTitleCard === true}
+                    keywordStyle={gen.keywordPopStyle ?? 'off'}
+                  />
+                </div>
+              ) : null}
               <Field
                 label="Avg seconds per clip / beat"
                 hint="Target seconds per on-screen beat (1–12). With voiceover, clips must add up to narration length, so the true average is `voice length ÷ number of shots` — each clip is capped near this value ×1.32; if the storyboard does not plan enough shots for your narration, the run will stop with a clear error instead of holding one image for minutes."
@@ -1010,12 +1326,12 @@ export function GeneratorConfigPanel({
             </div>
           </div>
 
-          <div className="mt-4 flex items-center justify-between border-t border-slate-200 pt-4">
-            <div className="flex items-center gap-2 text-[11px] text-slate-500">
-              <Info className="h-3 w-3" />
-              Any model marked unavailable needs its API key set in .env.
+          <div className="mt-4 flex flex-col gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 items-start gap-2 text-[11px] leading-snug text-slate-500 sm:items-center">
+              <Info className="mt-0.5 h-3 w-3 shrink-0 sm:mt-0" />
+              <span className="min-w-0">Any model marked unavailable needs its API key set in .env.</span>
             </div>
-            <Button onClick={save} disabled={busy}>
+            <Button onClick={save} disabled={busy} className="w-full shrink-0 sm:w-auto">
               {busy ? <Spinner className="h-4 w-4" /> : <Save className="h-4 w-4" />}
               Save configuration
             </Button>
@@ -1035,6 +1351,33 @@ function splitLines(s: string): string[] {
     .split('\n')
     .map((l) => l.trim())
     .filter(Boolean);
+}
+
+/** Single dashboard control — maps to `keywordPopStyle` + `allowSparseImageText` (mutually exclusive in stitch). */
+type FactTextMode = 'off' | 'keywords_subtle' | 'keywords_bold' | 'image_labels';
+
+function factTextModeFromGen(gen: PersonalGeneratorConfig): FactTextMode {
+  const sparse = gen.allowSparseImageText === true;
+  const kw = gen.keywordPopStyle ?? 'off';
+  if (sparse && kw === 'off') return 'image_labels';
+  if (kw === 'bold') return 'keywords_bold';
+  if (kw === 'subtle') return 'keywords_subtle';
+  return 'off';
+}
+
+function applyFactTextMode(gen: PersonalGeneratorConfig, mode: FactTextMode): PersonalGeneratorConfig {
+  switch (mode) {
+    case 'off':
+      return { ...gen, keywordPopStyle: 'off', allowSparseImageText: false };
+    case 'keywords_subtle':
+      return { ...gen, keywordPopStyle: 'subtle', allowSparseImageText: false };
+    case 'keywords_bold':
+      return { ...gen, keywordPopStyle: 'bold', allowSparseImageText: false };
+    case 'image_labels':
+      return { ...gen, keywordPopStyle: 'off', allowSparseImageText: true };
+    default:
+      return gen;
+  }
 }
 
 /** Deterministic fingerprint for JSON-like plain objects (styleBible / generatorConfig). */

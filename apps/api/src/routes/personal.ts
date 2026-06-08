@@ -257,6 +257,7 @@ personalRouter.get('/features', requireAuth, (_req, res) => {
         elevenlabs: voiceFeatures.elevenlabs,
         openai: voiceFeatures.openai,
       },
+      resend: features.resend,
     },
   });
 });
@@ -267,6 +268,7 @@ personalRouter.get('/features', requireAuth, (_req, res) => {
  * before validating PATCH bodies so the dashboard save button works.
  */
 function sanitizePersonalAccountPatchBody(body: Record<string, unknown>): void {
+  if (body.videoDeliveryEmail === '') body.videoDeliveryEmail = null;
   const gen = body.generatorConfig;
   if (gen && typeof gen === 'object' && !Array.isArray(gen)) {
     body.generatorConfig = Object.fromEntries(
@@ -290,6 +292,45 @@ function sanitizePersonalAccountPatchBody(body: Record<string, unknown>): void {
   }
 }
 
+const keywordOverlayTextAnchorZ = z.enum([
+  'top_left',
+  'top_center',
+  'top_right',
+  'middle_left',
+  'center',
+  'middle_right',
+  'bottom_left',
+  'bottom_center',
+  'bottom_right',
+]);
+
+const keywordOverlayFontIdZ = z.enum([
+  'inter',
+  'lora',
+  'source_serif',
+  'jetbrains_mono',
+  'oswald',
+  'dm_sans',
+  'clean_sans',
+  'clean_serif',
+]);
+
+const keywordOverlayAspectOverrideZ = z.object({
+  fontPreset: keywordOverlayFontIdZ.optional(),
+  fontScale: z.number().min(0.72).max(2.25).optional(),
+  textBackground: z.boolean().optional(),
+  textAnchor: keywordOverlayTextAnchorZ.optional(),
+});
+
+const keywordOverlayByAspectZ = z
+  .object({
+    '9:16': keywordOverlayAspectOverrideZ.optional(),
+    '1:1': keywordOverlayAspectOverrideZ.optional(),
+    '16:9': keywordOverlayAspectOverrideZ.optional(),
+    '4:5': keywordOverlayAspectOverrideZ.optional(),
+  })
+  .optional();
+
 /* ─── Accounts CRUD ─────────────────────────────────────────────── */
 
 const createAccountBodySchema = z.object({
@@ -311,6 +352,8 @@ const createAccountBodySchema = z.object({
   postSpacingMinutes: z.number().int().min(30).max(720).optional(),
   autoApprove: z.boolean().optional(),
   autoSchedule: z.boolean().optional(),
+  emailVideoOnReady: z.boolean().optional(),
+  videoDeliveryEmail: z.string().email().max(320).nullable().optional(),
   autoGenerateOnSchedule: z.boolean().optional(),
   accentColor: z.string().max(20).optional(),
   logoUrl: z.string().url().max(1000).optional(),
@@ -397,6 +440,11 @@ const createAccountBodySchema = z.object({
       stitchEncodePreset: z.enum(['fast', 'balanced', 'high']).optional(),
       /** Opening white slate with title, channel, topic, and scene stats (director stitch). */
       namesNumbersTitleCard: z.boolean().optional(),
+      keywordOverlayFontPreset: keywordOverlayFontIdZ.optional(),
+      keywordOverlayFontScale: z.number().min(0.72).max(2.25).optional(),
+      keywordOverlayTextBackground: z.boolean().optional(),
+      keywordOverlayTextAnchor: keywordOverlayTextAnchorZ.optional(),
+      keywordOverlayByAspect: keywordOverlayByAspectZ,
     })
     .passthrough()
     .optional(),
@@ -450,11 +498,29 @@ function normalizeGeneratorConfigPatch(gen: Record<string, unknown> | undefined)
   if (typeof gen.longformIntroSeconds === 'number') {
     gen.longformIntroSeconds = Math.min(5, Math.max(1.5, gen.longformIntroSeconds));
   }
+  if (typeof gen.keywordOverlayFontScale === 'number' && Number.isFinite(gen.keywordOverlayFontScale)) {
+    gen.keywordOverlayFontScale = Math.min(2.25, Math.max(0.72, gen.keywordOverlayFontScale));
+  }
+  const by = gen.keywordOverlayByAspect as Record<string, unknown> | undefined;
+  if (by && typeof by === 'object' && !Array.isArray(by)) {
+    for (const k of ['9:16', '1:1', '16:9', '4:5'] as const) {
+      const o = by[k];
+      if (o && typeof o === 'object' && !Array.isArray(o)) {
+        const rec = o as Record<string, unknown>;
+        if (typeof rec.fontScale === 'number' && Number.isFinite(rec.fontScale)) {
+          rec.fontScale = Math.min(2.25, Math.max(0.72, rec.fontScale));
+        }
+      }
+    }
+  }
 }
 
 personalRouter.post('/accounts', requireAuth, async (req, res, next) => {
   try {
     const user = (req as any).user as { id: string };
+    if (req.body && typeof req.body === 'object' && (req.body as Record<string, unknown>).videoDeliveryEmail === '') {
+      (req.body as Record<string, unknown>).videoDeliveryEmail = null;
+    }
     const body = createSchema.parse(req.body);
     // Look up the theme across built-ins + user customs. Built-ins are
     // immediately resolvable; customs require a DB hit.
@@ -1128,11 +1194,28 @@ personalRouter.get('/contentstudio/accounts', requireAuth, async (req, res, next
   try {
     const { listConnectedAccounts } = await import('../services/contentStudio.js');
     const workspaceId = req.query.workspaceId ? String(req.query.workspaceId) : undefined;
-    const accounts = await listConnectedAccounts(workspaceId);
+    const { accounts, listError } = await listConnectedAccounts(workspaceId);
     res.json({
       data: {
         configured: Boolean(features.contentStudio),
         accounts,
+        listError: listError ?? null,
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+personalRouter.get('/contentstudio/workspaces', requireAuth, async (_req, res, next) => {
+  try {
+    const { listWorkspaces } = await import('../services/contentStudio.js');
+    const { workspaces, listError } = await listWorkspaces();
+    res.json({
+      data: {
+        configured: Boolean(features.contentStudio),
+        workspaces,
+        listError: listError ?? null,
       },
     });
   } catch (e) {

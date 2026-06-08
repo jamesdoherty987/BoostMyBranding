@@ -101,3 +101,47 @@ export function clientInviteEmail(args: {
     text: `Your agency set up a BoostMyBranding workspace for ${args.businessName}. Finish setup: ${args.link}`,
   };
 }
+
+/** Link-based delivery — large MP4s are not attached (Resend size limits). */
+export function personalVideoReadyEmail(args: {
+  accountName: string;
+  topic: string;
+  captionPreview: string;
+  videoUrl: string;
+  postId: string;
+}) {
+  const safeName = escapeHtml(args.accountName);
+  const safeTopic = escapeHtml(args.topic);
+  const safeCaption =
+    args.captionPreview.length > 400
+      ? `${escapeHtml(args.captionPreview.slice(0, 400))}…`
+      : escapeHtml(args.captionPreview);
+  const safeUrl = escapeHtml(args.videoUrl);
+  const safePost = escapeHtml(args.postId);
+  return {
+    subject: `Video ready — ${args.accountName}`,
+    html: `
+      <div style="font-family:Inter,sans-serif;max-width:560px;margin:0 auto;padding:24px;">
+        <h1 style="font-size:20px;">Your video is ready</h1>
+        <p style="color:#334155;"><strong>${safeName}</strong> — topic: <strong>${safeTopic}</strong></p>
+        <p style="margin:20px 0;">
+          <a href="${safeUrl}" style="display:inline-block;background:linear-gradient(90deg,#48D886,#1D9CA1);color:white;padding:12px 22px;border-radius:12px;text-decoration:none;font-weight:600;">
+            Download / open video
+          </a>
+        </p>
+        <p style="color:#64748B;font-size:13px;line-height:1.5;">Link expires only if you move or delete the file in your dashboard storage. Post id: <code>${safePost}</code></p>
+        <hr style="border:none;border-top:1px solid #e2e8f0;margin:20px 0;" />
+        <p style="color:#475569;font-size:13px;line-height:1.5;"><strong>Caption preview</strong><br/>${safeCaption || '<em>(none)</em>'}</p>
+      </div>
+    `,
+    text: `Video ready for ${args.accountName} — ${args.topic}\n\nOpen: ${args.videoUrl}\n\nPost id: ${args.postId}`,
+  };
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}

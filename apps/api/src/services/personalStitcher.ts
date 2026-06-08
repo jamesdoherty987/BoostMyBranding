@@ -52,6 +52,13 @@ import type {
   ShotTransition,
   ShotSpeedRamp,
 } from './personalDirector.js';
+import type { KeywordOverlayFontId, KeywordOverlayTextAnchor } from '@boost/api-client';
+import {
+  KEYWORD_OVERLAY_FONT_SCALE_MAX,
+  KEYWORD_OVERLAY_FONT_SCALE_MIN,
+  isKeywordOverlayTextAnchor,
+} from '@boost/api-client';
+import { resolveKeywordOverlayBundledFontPath } from './personalKeywordFonts.js';
 
 /* ═══════════════════════════════════════════════════════════════════ */
 /* H.264 speed vs quality (override via .env)                           */
@@ -287,28 +294,83 @@ export interface StitchKeywordCard {
 export function normalizeKeywordCardsForShot(
   cards: Array<{ text: string; tStart?: number; tEnd?: number }> | undefined,
   durationSeconds: number,
-  opts?: { snappySlate?: boolean },
+  opts?: {
+    snappySlate?: boolean;
+    /**
+     * Storyboard / director planned duration for this shot (before voice-partition stretch).
+     * When this differs from the body segment, `tStart` / `tEnd` are scaled so pops stay aligned.
+     */
+    plannedDurationSeconds?: number;
+    /** Visual body length for this shot (excludes long-form intro pad on the encoded segment). */
+    bodyDurationSeconds?: number;
+    /** Long-form intro hold prepended to shot 0 on the encoded segment (seconds). */
+    introPadSeconds?: number;
+  },
 ): StitchKeywordCard[] | undefined {
   if (!cards?.length) return undefined;
   const snappy = opts?.snappySlate === true;
   const d = Math.max(0.45, durationSeconds);
+  const introPad = Math.max(0, Math.min(d * 0.85, opts?.introPadSeconds ?? 0));
+  const bodyLen = Math.max(0.05, d - introPad);
+  const planned =
+    typeof opts?.plannedDurationSeconds === 'number' && Number.isFinite(opts.plannedDurationSeconds)
+      ? Math.max(0.1, opts.plannedDurationSeconds)
+      : null;
+  const body =
+    typeof opts?.bodyDurationSeconds === 'number' && Number.isFinite(opts.bodyDurationSeconds)
+      ? Math.max(0.1, opts.bodyDurationSeconds)
+      : null;
+  const scaleBody = planned != null && body != null && planned > 0 ? body / planned : 1;
+  const mapT = (t: number) => introPad + Math.max(0, t) * scaleBody;
+
   const out: StitchKeywordCard[] = [];
   const maxCards = snappy ? 2 : 4;
   const maxLen = snappy ? 28 : 56;
   const minSpan = snappy ? 0.34 : 0.22;
-  const defaultSpan = snappy ? Math.min(0.72, d * 0.2) : Math.min(1.35, d * 0.34);
+  const defaultSpan = snappy ? Math.min(0.72, bodyLen * 0.2) : Math.min(1.35, bodyLen * 0.34);
   const maxSpan = snappy ? 0.88 : Math.min(2.2, d * 0.92);
   for (const c of cards.slice(0, maxCards)) {
     const text = c.text.trim();
     if (!text || text.length > maxLen) continue;
-    let start = typeof c.tStart === 'number' && Number.isFinite(c.tStart) ? c.tStart : d * (snappy ? 0.18 : 0.22);
-    let end = typeof c.tEnd === 'number' && Number.isFinite(c.tEnd) ? c.tEnd : start + defaultSpan;
+    let start =
+      typeof c.tStart === 'number' && Number.isFinite(c.tStart)
+        ? mapT(c.tStart)
+        : introPad + bodyLen * (snappy ? 0.18 : 0.22);
+    let end =
+      typeof c.tEnd === 'number' && Number.isFinite(c.tEnd) ? mapT(c.tEnd) : start + defaultSpan;
     start = Math.max(0, Math.min(d - minSpan - 0.02, start));
     end = Math.max(start + minSpan, Math.min(d - 0.02, end));
     if (end - start > maxSpan) end = start + maxSpan;
     out.push({ text, startSeconds: start, endSeconds: end });
   }
   return out.length ? out : undefined;
+}
+
+/**
+ * Drop keyword flashes that repeat the same text too soon on later shots (model often
+ * re-uses the same token). Keeps the first occurrence within a sliding window of shots.
+ */
+export function dedupeKeywordCardsAcrossShots(
+  shots: StitchShotInput[],
+  opts?: { minShotsBetweenRepeats?: number },
+): StitchShotInput[] {
+  const minGap = Math.max(1, Math.floor(opts?.minShotsBetweenRepeats ?? 5));
+  const lastShotIndexByKey = new Map<string, number>();
+  return shots.map((shot, shotIdx) => {
+    const cards = shot.keywordCards;
+    if (!cards?.length) return shot;
+    const kept: StitchKeywordCard[] = [];
+    for (const c of cards) {
+      const key = c.text.trim().toLowerCase().replace(/\s+/g, ' ');
+      if (!key) continue;
+      const prev = lastShotIndexByKey.get(key);
+      if (prev !== undefined && shotIdx - prev < minGap) continue;
+      lastShotIndexByKey.set(key, shotIdx);
+      kept.push(c);
+    }
+    if (kept.length === cards.length) return shot;
+    return { ...shot, keywordCards: kept.length ? kept : undefined };
+  });
 }
 
 export interface StitchShotInput {
@@ -388,6 +450,11 @@ export interface StitchArgs {
    * `slate` / `slate_bold` = white panel + dark text (names & numbers title-card family).
    */
   keywordOverlayStyle?: 'off' | 'subtle' | 'bold' | 'slate' | 'slate_bold';
+  /** Bundled TTF preset for keyword + sparse caption drawtext (see `personalKeywordFonts.ts`). */
+  keywordOverlayFontPreset?: KeywordOverlayFontId;
+  keywordOverlayFontScale?: number;
+  keywordOverlayTextBackground?: boolean;
+  keywordOverlayTextAnchor?: KeywordOverlayTextAnchor;
   /**
    * When false, still images are static (no Ken Burns). Default true.
    */
@@ -582,6 +649,23 @@ export async function stitchShots(args: StitchArgs): Promise<StitchResult> {
         Math.round((workingShots[i]!.durationSeconds - s.durationSeconds) * 1000) / 1000,
       ),
     });
+    const wantKeywordDrawForLog =
+      Boolean(args.keywordOverlayStyle && args.keywordOverlayStyle !== 'off') &&
+      workingShots.some((s) => (s.keywordCards?.length ?? 0) > 0);
+    const wantCaptionDrawForLog = workingShots.some((s) => Boolean(s.persistentCaption?.trim()));
+    if (
+      (wantKeywordDrawForLog || wantCaptionDrawForLog) &&
+      process.env.PERSONAL_LOG_KEYWORD_FONT?.trim() === '1'
+    ) {
+      try {
+        const fp = resolveKeywordOverlayBundledFontPath(args.keywordOverlayFontPreset);
+        console.info(
+          `[stitcher] keyword/caption drawtext font preset=${args.keywordOverlayFontPreset ?? 'inter'} path=${fp}`,
+        );
+      } catch (e) {
+        console.warn('[stitcher] keyword font resolve failed:', (e as Error).message);
+      }
+    }
     const { width, height } = dimsFor(args.aspectRatio ?? '9:16');
     const encodeTier = args.encodePreset;
 
@@ -669,6 +753,10 @@ export async function stitchShots(args: StitchArgs): Promise<StitchResult> {
             overlayStyle: args.keywordOverlayStyle ?? 'off',
             keywordCards: s.keywordCards,
             persistentCaption: s.persistentCaption,
+            keywordOverlayFontPreset: args.keywordOverlayFontPreset,
+            keywordOverlayFontScale: args.keywordOverlayFontScale,
+            keywordOverlayTextBackground: args.keywordOverlayTextBackground,
+            keywordOverlayTextAnchor: args.keywordOverlayTextAnchor,
             encodeTier,
             kenBurnsOnStills: args.kenBurnsOnStills !== false,
             onFfmpegStatsLine: (line) => {
@@ -1009,6 +1097,36 @@ function dimsFor(ar: '9:16' | '1:1' | '16:9' | '4:5'): { width: number; height: 
 }
 
 /**
+ * When a shot's `durationSeconds` changes (e.g. `scaleShotsToTarget`), rescale keyword
+ * `startSeconds` / `endSeconds` so drawtext `enable=between(t,...)` stays on the same
+ * relative timeline as the stretched segment (fixes pops drifting vs voice).
+ */
+function rescaleKeywordCardsToNewShotDuration<T extends { durationSeconds: number; keywordCards?: StitchKeywordCard[] }>(
+  shot: T,
+  oldDurationSeconds: number,
+): T {
+  const cards = shot.keywordCards;
+  if (!cards?.length || !(oldDurationSeconds > 0)) return shot;
+  const newD = shot.durationSeconds;
+  const r = newD / oldDurationSeconds;
+  if (!Number.isFinite(r) || Math.abs(r - 1) < 1e-9) return shot;
+  const minSpan = 0.12;
+  const edge = 0.02;
+  const maxEnd = Math.max(minSpan + edge, newD - edge);
+  const keywordCards = cards.map((c) => {
+    let st = c.startSeconds * r;
+    let en = c.endSeconds * r;
+    if (!Number.isFinite(st) || !Number.isFinite(en)) return c;
+    if (en <= st) en = st + minSpan;
+    st = Math.max(0, st);
+    en = Math.min(maxEnd, en);
+    st = Math.min(st, Math.max(0, en - minSpan));
+    return { ...c, startSeconds: st, endSeconds: en };
+  });
+  return { ...shot, keywordCards };
+}
+
+/**
  * Scale every shot's duration so the full video hits `target` seconds.
  * Only runs when target is set and differs from the current sum by more
  * than 2%. Per-shot floor of 1s so no shot becomes a single frame.
@@ -1019,7 +1137,7 @@ function dimsFor(ar: '9:16' | '1:1' | '16:9' | '4:5'): { width: number; height: 
  *
  * @param perShotMax  Upper bound per shot in seconds (default 18).
  */
-function scaleShotsToTarget<T extends { durationSeconds: number }>(
+function scaleShotsToTarget<T extends { durationSeconds: number; keywordCards?: StitchKeywordCard[] }>(
   shots: T[],
   target: number | undefined,
   perShotMax = 18,
@@ -1036,6 +1154,8 @@ function scaleShotsToTarget<T extends { durationSeconds: number }>(
     });
     return shots;
   }
+
+  const durationBeforeScale = shots.map((s) => s.durationSeconds);
 
   logVisualPacing('stitcher-scale', 'apply uniform scale', {
     current,
@@ -1103,7 +1223,7 @@ function scaleShotsToTarget<T extends { durationSeconds: number }>(
     target,
     after: scaled.map((s) => s.durationSeconds),
   });
-  return scaled;
+  return scaled.map((s, i) => rescaleKeywordCardsToNewShotDuration(s, durationBeforeScale[i]!));
 }
 
 /* ─── Download ───────────────────────────────────────────────── */
@@ -1367,6 +1487,43 @@ function windowsStaticFilterComplexExpr(filters: string[]): string {
   return expr;
 }
 
+/** Min edge inset for keyword drawtext (FFmpeg expr; commas escaped for `-vf`). */
+const KEYWORD_DRAWTEXT_MARGIN_EXPR = 'max(12\\,min(w\\,h)*0.028)';
+
+function stitchKeywordDrawtextPositionExprs(
+  anchor: KeywordOverlayTextAnchor | undefined,
+  opts: { isSlate: boolean; bold: boolean },
+): { x: string; y: string } {
+  const ar: KeywordOverlayTextAnchor =
+    anchor != null && isKeywordOverlayTextAnchor(anchor) ? anchor : 'bottom_center';
+  const yFracKw = opts.bold ? 0.72 : 0.76;
+  const yFracSlate = opts.bold ? 0.76 : 0.775;
+  const yf = opts.isSlate ? yFracSlate : yFracKw;
+  const M = KEYWORD_DRAWTEXT_MARGIN_EXPR;
+  switch (ar) {
+    case 'top_left':
+      return { x: M, y: 'h*0.085' };
+    case 'top_center':
+      return { x: '(w-tw)/2', y: 'h*0.085' };
+    case 'top_right':
+      return { x: `w-tw-${M}`, y: 'h*0.085' };
+    case 'middle_left':
+      return { x: M, y: '(h-th)/2' };
+    case 'center':
+      return { x: '(w-tw)/2', y: '(h-th)/2' };
+    case 'middle_right':
+      return { x: `w-tw-${M}`, y: '(h-th)/2' };
+    case 'bottom_left':
+      return { x: M, y: `h*${yf}` };
+    case 'bottom_center':
+      return { x: '(w-tw)/2', y: `h*${yf}` };
+    case 'bottom_right':
+      return { x: `w-tw-${M}`, y: `h*${yf}` };
+    default:
+      return { x: '(w-tw)/2', y: `h*${yf}` };
+  }
+}
+
 /* ─── Normalize one shot into a segment ──────────────────── */
 
 interface NormalizeArgs {
@@ -1389,6 +1546,10 @@ interface NormalizeArgs {
   overlayStyle?: 'off' | 'subtle' | 'bold' | 'slate' | 'slate_bold';
   keywordCards?: StitchKeywordCard[];
   persistentCaption?: string;
+  keywordOverlayFontPreset?: KeywordOverlayFontId;
+  keywordOverlayFontScale?: number;
+  keywordOverlayTextBackground?: boolean;
+  keywordOverlayTextAnchor?: KeywordOverlayTextAnchor;
   encodeTier?: StitchEncodePreset;
   /** Optional: throttled `frame=` lines for server logs + dashboard activity. */
   onFfmpegStatsLine?: (line: string) => void;
@@ -1495,41 +1656,41 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
     );
   }
 
-  const wantOverlays =
-    a.overlayStyle &&
-    a.overlayStyle !== 'off' &&
-    ((a.keywordCards && a.keywordCards.length > 0) ||
-      Boolean(a.persistentCaption?.trim()));
-  if (wantOverlays) {
-    const font = overlayFontPath();
-    if (!font) {
-      console.warn(
-        '[stitcher] text overlays skipped — set PERSONAL_OVERLAY_FONT to a .ttf or install DejaVu/Segoe UI Bold',
-      );
-    } else {
-      const fontEsc = ffmpegFilterPath(font);
-      const isSlate = a.overlayStyle === 'slate' || a.overlayStyle === 'slate_bold';
-      // Short overlays: inline `text='…'` + `x=(w-tw)/2`. Do **not** combine `textfile=` with
-      // `x=(main_w-text_w)/2` — some libavfilter builds tokenize `text_w` as the `text` option
-      // alongside `textfile` ("Both text and text file provided").
-      const bold = a.overlayStyle === 'bold' || a.overlayStyle === 'slate_bold';
-      const fs = Math.max(
-        20,
-        Math.round(a.height * (bold ? 0.062 : 0.048)),
-      );
-      const border = bold ? 4 : 2;
-      const boxAlpha = bold ? '0.5' : '0.38';
-      const boxBorder = bold ? 16 : 12;
-      const yFrac = bold ? 0.71 : 0.745;
-      const shadow = bold
-        ? ':shadowcolor=black@0.82:shadowx=3:shadowy=3'
-        : ':shadowcolor=black@0.55:shadowx=2:shadowy=2';
-      let idx = 0;
+  const wantKeywordDraw =
+    Boolean(a.overlayStyle && a.overlayStyle !== 'off') &&
+    Boolean(a.keywordCards && a.keywordCards.length > 0);
+  const wantCaptionDraw = Boolean(a.persistentCaption?.trim());
+  if (wantKeywordDraw || wantCaptionDraw) {
+    let font: string;
+    try {
+      font = resolveKeywordOverlayBundledFontPath(a.keywordOverlayFontPreset);
+    } catch (e) {
+      throw new StitcherError('validate', (e as Error).message, { cause: e });
+    }
+    const fontEsc = ffmpegFilterPath(font);
+    const isSlate = a.overlayStyle === 'slate' || a.overlayStyle === 'slate_bold';
+    const bold = a.overlayStyle === 'bold' || a.overlayStyle === 'slate_bold';
+    const fontSc = Math.min(
+      KEYWORD_OVERLAY_FONT_SCALE_MAX,
+      Math.max(KEYWORD_OVERLAY_FONT_SCALE_MIN, a.keywordOverlayFontScale ?? 1),
+    );
+    const wantBox = a.keywordOverlayTextBackground === true;
+    const posKeyword = stitchKeywordDrawtextPositionExprs(a.keywordOverlayTextAnchor, {
+      isSlate: false,
+      bold,
+    });
+    const posSlate = stitchKeywordDrawtextPositionExprs(a.keywordOverlayTextAnchor, {
+      isSlate: true,
+      bold,
+    });
+    let idx = 0;
+    if (wantKeywordDraw) {
       for (const kw of a.keywordCards ?? []) {
         const line = sanitizeOverlayFileText(kw.text, isSlate ? 28 : 56);
         if (!line) continue;
         const textIn = escapeDrawtextInlineText(line);
         idx += 1;
+        const pos = isSlate ? posSlate : posKeyword;
         if (stitchLogDrawtextNormalizeEnabled()) {
           console.info(
             `[stitcher:drawtext-inline] ${JSON.stringify({
@@ -1539,46 +1700,72 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
               rawLen: line.length,
               escapedLen: textIn.length,
               rawPreview: line.length > 120 ? `${line.slice(0, 120)}…` : line,
-              xExpr: '(w-tw)/2',
+              xExpr: pos.x,
+              yExpr: pos.y,
             })}`,
           );
         }
-        const y = Math.round(a.height * yFrac);
         const t0 = kw.startSeconds.toFixed(3);
         const t1 = kw.endSeconds.toFixed(3);
         if (isSlate) {
-          const fsS = Math.max(16, Math.round(a.height * (bold ? 0.038 : 0.033)));
-          const ySlate = Math.round(a.height * (bold ? 0.76 : 0.775));
-          const boxW = bold ? 10 : 8;
+          const fsS = Math.max(15, Math.round(a.height * (bold ? 0.034 : 0.03) * fontSc));
+          if (wantBox) {
+            const boxW = bold ? 10 : 8;
+            filters.push(
+              `drawtext=fontfile=${fontEsc}:text='${textIn}':fontsize=${fsS}:fontcolor=#1a1a1a:borderw=1:bordercolor=#e5e7eb@0.92:box=1:boxcolor=white@${bold ? '0.93' : '0.88'}:boxborderw=${boxW}:x=${pos.x}:y=${pos.y}:enable='between(t\\,${t0}\\,${t1})'`,
+            );
+          } else {
+            filters.push(
+              `drawtext=fontfile=${fontEsc}:text='${textIn}':fontsize=${fsS}:fontcolor=white@0.95:borderw=2:bordercolor=black@0.78:shadowcolor=black@0.28:shadowx=1:shadowy=1:x=${pos.x}:y=${pos.y}:enable='between(t\\,${t0}\\,${t1})'`,
+            );
+          }
+        } else {
+          const fs = Math.max(17, Math.round(a.height * (bold ? 0.05 : 0.038) * fontSc));
+          const bw = bold ? 3 : 2;
+          if (wantBox) {
+            const boxAlpha = bold ? '0.5' : '0.38';
+            const boxBorder = bold ? 14 : 10;
+            const shadow = bold
+              ? ':shadowcolor=black@0.82:shadowx=2:shadowy=2'
+              : ':shadowcolor=black@0.55:shadowx=1:shadowy=1';
+            filters.push(
+              `drawtext=fontfile=${fontEsc}:text='${textIn}':fontsize=${fs}:fontcolor=white:borderw=${bw}:bordercolor=black@0.88${shadow}:box=1:boxcolor=black@${boxAlpha}:boxborderw=${boxBorder}:x=${pos.x}:y=${pos.y}:enable='between(t\\,${t0}\\,${t1})'`,
+            );
+          } else {
+            filters.push(
+              `drawtext=fontfile=${fontEsc}:text='${textIn}':fontsize=${fs}:fontcolor=white@0.96:borderw=${bw}:bordercolor=black@0.72:shadowcolor=black@0.32:shadowx=1:shadowy=1:x=${pos.x}:y=${pos.y}:enable='between(t\\,${t0}\\,${t1})'`,
+            );
+          }
+        }
+      }
+    }
+    if (wantCaptionDraw) {
+      const cap = sanitizeOverlayFileText(a.persistentCaption!.trim(), 80);
+      if (cap) {
+        const capIn = escapeDrawtextInlineText(cap);
+        const capPos = posKeyword;
+        if (stitchLogDrawtextNormalizeEnabled()) {
+          console.info(
+            `[stitcher:drawtext-inline] ${JSON.stringify({
+              segmentIndex: a.segmentIndex,
+              kind: 'persistentCaption',
+              rawLen: cap.length,
+              escapedLen: capIn.length,
+              rawPreview: cap.length > 120 ? `${cap.slice(0, 120)}…` : cap,
+              xExpr: capPos.x,
+              yExpr: capPos.y,
+            })}`,
+          );
+        }
+        const fs2 = Math.max(14, Math.round(a.height * (bold ? 0.03 : 0.027) * fontSc));
+        const te = Math.max(0.05, a.durationSeconds - 0.04).toFixed(3);
+        if (wantBox) {
           filters.push(
-            `drawtext=fontfile=${fontEsc}:text='${textIn}':fontsize=${fsS}:fontcolor=#1a1a1a:borderw=1:bordercolor=#e5e7eb@0.92:shadowcolor=black@0.1:shadowx=1:shadowy=1:box=1:boxcolor=white@${bold ? '0.93' : '0.88'}:boxborderw=${boxW}:x=(w-tw)/2:y=${ySlate}:enable='between(t\\,${t0}\\,${t1})'`,
+            `drawtext=fontfile=${fontEsc}:text='${capIn}':fontsize=${fs2}:fontcolor=white@0.94:borderw=2:bordercolor=black@0.88:shadowcolor=black@0.5:shadowx=2:shadowy=2:box=1:boxcolor=black@0.34:boxborderw=8:x=${capPos.x}:y=${capPos.y}:enable='between(t\\,0\\,${te})'`,
           );
         } else {
           filters.push(
-            `drawtext=fontfile=${fontEsc}:text='${textIn}':fontsize=${fs}:fontcolor=white:borderw=${border}:bordercolor=black@0.88${shadow}:box=1:boxcolor=black@${boxAlpha}:boxborderw=${boxBorder}:x=(w-tw)/2:y=${y}:enable='between(t\\,${t0}\\,${t1})'`,
-          );
-        }
-      }
-      if (a.persistentCaption?.trim()) {
-        const cap = sanitizeOverlayFileText(a.persistentCaption.trim(), 80);
-        if (cap) {
-          const capIn = escapeDrawtextInlineText(cap);
-          if (stitchLogDrawtextNormalizeEnabled()) {
-            console.info(
-              `[stitcher:drawtext-inline] ${JSON.stringify({
-                segmentIndex: a.segmentIndex,
-                kind: 'persistentCaption',
-                rawLen: cap.length,
-                escapedLen: capIn.length,
-                rawPreview: cap.length > 120 ? `${cap.slice(0, 120)}…` : cap,
-                xExpr: '(w-tw)/2',
-              })}`,
-            );
-          }
-          const fs2 = Math.max(17, Math.round(a.height * (bold ? 0.036 : 0.032)));
-          const te = Math.max(0.05, a.durationSeconds - 0.04).toFixed(3);
-          filters.push(
-            `drawtext=fontfile=${fontEsc}:text='${capIn}':fontsize=${fs2}:fontcolor=white@0.94:borderw=2:bordercolor=black@0.88:shadowcolor=black@0.5:shadowx=2:shadowy=2:box=1:boxcolor=black@0.34:boxborderw=10:x=(w-tw)/2:y=h*0.86:enable='between(t\\,0\\,${te})'`,
+            `drawtext=fontfile=${fontEsc}:text='${capIn}':fontsize=${fs2}:fontcolor=white@0.95:borderw=2:bordercolor=black@0.7:shadowcolor=black@0.3:shadowx=1:shadowy=1:x=${capPos.x}:y=${capPos.y}:enable='between(t\\,0\\,${te})'`,
           );
         }
       }
@@ -1653,7 +1840,12 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
   } catch (e) {
     workDirStat = { exists: false, err: e instanceof Error ? e.message : String(e) };
   }
-  const fontProbe = overlayFontPath();
+  let fontProbe: string | null = null;
+  try {
+    fontProbe = resolveKeywordOverlayBundledFontPath(a.keywordOverlayFontPreset);
+  } catch {
+    fontProbe = null;
+  }
   const drawtextCount = filters.filter((f) => f.startsWith('drawtext=')).length;
   const filterComplexFull = winFilterComplexGraph ?? undefined;
   const normalizePrePayload = {

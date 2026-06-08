@@ -33,7 +33,7 @@ const INTEGRATIONS: {
       s.contentStudio && s.contentStudioDefaultWorkspace
         ? 'Default workspace id is set on the API server (CONTENTSTUDIO_WORKSPACE_ID).'
         : s.contentStudio
-          ? 'Add CONTENTSTUDIO_WORKSPACE_ID to the API .env (or set a workspace on each Personal channel) before scheduling posts.'
+          ? 'Add CONTENTSTUDIO_WORKSPACE_ID to the API .env (Personal → Posting → List workspaces) or set a workspace on each Personal channel before scheduling posts.'
           : null,
   },
   { name: 'Cloudflare R2', envKey: 'R2_ACCESS_KEY_ID', statusKey: 'r2' },

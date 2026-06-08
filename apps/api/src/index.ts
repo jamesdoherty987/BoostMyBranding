@@ -17,6 +17,7 @@ import { env } from './env.js';
 import { generalLimiter } from './middleware/rateLimit.js';
 import { requestLogger } from './middleware/logger.js';
 import { sameOriginOnly, extraHeaders } from './middleware/security.js';
+import { allowedBrowserOrigins } from './lib/allowedOrigins.js';
 
 import { authRouter } from './routes/auth.js';
 import { clientsRouter } from './routes/clients.js';
@@ -70,22 +71,12 @@ app.use(
 app.use(extraHeaders);
 app.use(requestLogger);
 
+const corsAllowedOrigins = new Set(allowedBrowserOrigins());
+
 app.use(
   cors({
     origin: (origin, cb) => {
-      // Normalize env URLs to origin-only (protocol://host) since the
-      // browser Origin header never includes a path.
-      const allowed = [env.APP_URL, env.PORTAL_URL, env.DASHBOARD_URL].map(
-        (u) => {
-          try {
-            const p = new URL(u);
-            return `${p.protocol}//${p.host}`;
-          } catch {
-            return u;
-          }
-        },
-      );
-      if (!origin || allowed.includes(origin)) return cb(null, true);
+      if (!origin || corsAllowedOrigins.has(origin)) return cb(null, true);
       cb(null, false);
     },
     credentials: true,

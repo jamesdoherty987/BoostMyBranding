@@ -106,7 +106,7 @@ export function Sidebar() {
   return (
     <>
       {/* Mobile top bar */}
-      <div className="safe-pt fixed left-0 right-0 top-0 z-40 flex min-w-0 items-center justify-between gap-2 border-b border-slate-200 bg-white/95 px-3 py-3 backdrop-blur sm:px-4 md:hidden">
+      <div className="fixed left-0 right-0 top-0 z-40 flex min-w-0 items-center justify-between gap-2 border-b border-slate-200 bg-white/95 px-3 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top,0px))] backdrop-blur sm:px-4 md:hidden">
         <div className="shrink-0">
           <Logo size="sm" />
         </div>
@@ -251,9 +251,6 @@ export function Sidebar() {
           </>
         ) : null}
       </AnimatePresence>
-
-      {/* Mobile spacer */}
-      <div className="h-14 md:hidden" />
     </>
   );
 }

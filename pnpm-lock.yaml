@@ -34,6 +34,9 @@ importers:
       '@aws-sdk/s3-request-presigner':
         specifier: ^3.705.0
         version: 3.1040.0
+      '@boost/api-client':
+        specifier: workspace:*
+        version: link:../../packages/api-client
       '@boost/core':
         specifier: workspace:*
         version: link:../../packages/core

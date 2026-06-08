@@ -281,6 +281,18 @@ export type ContentStudioConnectedAccount = {
   label: string;
 };
 
+/** Workspace row from GET /workspaces (for picking CONTENTSTUDIO_WORKSPACE_ID). */
+export type ContentStudioWorkspaceSummary = {
+  id: string;
+  name: string;
+};
+
+export type ListConnectedAccountsResult = {
+  accounts: ContentStudioConnectedAccount[];
+  /** Set when the HTTP call failed, JSON was invalid, or ContentStudio returned `status: false`. */
+  listError?: string;
+};
+
 function pickAccountRowId(row: Record<string, unknown>): string {
   const candidates = [
     row.account_id,
@@ -334,6 +346,102 @@ function pickAccountTitle(row: Record<string, unknown>): string {
   return '';
 }
 
+/** Platform string from various ContentStudio account row shapes. */
+function pickAccountPlatform(row: Record<string, unknown>): string {
+  const keys = ['platform', 'social_platform', 'provider', 'network', 'type'] as const;
+  for (const k of keys) {
+    const v = row[k];
+    if (typeof v === 'string' && v.trim()) return v.trim();
+  }
+  return '';
+}
+
+/** Collect account-like rows when `data` or `accounts` is grouped by platform key. */
+function rowsFromPlatformGrouped(obj: Record<string, unknown>): unknown[] {
+  const rows: unknown[] = [];
+  for (const val of Object.values(obj)) {
+    if (!Array.isArray(val)) continue;
+    for (const item of val) {
+      if (item && typeof item === 'object') rows.push(item);
+    }
+  }
+  return rows;
+}
+
+/**
+ * Normalize API body to a flat list of account row objects (handles paginated wrappers
+ * and platform-keyed maps like posts' `accounts.facebook[]`).
+ */
+function extractRawAccountRows(body: Record<string, unknown>): unknown[] {
+  const data = body.data;
+  if (Array.isArray(data)) return data;
+  if (data && typeof data === 'object' && !Array.isArray(data)) {
+    const rec = data as Record<string, unknown>;
+    const grouped = rowsFromPlatformGrouped(rec);
+    if (grouped.length) return grouped;
+    if (Array.isArray(rec.items)) return rec.items;
+    if (Array.isArray(rec.accounts)) return rec.accounts;
+    if (Array.isArray(rec.data)) return rec.data;
+  }
+  if (Array.isArray(body.accounts)) return body.accounts;
+  const acct = body.accounts;
+  if (acct && typeof acct === 'object' && !Array.isArray(acct)) {
+    return rowsFromPlatformGrouped(acct as Record<string, unknown>);
+  }
+  return [];
+}
+
+async function fetchWorkspaceAccountRowsAllPages(workspaceId: string): Promise<{
+  rows: unknown[];
+  listError?: string;
+}> {
+  const all: unknown[] = [];
+  let page = 1;
+  let lastPage = 1;
+  const maxPages = 25;
+  const perPage = 100;
+
+  do {
+    const url = `${CS_BASE}/workspaces/${encodeURIComponent(workspaceId)}/accounts?page=${page}&per_page=${perPage}`;
+    const res = await fetch(url, { headers: csHeaders() });
+    const text = await res.text();
+    let json: Record<string, unknown>;
+    try {
+      json = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      if (!res.ok) {
+        return { rows: [], listError: `ContentStudio HTTP ${res.status}: ${text.slice(0, 280)}` };
+      }
+      return { rows: [], listError: 'ContentStudio returned non-JSON for accounts list.' };
+    }
+
+    if (!res.ok) {
+      const msg =
+        typeof json.message === 'string'
+          ? json.message
+          : typeof json.error === 'string'
+            ? json.error
+            : text.slice(0, 280);
+      return { rows: [], listError: `ContentStudio HTTP ${res.status}: ${msg}` };
+    }
+
+    if (json.status === false) {
+      const msg = typeof json.message === 'string' ? json.message : 'ContentStudio returned status:false';
+      return { rows: [], listError: msg };
+    }
+
+    const chunk = extractRawAccountRows(json);
+    all.push(...chunk);
+
+    const cur = Number(json.current_page ?? page) || page;
+    lastPage = Number(json.last_page ?? json.lastPage ?? 1) || 1;
+    if (chunk.length === 0 && cur >= lastPage) break;
+    page = cur + 1;
+  } while (page <= lastPage && page <= maxPages);
+
+  return { rows: all };
+}
+
 function buildAccountLabel(
   platform: ContentStudioPlatform,
   handle: string,
@@ -355,32 +463,23 @@ function buildAccountLabel(
  * dashboard can tell the user which platforms actually have a handle
  * attached. Returns an empty list when the API isn't configured.
  */
-export async function listConnectedAccounts(workspaceId?: string): Promise<ContentStudioConnectedAccount[]> {
-  if (!features.contentStudio) return [];
+export async function listConnectedAccounts(workspaceId?: string): Promise<ListConnectedAccountsResult> {
+  if (!features.contentStudio) return { accounts: [] };
   const ws = (workspaceId ?? env.CONTENTSTUDIO_WORKSPACE_ID ?? '').trim();
-  if (!ws) return [];
+  if (!ws) return { accounts: [] };
   try {
-    const url = `${CS_BASE}/workspaces/${encodeURIComponent(ws)}/accounts`;
-    const res = await fetch(url, { headers: csHeaders() });
-    if (!res.ok) return [];
-    const body = (await res.json()) as {
-      data?: unknown[];
-      accounts?: unknown[];
-    };
-    const rawRows = Array.isArray(body.data)
-      ? body.data
-      : Array.isArray(body.accounts)
-        ? body.accounts
-        : Array.isArray((body as { results?: unknown[] }).results)
-          ? (body as { results: unknown[] }).results
-          : [];
+    const { rows: rawRows, listError } = await fetchWorkspaceAccountRowsAllPages(ws);
+    if (listError) {
+      return { accounts: [], listError };
+    }
     const out: ContentStudioConnectedAccount[] = [];
     let missingId = 0;
+    const seen = new Set<string>();
     for (const raw of rawRows) {
       if (!raw || typeof raw !== 'object') continue;
       const row = raw as Record<string, unknown>;
-      const platformRaw = row.platform;
-      if (typeof platformRaw !== 'string' || !platformRaw.trim()) continue;
+      const platformRaw = pickAccountPlatform(row);
+      if (!platformRaw) continue;
       const platform = normalizePlatform(platformRaw);
       const id = pickAccountRowId(row);
       const handle = pickAccountHandle(row);
@@ -390,6 +489,9 @@ export async function listConnectedAccounts(workspaceId?: string): Promise<Conte
         missingId++;
         continue;
       }
+      const dedupeKey = `${platform}:${id}`;
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
       out.push({ platform, handle, id, label });
     }
     if (missingId > 0) {
@@ -397,10 +499,67 @@ export async function listConnectedAccounts(workspaceId?: string): Promise<Conte
         `[contentStudio] ${missingId} workspace account row(s) skipped (no id). First row keys: ${rawRows[0] && typeof rawRows[0] === 'object' ? Object.keys(rawRows[0] as object).join(', ') : '—'}`,
       );
     }
-    return out;
+    return { accounts: out };
   } catch (e) {
-    console.warn('[contentStudio] listConnectedAccounts failed:', (e as Error).message);
-    return [];
+    const msg = (e as Error).message;
+    console.warn('[contentStudio] listConnectedAccounts failed:', msg);
+    return { accounts: [], listError: msg };
+  }
+}
+
+export type ListWorkspacesResult = {
+  workspaces: ContentStudioWorkspaceSummary[];
+  listError?: string;
+};
+
+/** List workspaces for this API key so the user can copy the correct workspace id into .env or the form. */
+export async function listWorkspaces(): Promise<ListWorkspacesResult> {
+  if (!features.contentStudio) return { workspaces: [] };
+  const all: ContentStudioWorkspaceSummary[] = [];
+  let page = 1;
+  let lastPage = 1;
+  const perPage = 50;
+  const maxPages = 20;
+  try {
+    do {
+      const url = `${CS_BASE}/workspaces?page=${page}&per_page=${perPage}`;
+      const res = await fetch(url, { headers: csHeaders() });
+      const text = await res.text();
+      let json: Record<string, unknown>;
+      try {
+        json = JSON.parse(text) as Record<string, unknown>;
+      } catch {
+        if (!res.ok) return { workspaces: [], listError: `ContentStudio HTTP ${res.status}: ${text.slice(0, 280)}` };
+        return { workspaces: [], listError: 'ContentStudio returned non-JSON for workspaces list.' };
+      }
+      if (!res.ok) {
+        const msg =
+          typeof json.message === 'string'
+            ? json.message
+            : typeof json.error === 'string'
+              ? json.error
+              : text.slice(0, 280);
+        return { workspaces: [], listError: `ContentStudio HTTP ${res.status}: ${msg}` };
+      }
+      if (json.status === false) {
+        const msg = typeof json.message === 'string' ? json.message : 'ContentStudio returned status:false';
+        return { workspaces: [], listError: msg };
+      }
+      const rows = Array.isArray(json.data) ? json.data : [];
+      for (const raw of rows) {
+        if (!raw || typeof raw !== 'object') continue;
+        const row = raw as Record<string, unknown>;
+        const id = String(row._id ?? row.id ?? row.workspace_id ?? row.workspaceId ?? '').trim();
+        const name = typeof row.name === 'string' && row.name.trim() ? row.name.trim() : id || 'Workspace';
+        if (id) all.push({ id, name });
+      }
+      const cur = Number(json.current_page ?? page) || page;
+      lastPage = Number(json.last_page ?? json.lastPage ?? 1) || 1;
+      page = cur + 1;
+    } while (page <= lastPage && page <= maxPages);
+    return { workspaces: all };
+  } catch (e) {
+    return { workspaces: [], listError: (e as Error).message };
   }
 }
 
@@ -424,6 +583,8 @@ function normalizePlatform(p: string): ContentStudioPlatform {
     youtube: 'youtube',
     yt: 'youtube',
     ytshorts: 'youtube',
+    youtubechannel: 'youtube',
+    googleyoutube: 'youtube',
     googlemybusiness: 'google_business',
     gmb: 'google_business',
     googlebusiness: 'google_business',

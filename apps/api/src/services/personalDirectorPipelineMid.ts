@@ -6,6 +6,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
+import { resolveKeywordOverlayForAspect } from '@boost/api-client';
 import {
   getDb,
   personalAccounts,
@@ -22,6 +23,8 @@ import {
   stripDirectorResumeKeys,
   PERSONAL_SCRIPT_CK_PRE,
   PERSONAL_SCRIPT_CK_SRC,
+  filterKeywordCardsByVoiceover,
+  overlayFactLabelGroundedInVoiceover,
   type Storyboard,
 } from './personalDirector.js';
 import { searchAssets, pickGameplayLoop } from './personalScraper.js';
@@ -29,9 +32,12 @@ import {
   synthesizeVoice,
   estimateDurationSeconds,
   joinNarrationParts,
+  joinNarrationPartsWithShotCharSpans,
+  keywordStitchCardsFromVoiceAlignment,
   shotDurationsFromVoicePartition,
   stripLeadingHookFromFirstVoiceover,
   minShotsForVoiceAndAvgClip,
+  type VoiceCharacterAlignment,
 } from './personalVoice.js';
 import { pickMusic } from './personalMusic.js';
 import { schedulePost } from './contentStudio.js';
@@ -64,6 +70,7 @@ import { resolveMusicDuckUnderVoice, resolveMusicSoloVolume } from './personalMu
 import {
   stitchShots,
   normalizeKeywordCardsForShot,
+  dedupeKeywordCardsAcrossShots,
   perShotSecondsMaxFromAverageClip,
   defaultNamesNumbersTitleCardDurationSeconds,
   type StitchShotInput,
@@ -72,6 +79,7 @@ import { logVisualPacing } from './personalDebugVisualPacing.js';
 import { buildPersonalThumbnailShotAlign, createPersonalPostThumbnail, shortThumbnailOverlayLine } from './personalAiThumbnail.js';
 import { resolvePersonalInspirationImageUrls } from './personalInspirationRefs.js';
 import type { GenerateForAccountArgs, GenerateForAccountResult } from './personalPipeline.js';
+import { maybeEmailPersonalVideoReady } from './personalVideoDeliveryEmail.js';
 
 const SOURCING_DEBUG_CONSOLE = process.env.PERSONAL_DEBUG_SOURCING === '1';
 
@@ -223,6 +231,8 @@ export async function directorPipelineFromResolvedStoryboard(
   /** Pre-sourcing TTS (fresh runs) — see early block after references. */
   let voiceoverUrl: string | null = null;
   let measuredVoiceSeconds: number | null = null;
+  /** ElevenLabs-only: character timings for the exact narration MP3 used for this render. */
+  let voiceCharacterAlignment: VoiceCharacterAlignment | undefined;
 
   const db = getDb();
 
@@ -309,6 +319,7 @@ export async function directorPipelineFromResolvedStoryboard(
       );
       voiceoverUrl = voiceEarly.audioUrl;
       measuredVoiceSeconds = voiceEarly.durationSeconds;
+      voiceCharacterAlignment = voiceEarly.voiceCharacterAlignment;
       totalCostCents += voiceEarly.costCents;
 
       /** Avoid divide-by-zero / insane shot counts if the provider returns a bogus ~0s duration. */
@@ -387,6 +398,7 @@ export async function directorPipelineFromResolvedStoryboard(
         );
         voiceoverUrl = voiceFix.audioUrl;
         measuredVoiceSeconds = voiceFix.durationSeconds;
+        voiceCharacterAlignment = voiceFix.voiceCharacterAlignment;
         totalCostCents += voiceFix.costCents;
       }
     }
@@ -893,6 +905,7 @@ export async function directorPipelineFromResolvedStoryboard(
         );
         voiceoverUrl = voice.audioUrl;
         measuredVoiceSeconds = voice.durationSeconds;
+        voiceCharacterAlignment = voice.voiceCharacterAlignment;
         estimatedDuration = Math.max(estimatedDuration, voice.durationSeconds);
         totalCostCents += voice.costCents;
       }
@@ -1216,7 +1229,46 @@ export async function directorPipelineFromResolvedStoryboard(
     }
   }
 
-  const stitchInputs: StitchShotInput[] = resolved.map((r, i) => {
+  const narrJoinForAlign = joinNarrationParts([
+    storyboard.hook,
+    ...shotVosForNarration,
+    storyboard.outro,
+  ]);
+  const { narration: narrSpanCheck, shotSpanByIndex } = joinNarrationPartsWithShotCharSpans(
+    storyboard.hook ?? '',
+    shotVosForNarration,
+    storyboard.outro ?? '',
+  );
+  if (narrSpanCheck !== narrJoinForAlign) {
+    console.warn('[director-mid] narration / span string mismatch; ElevenLabs keyword alignment skipped.');
+  }
+  const alignmentForStitch =
+    voiceCharacterAlignment &&
+    voiceCharacterAlignment.narrationText === narrJoinForAlign &&
+    narrSpanCheck === narrJoinForAlign
+      ? voiceCharacterAlignment
+      : undefined;
+
+  /** VO is delayed in mux by this many seconds; aligns ElevenLabs times to per-shot video timeline. */
+  const voiceLeadInForKeywordTiming =
+    longformIntroSeconds > 0 && Number.isFinite(longformIntroSeconds) ? longformIntroSeconds : 0;
+
+  /** Cumulative encoded segment duration before each shot (matches final concat order). */
+  const cumStitchDurBefore: number[] = [];
+  {
+    let acc = 0;
+    for (let j = 0; j < resolved.length; j++) {
+      cumStitchDurBefore.push(acc);
+      const bd =
+        visualDurations != null && visualDurations[j] != null
+          ? visualDurations[j]!
+          : resolved[j]!.fs.shot.durationSeconds;
+      const ip = j === 0 && longformIntroSeconds > 0 ? longformIntroSeconds : 0;
+      acc += bd + ip;
+    }
+  }
+
+  let stitchInputs: StitchShotInput[] = resolved.map((r, i) => {
     const baseDur =
       visualDurations != null && visualDurations[i] != null
         ? visualDurations[i]!
@@ -1231,18 +1283,55 @@ export async function directorPipelineFromResolvedStoryboard(
       speedRamp: r.fs.shot.speedRamp,
       focalX: r.fs.shot.focalX,
       focalY: r.fs.shot.focalY,
-      keywordCards:
-        keywordOverlayStyle !== 'off'
-          ? normalizeKeywordCardsForShot(r.fs.shot.keywordCards, dur, {
+      keywordCards: (() => {
+        if (keywordOverlayStyle === 'off') return undefined;
+        const filtered = filterKeywordCardsByVoiceover(r.fs.shot.keywordCards, r.fs.shot.voiceover ?? '');
+        const normOpts = {
+          snappySlate: genConfig.namesNumbersTitleCard === true,
+          plannedDurationSeconds: r.fs.shot.durationSeconds,
+          bodyDurationSeconds: baseDur,
+          introPadSeconds: introPad,
+        } as const;
+        if (
+          alignmentForStitch &&
+          visualDurations != null &&
+          visualDurations[i] != null &&
+          filtered?.length
+        ) {
+          const span = shotSpanByIndex.get(i);
+          const vd = visualDurations;
+          const mp3Start = vd.slice(0, i).reduce((a, b) => a + b, 0);
+          const mp3End = mp3Start + vd[i]!;
+          if (span && span.end > span.start) {
+            const aligned = keywordStitchCardsFromVoiceAlignment({
+              cards: filtered,
+              alignment: alignmentForStitch,
+              windowStart: span.start,
+              windowEnd: span.end,
+              mp3PartitionStart: mp3Start,
+              mp3PartitionEnd: mp3End,
+              segmentDurationSeconds: dur,
+              introPadSeconds: introPad,
               snappySlate: genConfig.namesNumbersTitleCard === true,
-            })
-          : undefined,
-      persistentCaption:
-        genConfig.allowSparseImageText === true && r.fs.shot.imageCaption
-          ? String(r.fs.shot.imageCaption).trim().slice(0, 80) || undefined
-          : undefined,
+              voiceoverLeadInSeconds: voiceLeadInForKeywordTiming,
+              cumulativeStitchSecondsBeforeShot: cumStitchDurBefore[i]!,
+            });
+            if (aligned?.length) return aligned;
+          }
+        }
+        return normalizeKeywordCardsForShot(filtered, dur, normOpts);
+      })(),
+      /** Mutually exclusive with keyword / slate FFmpeg overlays — avoids duplicate labels on the same shot. */
+      persistentCaption: (() => {
+        if (keywordOverlayStyle !== 'off' || genConfig.allowSparseImageText !== true) return undefined;
+        const cap = r.fs.shot.imageCaption ? String(r.fs.shot.imageCaption).trim().slice(0, 80) : '';
+        if (!cap) return undefined;
+        if (!overlayFactLabelGroundedInVoiceover(cap, r.fs.shot.voiceover ?? '')) return undefined;
+        return cap;
+      })(),
     };
   });
+  stitchInputs = dedupeKeywordCardsAcrossShots(stitchInputs, { minShotsBetweenRepeats: 5 });
 
   const shotSum = stitchInputs.reduce((a, s) => a + s.durationSeconds, 0);
   const nStitch = stitchInputs.length;
@@ -1372,6 +1461,8 @@ export async function directorPipelineFromResolvedStoryboard(
     nShots: resolved.length,
   });
 
+  const keywordKo = resolveKeywordOverlayForAspect(genConfig, aspectRatio);
+
   const stitched = await withAbortWhenPersonalPostFailed(
     postId,
     stitchShots({
@@ -1395,6 +1486,10 @@ export async function directorPipelineFromResolvedStoryboard(
       /** Keep scale cap aligned with partition ceiling (undefined was defaulting to 18s). */
       perShotSecondsMax: visualDurations != null ? maxPerPartition + 0.35 : perShotSecondsMax,
       keywordOverlayStyle,
+      keywordOverlayFontPreset: keywordKo.fontPreset,
+      keywordOverlayFontScale: keywordKo.fontScale,
+      keywordOverlayTextBackground: keywordKo.textBackground,
+      keywordOverlayTextAnchor: keywordKo.textAnchor,
       onRenderProgress: async (p) => {
         try {
           await db
@@ -1437,6 +1532,8 @@ export async function directorPipelineFromResolvedStoryboard(
   const thumbnailUrl = thumb.url;
   totalCostCents += thumb.costCents;
 
+  const finalDirectorCaption = composeCaption(storyboard);
+
   let contentStudioPostId: string | null = null;
   let scheduledAt: Date | null = null;
   const shouldSchedule = shouldSchedulePersonalToContentStudio(args, account);
@@ -1447,7 +1544,7 @@ export async function directorPipelineFromResolvedStoryboard(
     try {
       const res = await schedulePost({
         platform: account.platform,
-        caption: composeCaption(storyboard),
+        caption: finalDirectorCaption,
         videoUrl: stitched.videoUrl,
         scheduledAt: when,
         workspaceId: account.contentStudioWorkspaceId ?? undefined,
@@ -1499,7 +1596,7 @@ export async function directorPipelineFromResolvedStoryboard(
       videoUrl: stitched.videoUrl,
       thumbnailUrl: thumbnailUrl ?? null,
       durationSeconds: Math.max(1, Math.round(stitched.durationSeconds)),
-      caption: composeCaption(storyboard),
+      caption: finalDirectorCaption,
       hashtags: storyboard.hashtags ?? theme.defaultHashtags,
       contentStudioPostId,
       scheduledAt,
@@ -1522,6 +1619,16 @@ export async function directorPipelineFromResolvedStoryboard(
       updatedAt: new Date(),
     })
     .where(eq(personalAccounts.id, account.id));
+
+  void maybeEmailPersonalVideoReady({
+    accountName: account.accountName,
+    emailVideoOnReady: account.emailVideoOnReady,
+    videoDeliveryEmail: account.videoDeliveryEmail,
+    postId,
+    videoUrl: stitched.videoUrl,
+    topic: topic.trim() || 'Video',
+    captionPreview: finalDirectorCaption,
+  }).catch((e) => console.warn('[personal] video delivery email:', (e as Error).message));
 
   broadcast({
     type: 'personal:progress',
@@ -1641,6 +1748,8 @@ export async function finishDirectorFromPreStitchCheckpoint(
 
   const resumeVoLeadIn = voiceoverLeadInSecondsWithoutTitleCard(pre);
 
+  const resumeKeywordKo = resolveKeywordOverlayForAspect(genCfg, pre.aspectRatio);
+
   const stitched = await stitchShots({
     accountId: account.id,
     postId,
@@ -1661,6 +1770,10 @@ export async function finishDirectorFromPreStitchCheckpoint(
     targetDurationSeconds: stitchTargetResume,
     perShotSecondsMax: voicePartitionedResume ? undefined : perShotSecondsMax,
     keywordOverlayStyle: pre.keywordOverlayStyle ?? 'off',
+    keywordOverlayFontPreset: resumeKeywordKo.fontPreset,
+    keywordOverlayFontScale: resumeKeywordKo.fontScale,
+    keywordOverlayTextBackground: resumeKeywordKo.textBackground,
+    keywordOverlayTextAnchor: resumeKeywordKo.textAnchor,
     onRenderProgress: async (p) => {
       try {
         await db
@@ -1700,6 +1813,8 @@ export async function finishDirectorFromPreStitchCheckpoint(
   const thumbnailUrl = thumb.url;
   totalCostCents += thumb.costCents;
 
+  const resumeDirectorCaption = composeCaption(storyboard);
+
   let contentStudioPostId: string | null = null;
   let scheduledAt: Date | null = null;
   const shouldSchedule = shouldSchedulePersonalToContentStudio(genArgs, account);
@@ -1710,7 +1825,7 @@ export async function finishDirectorFromPreStitchCheckpoint(
     try {
       const res = await schedulePost({
         platform: account.platform,
-        caption: composeCaption(storyboard),
+        caption: resumeDirectorCaption,
         videoUrl: stitched.videoUrl,
         scheduledAt: when,
         workspaceId: account.contentStudioWorkspaceId ?? undefined,
@@ -1770,7 +1885,7 @@ export async function finishDirectorFromPreStitchCheckpoint(
       videoUrl: stitched.videoUrl,
       thumbnailUrl: thumbnailUrl ?? null,
       durationSeconds: Math.max(1, Math.round(stitched.durationSeconds)),
-      caption: composeCaption(storyboard),
+      caption: resumeDirectorCaption,
       hashtags: storyboard.hashtags ?? theme.defaultHashtags,
       contentStudioPostId,
       scheduledAt,
@@ -1793,6 +1908,16 @@ export async function finishDirectorFromPreStitchCheckpoint(
       updatedAt: new Date(),
     })
     .where(eq(personalAccounts.id, account.id));
+
+  void maybeEmailPersonalVideoReady({
+    accountName: account.accountName,
+    emailVideoOnReady: account.emailVideoOnReady,
+    videoDeliveryEmail: account.videoDeliveryEmail,
+    postId,
+    videoUrl: stitched.videoUrl,
+    topic: (post.topic ?? '').trim() || 'Video',
+    captionPreview: resumeDirectorCaption,
+  }).catch((e) => console.warn('[personal] video delivery email:', (e as Error).message));
 
   broadcast({
     type: 'personal:progress',

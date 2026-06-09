@@ -94,7 +94,9 @@ Next.js runs **`rewrites()` from `next.config.ts` at `next build` time**, not on
 - If you **change the Railway public URL**, run a **new Vercel deployment** so the rewrite destination is rebuilt.
 - **Preview** deployments: set `API_UPSTREAM` on the **Preview** environment too if previews should call an API; otherwise they may have no `/api` proxy unless you point Preview at a staging API.
 
-**Turborepo:** `turbo.json` lists `API_UPSTREAM`, `VERCEL_*`, and `NEXT_PUBLIC_*` on the **`build`** task so they are **not stripped** in Turbo’s default strict env mode (otherwise `next build` would not see them).
+**Turborepo:** `turbo.json` lists `API_UPSTREAM`, `VERCEL_*`, and `NEXT_PUBLIC_*` on the **`build`** task so they are **included in the cache hash** when they change. The repo uses **`"envMode": "loose"`** (Turborepo 2 default is strict): strict mode only passes allowlisted env vars into tasks, which often breaks **`next build` on Vercel** because the platform injects many variables Next and tooling expect. Loose mode keeps those vars available while the `env` list still drives invalidation.
+
+**If the build still fails:** open the Vercel log, expand the **`web:build`** / **`next build`** step, and copy the **first error** (not only “exited with 1”). Common checks: **Root Directory** = `apps/web`, **Install Command** / **Build Command** overrides cleared (use `apps/web/vercel.json`), `pnpm-lock.yaml` committed and in sync, and **`API_UPSTREAM`** set for Production when you want `/api` to work after deploy.
 
 ### Vercel project settings (recommended)
 

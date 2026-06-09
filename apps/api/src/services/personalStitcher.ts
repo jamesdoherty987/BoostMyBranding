@@ -23,7 +23,8 @@
  * and encoded at full canvas resolution (30fps). Long storyboards mean
  * many sequential FFmpeg passes — the dominant cost is CPU, not I/O.
  * Tune `PERSONAL_STITCH_PRESET` / `PERSONAL_STITCH_CRF` in `.env` for
- * speed vs quality.
+ * speed vs quality. `PERSONAL_STITCH_NORMALIZE_THREADS` caps FFmpeg threads on
+ * each normalize pass (default 1) to avoid OOM on small workers with Ken Burns + libx264.
  *
  * Frozen last-frame + VO continues: usually **audio longer than real video**
  * after concat (bad container `Duration`). `mixAudio` caps `apad` to the
@@ -31,6 +32,8 @@
  * `PERSONAL_DEBUG_MIX_AUDIO=1` or `PERSONAL_DEBUG_STITCH_TIMELINE=1`.
  * `PERSONAL_DEBUG_STITCH_FFMPEG=1` — FFmpeg `-loglevel verbose`, argv, full filter string, stderr tail on failure.
  * `PERSONAL_DEBUG_STITCH_NORMALIZE=1` — pre-invoke JSON for **every** normalize shot (argv + filters) without verbose FFmpeg.
+ * `PERSONAL_LOG_STITCH_NORMALIZE_SHOTS=1` — compact per-shot lines (memory, preset/CRF, threads) for every normalize pass.
+ * `PERSONAL_DEBUG_STITCH_NORMALIZE_DEEP=1` — above + FFmpeg pid, argv preview, streaming stderr highlights, stderr ring buffer on failure.
  * `PERSONAL_LOG_DRAWTEXT_NORMALIZE=1` — per-shot drawtext filter snippets + overlay inline text preview / legacy `ov-*.txt` dumps (high volume).
  * `PERSONAL_LOG_FFMPEG_VERSION=1` — one-line `ffmpeg -version` head at stitch start (also when `PERSONAL_DEBUG_STITCH_FFMPEG=1`).
  * Failed normalize always logs `[stitcher:normalize-failed]` with argv, filters, and full FFmpeg stderr when available.
@@ -181,6 +184,81 @@ function stitchNormalizeDumpEveryShot(): boolean {
   return v === '1' || v === 'true' || v === 'yes' || v === 'on';
 }
 
+/**
+ * Per-shot normalize FFmpeg: cap encode + filter threads to cut peak RAM (Ken Burns `zoompan`
+ * + libx264 on 512MB–1GB workers is often SIGKILL with ffmpeg defaults).
+ *
+ * `PERSONAL_STITCH_NORMALIZE_THREADS`:
+ * - **unset** → `-threads 1 -filter_threads 1` (safest default)
+ * - `auto` | `0` | `default` → omit (faster on big CPUs; riskier on tiny containers)
+ * - `1`–`32` → `-threads N` and `-filter_threads` capped at `min(N, 8)`
+ */
+function normalizeFfmpegThreadArgs(): string[] {
+  const raw = process.env.PERSONAL_STITCH_NORMALIZE_THREADS?.trim().toLowerCase();
+  if (raw === 'auto' || raw === '0' || raw === 'default') return [];
+  let n = 1;
+  if (raw) {
+    const parsed = Number.parseInt(raw, 10);
+    if (Number.isFinite(parsed) && parsed >= 1 && parsed <= 32) n = parsed;
+  }
+  const filterThreads = Math.min(n, 8);
+  return ['-threads', String(n), '-filter_threads', String(filterThreads)];
+}
+
+/** Deep tracing: memory + argv + streaming stderr lines + ring buffer on failure. */
+function stitchNormalizeDeepDiagnostics(): boolean {
+  const v = process.env.PERSONAL_DEBUG_STITCH_NORMALIZE_DEEP?.trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes' || v === 'on';
+}
+
+/** Compact per-shot start/done lines (memory, preset/CRF). On automatically when deep is on. */
+function stitchNormalizeShotDiagnostics(): boolean {
+  if (stitchNormalizeDeepDiagnostics()) return true;
+  const v = process.env.PERSONAL_LOG_STITCH_NORMALIZE_SHOTS?.trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes' || v === 'on';
+}
+
+function stitchProcessDiagnosticsSnapshot(): {
+  memMb: Record<string, number>;
+  maxRssKb?: number;
+  pid: number;
+} {
+  const memMb: Record<string, number> = {};
+  for (const [k, v] of Object.entries(process.memoryUsage())) {
+    memMb[k] = Math.round((v / 1024 / 1024) * 100) / 100;
+  }
+  let maxRssKb: number | undefined;
+  try {
+    if (typeof process.resourceUsage === 'function') {
+      const r = process.resourceUsage();
+      if (typeof r.maxRSS === 'number' && r.maxRSS > 0) maxRssKb = r.maxRSS;
+    }
+  } catch {
+    /* ignore */
+  }
+  return { memMb, maxRssKb, pid: process.pid };
+}
+
+/** Safe argv for logs: shorten path-like tokens, cap count. */
+function ffmpegArgvTokensForLog(argv: readonly string[], maxElems = 100): string[] {
+  const out: string[] = [];
+  let n = 0;
+  for (const s of argv) {
+    if (n >= maxElems) {
+      out.push(`…+${argv.length - maxElems} more`);
+      break;
+    }
+    n += 1;
+    if (s.length > 160 && (/[/\\]/.test(s) || /^[A-Za-z]:[\\/]/.test(s))) {
+      const b = path.basename(s);
+      out.push(b.length > 120 ? `${b.slice(0, 120)}…` : b);
+      continue;
+    }
+    out.push(s.length > 220 ? `${s.slice(0, 220)}…` : s);
+  }
+  return out;
+}
+
 function stitchLogFfmpegVersionEnabled(): boolean {
   const v = process.env.PERSONAL_LOG_FFMPEG_VERSION?.trim().toLowerCase();
   return v === '1' || v === 'true' || v === 'yes' || v === 'on';
@@ -238,6 +316,8 @@ export class StitcherError extends Error {
  */
 class FfmpegInvokeError extends Error {
   readonly exitCode: number | null;
+  /** Node `child_process` close signal, e.g. `SIGKILL` when the Linux OOM killer stops FFmpeg. */
+  readonly killSignal: string | null;
   readonly ffmpegStderr: string;
   readonly ffmpegLabel: string;
   readonly ffmpegArgv: string[];
@@ -245,19 +325,28 @@ class FfmpegInvokeError extends Error {
 
   constructor(init: {
     exitCode: number | null;
+    killSignal?: string | null;
     stderr: string;
     label: string;
     argv: string[];
     cwd?: string;
     summary: string;
   }) {
-    const oomHint =
-      init.exitCode == null && !/\b(killed|sigkill|enomem|error|failed)\b/i.test(init.summary)
-        ? ' (exit code missing: often OOM/SIGKILL on small hosts; try more RAM, PERSONAL_STITCH_PRESET=veryfast, or PERSONAL_STITCH_H264_PROFILE=0.)'
+    const sig =
+      init.killSignal && init.killSignal !== 'null' && init.killSignal !== 'undefined'
+        ? String(init.killSignal)
+        : null;
+    const sigPart = sig ? ` signal=${sig}` : '';
+    const sigIsKill = sig === 'SIGKILL';
+    const oomHint = sigIsKill
+      ? ' (SIGKILL: kernel or host killed FFmpeg — often OOM on small workers; enable PERSONAL_LOG_STITCH_NORMALIZE_SHOTS=1 or PERSONAL_DEBUG_STITCH_NORMALIZE_DEEP=1 for memory + stderr ring.)'
+      : init.exitCode == null && !/\b(killed|sigkill|enomem|error|failed)\b/i.test(init.summary)
+        ? ' (exit code missing: often OOM/SIGKILL on small hosts; try PERSONAL_STITCH_PRESET=veryfast or ultrafast, more RAM, or a lower output resolution. Normalize FFmpeg threads default to 1; set PERSONAL_STITCH_NORMALIZE_THREADS=auto only on larger machines.)'
         : '';
-    super(`[ffmpeg ${init.label}] exit ${init.exitCode ?? 'unknown'}: ${init.summary}${oomHint}`);
+    super(`[ffmpeg ${init.label}] exit ${init.exitCode ?? 'unknown'}${sigPart}: ${init.summary}${oomHint}`);
     this.name = 'FfmpegInvokeError';
     this.exitCode = init.exitCode;
+    this.killSignal = sig;
     this.ffmpegStderr = init.stderr;
     this.ffmpegLabel = init.label;
     this.ffmpegArgv = init.argv;
@@ -719,6 +808,33 @@ export async function stitchShots(args: StitchArgs): Promise<StitchResult> {
         `[stitcher:debug-ffmpeg] stitchShots normalize batch postId=${args.postId} nShots=${nShots} canvas=${width}x${height} aspect=${args.aspectRatio ?? '9:16'} colourGrade=${args.colourGrade ?? 'natural'} overlay=${args.keywordOverlayStyle ?? 'off'} kenBurnsOnStills=${args.kenBurnsOnStills !== false}`,
       );
       console.info(`[stitcher:debug-ffmpeg] workDir=${ffmpegCliFilesystemPath(workDir)} ffmpeg=${ffmpegBin}`);
+    }
+    if (stitchNormalizeShotDiagnostics()) {
+      console.info(
+        '[stitcher:normalize-batch]',
+        JSON.stringify({
+          postId: args.postId,
+          nShots,
+          canvas: { width, height },
+          aspectRatio: args.aspectRatio ?? '9:16',
+          encodeTier,
+          resolved: {
+            libx264Preset: stitchH264Preset(encodeTier),
+            libx264Crf: stitchH264Crf(encodeTier),
+            normalizeThreadArgv: normalizeFfmpegThreadArgs(),
+          },
+          env: {
+            NODE_ENV: process.env.NODE_ENV ?? null,
+            PERSONAL_STITCH_PRESET: process.env.PERSONAL_STITCH_PRESET ?? null,
+            PERSONAL_STITCH_CRF: process.env.PERSONAL_STITCH_CRF ?? null,
+            PERSONAL_STITCH_NORMALIZE_THREADS: process.env.PERSONAL_STITCH_NORMALIZE_THREADS ?? null,
+            PERSONAL_LOG_STITCH_NORMALIZE_SHOTS: process.env.PERSONAL_LOG_STITCH_NORMALIZE_SHOTS ?? null,
+            PERSONAL_DEBUG_STITCH_NORMALIZE_DEEP: process.env.PERSONAL_DEBUG_STITCH_NORMALIZE_DEEP ?? null,
+          },
+          platform: process.platform,
+          process: stitchProcessDiagnosticsSnapshot(),
+        }),
+      );
     }
     for (let i = 0; i < localShots.length; i++) {
       const s = localShots[i]!;
@@ -1785,7 +1901,17 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
     process.platform === 'win32' && a.kind === 'image' && !useKenBurnsOnImage;
   const winFilterComplexGraph = winStaticFilterComplex ? windowsStaticFilterComplexExpr(filters) : null;
 
+  const normalizeDiagDeep = stitchNormalizeDeepDiagnostics();
+  const normalizeDiagShots = stitchNormalizeShotDiagnostics();
+  const normalizeDiagnosticsLevel: 'deep' | 'shots' | undefined = normalizeDiagDeep
+    ? 'deep'
+    : normalizeDiagShots
+      ? 'shots'
+      : undefined;
+
+  const normalizeThreadArgs = normalizeFfmpegThreadArgs();
   const args: string[] = [];
+  args.push(...normalizeThreadArgs);
   // Still + no Ken Burns: loop image; duration is enforced with `-frames:v` (not `-t`) below.
   if (a.kind === 'image' && !useKenBurnsOnImage) {
     args.push('-loop', '1');
@@ -1900,8 +2026,64 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
     argv: [a.ffmpegBin, ...args],
     h264EncodeArgs: vEnc,
     winStaticFilterComplex,
-    omitH264HighProfile: process.platform === 'win32',
+    normalizeThreadArgs,
+    omitH264HighProfile: true,
+    normalizeDiagnostics: normalizeDiagnosticsLevel ?? null,
   };
+
+  const normWall0 = performance.now();
+  if (normalizeDiagShots) {
+    const tier = a.encodeTier;
+    let inputBytes: number | undefined;
+    try {
+      inputBytes = statSync(a.input).size;
+    } catch {
+      inputBytes = undefined;
+    }
+    console.info(
+      '[stitcher:normalize-shot-start]',
+      JSON.stringify({
+        segmentIndex: a.segmentIndex,
+        kind: a.kind,
+        durationSeconds: a.durationSeconds,
+        canvas: { w: a.width, h: a.height },
+        fps: a.fps,
+        kenBurns: useKenBurnsOnImage,
+        imageOutFrames: useKenBurnsOnImage ? imageOutFrames : undefined,
+        staticStillFrames: staticStillFrames > 0 ? staticStillFrames : undefined,
+        drawtextCount,
+        libx264Preset: stitchH264Preset(tier),
+        libx264Crf: stitchH264Crf(tier),
+        h264SegmentProfile: 'omitted',
+        normalizeThreadArgs,
+        inputBasename: path.basename(a.input),
+        inputBytes,
+        vfChars: vfJoined.length,
+        filterPass: winStaticFilterComplex ? 'filter_complex' : 'vf',
+        winWorkdirSpawn: useWinWorkdirSpawn,
+        platform: process.platform,
+        node: process.version,
+        process: stitchProcessDiagnosticsSnapshot(),
+      }),
+    );
+  }
+  if (normalizeDiagDeep) {
+    const fcf = filterComplexFull;
+    console.info(
+      '[stitcher:normalize-deep]',
+      JSON.stringify({
+        segmentIndex: a.segmentIndex,
+        cwd: useWinWorkdirSpawn ? workDirAbs : undefined,
+        processCwd: process.cwd(),
+        argvTokens: ffmpegArgvTokensForLog([a.ffmpegBin, ...args]),
+        argvTokenCount: args.length + 1,
+        vfJoinedPreview:
+          vfJoined.length > 2800 ? `${vfJoined.slice(0, 2800)}…(+${vfJoined.length - 2800} chars)` : vfJoined,
+        filterComplexPreview:
+          typeof fcf === 'string' && fcf.length > 2400 ? `${fcf.slice(0, 2400)}…(+${fcf.length - 2400} chars)` : fcf,
+      }),
+    );
+  }
 
   if (shouldDumpNormalizePre) {
     console.info(
@@ -1915,7 +2097,7 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
         {
           ...normalizePrePayload,
           vfJoinedFull: `${vfJoined.slice(0, 900)}${vfJoined.length > 900 ? `…(+${vfJoined.length - 900} chars)` : ''}`,
-          hint: 'Every shot: set PERSONAL_DEBUG_STITCH_NORMALIZE=1. FFmpeg stderr lines: PERSONAL_DEBUG_STITCH_FFMPEG=1.',
+          hint: 'Every shot: PERSONAL_DEBUG_STITCH_NORMALIZE=1 (pre-invoke JSON), PERSONAL_LOG_STITCH_NORMALIZE_SHOTS=1 (memory per shot), PERSONAL_DEBUG_STITCH_NORMALIZE_DEEP=1 (argv + stderr stream + ring). FFmpeg verbose: PERSONAL_DEBUG_STITCH_FFMPEG=1.',
         },
         null,
         0,
@@ -1985,6 +2167,7 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
     await runFfmpeg(a.ffmpegBin, args, `normalize:${path.basename(a.output)}`, {
       onStatsLine: a.onFfmpegStatsLine,
       cwd: useWinWorkdirSpawn ? workDirAbs : undefined,
+      normalizeDiagnostics: normalizeDiagnosticsLevel,
       debugContext: shouldDumpNormalizePre
         ? {
             phase: 'normalize',
@@ -1999,6 +2182,17 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
           }
         : undefined,
     });
+    if (normalizeDiagShots) {
+      console.info(
+        '[stitcher:normalize-shot-done]',
+        JSON.stringify({
+          segmentIndex: a.segmentIndex,
+          wallMs: Math.round(performance.now() - normWall0),
+          outputBasename: path.basename(a.output),
+          process: stitchProcessDiagnosticsSnapshot(),
+        }),
+      );
+    }
   } catch (err) {
     const ff = err instanceof FfmpegInvokeError ? err : null;
     const tail = vfJoined.length > 12_000 ? `${vfJoined.slice(0, 12_000)}…[truncated ${vfJoined.length - 12_000} chars]` : vfJoined;
@@ -2058,11 +2252,12 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
             durationSeconds: a.durationSeconds,
             winWorkdirSpawn: useWinWorkdirSpawn,
             winStaticFilterComplex,
-            omitH264HighProfile: process.platform === 'win32',
+            omitH264HighProfile: true,
             colourGrade: a.colourGrade,
             overlayStyle: a.overlayStyle,
             message: err instanceof Error ? err.message : String(err),
             ffmpegExitCode: ff?.exitCode ?? null,
+            ffmpegKillSignal: ff?.killSignal ?? null,
             ffmpegLabel: ff?.ffmpegLabel,
             ffmpegArgv: ff?.ffmpegArgv ?? [a.ffmpegBin, ...args],
             ffmpegCwd: ff?.ffmpegCwd ?? (useWinWorkdirSpawn ? workDirAbs : undefined),
@@ -2087,8 +2282,10 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
               pathLens: normalizePrePayload.pathLens,
               staticStillFrames: normalizePrePayload.staticStillFrames,
               imageOutFrames: normalizePrePayload.imageOutFrames,
+              normalizeDiagnostics: normalizePrePayload.normalizeDiagnostics,
             },
-            hint: 'PERSONAL_DEBUG_STITCH_NORMALIZE=1 logs every shot pre-invoke. PERSONAL_DEBUG_STITCH_FFMPEG=1 adds FFmpeg verbose stderr during the run. PERSONAL_LOG_DRAWTEXT_NORMALIZE=1 logs `[stitcher:drawtext-inline]` + legacy ov-*.txt dumps. PERSONAL_LOG_FFMPEG_VERSION=1 logs ffmpeg -version once per stitch.',
+            processAtFailure: stitchProcessDiagnosticsSnapshot(),
+            hint: 'PERSONAL_DEBUG_STITCH_NORMALIZE=1 logs every shot pre-invoke JSON. PERSONAL_LOG_STITCH_NORMALIZE_SHOTS=1 logs memory+preset each shot. PERSONAL_DEBUG_STITCH_NORMALIZE_DEEP=1 adds argv preview + streaming stderr + ring buffer. PERSONAL_DEBUG_STITCH_FFMPEG=1 = full FFmpeg verbose. PERSONAL_LOG_FFMPEG_VERSION=1 logs ffmpeg -version once per stitch.',
           },
           null,
           0,
@@ -2630,7 +2827,7 @@ function summarizeFfmpegStderr(stderr: string, maxLen = 1200): string {
   const strong = lines.filter(
     (l) =>
       !swScalerDeprec(l) &&
-      /\berror\b|\bfailed\b|\binvalid\b|\bconversion failed\b|\bimpossible\b|\bnot supported\b|Unknown encoder|unknown option|Protocol not found|No such file|Cannot allocate|\bKilled\b|SIGKILL|ENOMEM/i.test(
+      /\berror\b|\bfailed\b|\binvalid\b|\bconversion failed\b|\bimpossible\b|\bnot supported\b|Unknown encoder|unknown option|Protocol not found|No such file|Cannot allocate|out of memory|\bOOM\b|\bmalloc\b|\bKilled\b|SIGKILL|ENOMEM|Segmentation fault|signal 9/i.test(
         l,
       ),
   );
@@ -2667,6 +2864,8 @@ export interface RunFfmpegOpts {
   cwd?: string;
   /** Passed through on failure when normalize verbose flags are on (see `normalizeToSegment`). */
   debugContext?: Record<string, unknown>;
+  /** Normalize-only: ring-buffer last stderr lines + spawn/pid logs (`shots` = light, `deep` = streaming highlights). */
+  normalizeDiagnostics?: 'deep' | 'shots';
 }
 
 function runFfmpeg(
@@ -2682,6 +2881,14 @@ function runFfmpeg(
   const wantStatsPipe = statsToCaller || statsToConsole;
   const wantDebugTrace = stitchFfmpegDebugTrace();
   const logLevel = wantDebugTrace ? 'verbose' : wantStatsPipe ? 'info' : 'error';
+  const diag = opts?.normalizeDiagnostics;
+  const stderrRingMax = diag === 'deep' ? 220 : diag === 'shots' ? 100 : 0;
+  const stderrRing: string[] = [];
+  const pushStderrRing = (line: string) => {
+    if (stderrRingMax <= 0) return;
+    stderrRing.push(line);
+    while (stderrRing.length > stderrRingMax) stderrRing.shift();
+  };
 
   return new Promise<void>((resolve, reject) => {
     if (wantDebugTrace) {
@@ -2699,6 +2906,19 @@ function runFfmpeg(
       ...(opts?.cwd ? { cwd: opts.cwd } : {}),
       windowsHide: true,
     });
+    if (diag) {
+      console.info(
+        '[stitcher:ffmpeg-spawn]',
+        JSON.stringify({
+          label,
+          normalizeDiagnostics: diag,
+          pid: p.pid,
+          cwd: opts?.cwd ?? null,
+          argvLen: 3 + args.length,
+          logLevel,
+        }),
+      );
+    }
     let stderr = '';
     let settled = false;
     let lastStatsLine = '';
@@ -2748,21 +2968,27 @@ function runFfmpeg(
     p.stderr.on('data', (b) => {
       const chunk = b.toString();
       stderr += chunk;
-      if (wantDebugTrace) {
-        for (const raw of chunk.split('\n')) {
-          const t = raw.trim();
-          if (!t) continue;
+      for (const raw of chunk.split('\n')) {
+        const t = raw.trim();
+        if (!t) continue;
+        pushStderrRing(t);
+        if (diag === 'deep') {
+          if (
+            /frame=|fps=|speed=|bitrate=|time=|error|killed|impossible|cannot allocate|out of memory|\bOOM\b|memory|segmentation|libx264|Unknown|Invalid|deprecated encoder|Stream #|Duration:|Opening |^(Exit|Aborted)|Written|video:|muxing|filter /i.test(
+              t,
+            )
+          ) {
+            console.info(`[stitcher:ffmpeg-stderr-line] label=${label} ${t.slice(0, 2000)}`);
+          }
+        }
+        if (wantDebugTrace) {
           if (
             /\b(filter|error|invalid|failed|unknown|deprecated|libx264|drawtext|scale|crop|format)\b/i.test(t)
           ) {
             console.info(`[stitcher:debug-ffmpeg] stderr[${label}] ${t.slice(0, 2000)}`);
           }
         }
-      }
-      if (!wantStatsPipe) return;
-      for (const raw of chunk.split('\n')) {
-        const t = raw.trim();
-        if (t.includes('frame=') && (t.includes('time=') || t.includes('fps='))) {
+        if (wantStatsPipe && t.includes('frame=') && (t.includes('time=') || t.includes('fps='))) {
           lastStatsLine = t;
         }
       }
@@ -2782,7 +3008,7 @@ function runFfmpeg(
       reject(e);
     });
 
-    p.on('close', (code) => {
+    p.on('close', (code, signal) => {
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
@@ -2795,12 +3021,22 @@ function runFfmpeg(
             `[stitcher:debug-ffmpeg] ok label=${label} ms=${(performance.now() - wall0).toFixed(0)} stderr_bytes=${stderr.length}`,
           );
         }
+        if (diag === 'deep') {
+          console.info(
+            `[stitcher:ffmpeg-ok-deep] label=${label} ms=${(performance.now() - wall0).toFixed(0)} stderr_bytes=${stderr.length} ring_lines=${stderrRing.length}`,
+          );
+        }
         return resolve();
+      }
+      if (diag && stderrRing.length > 0) {
+        console.warn(
+          `[stitcher:ffmpeg-stderr-ring] label=${label} exit=${code ?? 'null'} signal=${signal ?? 'null'} lines=${stderrRing.length}\n${stderrRing.join('\n')}`,
+        );
       }
       if (wantDebugTrace) {
         const tail = stderr.length > 24_000 ? stderr.slice(-24_000) : stderr;
         console.error(
-          `[stitcher:debug-ffmpeg] FAIL label=${label} exit=${code ?? 'unknown'} ms=${(performance.now() - wall0).toFixed(0)}\n` +
+          `[stitcher:debug-ffmpeg] FAIL label=${label} exit=${code ?? 'unknown'} signal=${signal ?? 'null'} ms=${(performance.now() - wall0).toFixed(0)}\n` +
             `  argv_json=${JSON.stringify([bin, '-hide_banner', `-loglevel=${logLevel}`, ...args])}\n` +
             `  cwd=${opts?.cwd ?? '(process default)'}\n` +
             (opts?.debugContext
@@ -2822,6 +3058,7 @@ function runFfmpeg(
       reject(
         new FfmpegInvokeError({
           exitCode: typeof code === 'number' ? code : null,
+          killSignal: typeof signal === 'string' && signal ? signal : null,
           stderr,
           label,
           argv: [bin, '-hide_banner', '-loglevel', logLevel, ...args],

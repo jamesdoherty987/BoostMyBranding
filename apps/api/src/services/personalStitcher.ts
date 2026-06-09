@@ -85,7 +85,10 @@ function stitchH264Preset(encodeTier?: StitchEncodePreset): string {
   if (raw && H264_ALLOWED_PRESETS.has(raw)) return raw;
   switch (encodeTier) {
     case 'high':
-      return process.env.NODE_ENV === 'production' ? 'slow' : 'medium';
+      // `slow` spikes RAM (refs/b-frames) and routinely OOMs 512MB–1GB hosts on long director
+      // stitches (Ken Burns @ 1080×1920 × dozens of shots). `medium` matches typical dev
+      // defaults and stays stable in production; override with PERSONAL_STITCH_PRESET if needed.
+      return 'medium';
     case 'fast':
       return 'ultrafast';
     case 'balanced':
@@ -95,7 +98,7 @@ function stitchH264Preset(encodeTier?: StitchEncodePreset): string {
   }
 }
 
-/** Env `PERSONAL_STITCH_CRF` wins; else tier nudges CRF around NODE_ENV default. */
+/** Env `PERSONAL_STITCH_CRF` wins; else tier nudges CRF around a single default (same in prod as dev). */
 function stitchH264Crf(encodeTier?: StitchEncodePreset): string {
   const raw = process.env.PERSONAL_STITCH_CRF?.trim();
   if (raw) {
@@ -105,7 +108,7 @@ function stitchH264Crf(encodeTier?: StitchEncodePreset): string {
       if (r >= 18 && r <= 35) return String(r);
     }
   }
-  const base = process.env.NODE_ENV === 'production' ? 22 : 23;
+  const base = 23;
   switch (encodeTier) {
     case 'high':
       return String(Math.max(18, base - 2));
@@ -131,7 +134,7 @@ function stitchH264ProfileArgs(): string[] {
 function stitchH264VArgs(opts?: {
   tune?: 'stillimage';
   encodeTier?: StitchEncodePreset;
-  /** Windows: some FFmpeg/libx264 builds fail linking RGB stills when `-profile:v high` is set. */
+  /** Omit `-profile:v high` for this encode (intermediate segments default true — avoids fragile Linux/docker + MJPEG paths). */
   omitProfile?: boolean;
 }): string[] {
   const tier = opts?.encodeTier;
@@ -248,7 +251,11 @@ class FfmpegInvokeError extends Error {
     cwd?: string;
     summary: string;
   }) {
-    super(`[ffmpeg ${init.label}] exit ${init.exitCode ?? 'unknown'}: ${init.summary}`);
+    const oomHint =
+      init.exitCode == null && !/\b(killed|sigkill|enomem|error|failed)\b/i.test(init.summary)
+        ? ' (exit code missing: often OOM/SIGKILL on small hosts; try more RAM, PERSONAL_STITCH_PRESET=veryfast, or PERSONAL_STITCH_H264_PROFILE=0.)'
+        : '';
+    super(`[ffmpeg ${init.label}] exit ${init.exitCode ?? 'unknown'}: ${init.summary}${oomHint}`);
     this.name = 'FfmpegInvokeError';
     this.exitCode = init.exitCode;
     this.ffmpegStderr = init.stderr;
@@ -1796,7 +1803,9 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
   const vEnc = stitchH264VArgs({
     tune: useKenBurnsOnImage ? 'stillimage' : undefined,
     encodeTier: a.encodeTier,
-    omitProfile: process.platform === 'win32',
+    // Intermediate segment encodes: omit `-profile:v high` everywhere (not only Windows).
+    // Linux/Docker FFmpeg + mjpeg→yuv420p→libx264 has failed with profile high; matches stable Windows path.
+    omitProfile: true,
   });
   args.push(...vEnc);
   args.push('-an'); // strip audio — we mix separately
@@ -2621,7 +2630,7 @@ function summarizeFfmpegStderr(stderr: string, maxLen = 1200): string {
   const strong = lines.filter(
     (l) =>
       !swScalerDeprec(l) &&
-      /\berror\b|\bfailed\b|\binvalid\b|\bconversion failed\b|\bimpossible\b|\bnot supported\b|\blibx264\b|\bdrawtext\b|Unknown encoder|unknown option|Protocol not found|No such file|Cannot allocate/i.test(
+      /\berror\b|\bfailed\b|\binvalid\b|\bconversion failed\b|\bimpossible\b|\bnot supported\b|Unknown encoder|unknown option|Protocol not found|No such file|Cannot allocate|\bKilled\b|SIGKILL|ENOMEM/i.test(
         l,
       ),
   );

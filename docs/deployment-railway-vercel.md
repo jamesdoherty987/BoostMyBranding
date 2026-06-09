@@ -93,9 +93,18 @@ Next.js runs **`rewrites()` from `next.config.ts` at `next build` time**, not on
 
 The Production build **fails fast** with a clear error if `API_UPSTREAM` is missing when `VERCEL_ENV=production`.
 
-After changing env vars, **redeploy** Vercel so `next.config.ts` is re-evaluated at build.
+**Turborepo:** `turbo.json` lists `API_UPSTREAM`, `VERCEL_*`, and `NEXT_PUBLIC_*` on the **`build`** task so they are **not stripped** in Turbo’s default strict env mode (otherwise `next build` would not see them).
 
-**Build command:** Prefer installing from the **monorepo root** and running **`pnpm turbo run build --filter=web`** (or set Vercel **Root Directory** to `apps/web` and use **`pnpm build`**, with install still from root if your template requires it). If you use a custom chain like `pnpm --filter @boost/core build && …`, `@boost/ui` and `@boost/api-client` now define a **`build`** script (`tsc --noEmit`) so those steps do not fail with “Missing script: build”.
+### Vercel project settings (recommended)
+
+1. **Root Directory:** `apps/web` (not the monorepo root).
+2. **Framework Preset:** Next.js (auto-detected from `apps/web/vercel.json`).
+3. **Install / Build:** Leave the dashboard **Install Command** and **Build Command** **empty** so Vercel uses **`apps/web/vercel.json`**, which runs:
+   - Install: `cd ../.. && … && pnpm install --frozen-lockfile` (full workspace)
+   - Build: `cd ../.. && pnpm exec turbo run build --filter=web`
+4. If you previously set a custom command like `pnpm --filter @boost/core build && … && next build`, **delete it** — it runs from `apps/web` without the workspace root and breaks; the `vercel.json` commands replace it.
+
+After changing env vars, **redeploy** Vercel so `next.config.ts` is re-evaluated at build.
 
 ## 4. How URLs work in this repo
 

@@ -13,9 +13,9 @@ import type { NextConfig } from 'next';
  * separate deployments. Only the API lives elsewhere because it needs a
  * long-running Node process (cron, websockets, 30s+ generation jobs).
  *
- * Required env vars for production (Vercel):
- *   API_UPSTREAM — must be set **before** `next build` (rewrites are build-time).
- *   Omit in local dev: defaults to http://127.0.0.1:4000 for `/api/*` rewrites.
+ * Recommended for production (Vercel): **API_UPSTREAM** before `next build` so rewrites
+ * bake in your API origin. If it is missing, `next build` still succeeds but `/api/*`
+ * is not proxied until you set it and redeploy. Local dev defaults to http://127.0.0.1:4000.
  */
 
 /** Upstream Express API for Next rewrites (`/api/*` → API). In local dev, default to the API port so you do not need API_UPSTREAM in `.env`. */
@@ -23,13 +23,18 @@ const API =
   process.env.API_UPSTREAM?.trim() ||
   (process.env.NODE_ENV === 'development' ? 'http://127.0.0.1:4000' : '');
 
+let warnedMissingApiUpstream = false;
+
 // `rewrites()` is evaluated at **build time** (see Next.js discussions on build-time
-// rewrites). `API_UPSTREAM` must exist in the Vercel **Production** build environment
-// or `/api/*` will not be proxied. Changing the Railway URL requires a new Vercel build.
+// rewrites). Set `API_UPSTREAM` before deploy so `/api/*` proxies to Railway; without it,
+// the build still succeeds but `/api/*` is not rewritten until you set the var and rebuild.
 if (process.env.VERCEL_ENV === 'production' && !process.env.API_UPSTREAM?.trim()) {
-  throw new Error(
-    '[next.config] Missing API_UPSTREAM: add it to Vercel → Environment Variables (Production), e.g. https://your-api.up.railway.app (no trailing slash), then redeploy.',
-  );
+  if (!warnedMissingApiUpstream) {
+    warnedMissingApiUpstream = true;
+    console.warn(
+      '[next.config] Missing API_UPSTREAM: add it in Vercel → Environment Variables (Production), e.g. https://your-api.up.railway.app (no trailing slash), then redeploy so /api/* proxies to your API.',
+    );
+  }
 }
 
 const nextConfig: NextConfig = {

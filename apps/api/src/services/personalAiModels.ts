@@ -215,8 +215,8 @@ function geminiVeoModelId(): string {
   if (fromEnv) return fromEnv;
   return 'veo-3.1-generate-preview';
 }
-const hasRunway = () => Boolean(process.env.RUNWAY_API_KEY);
-const hasReplicate = () => Boolean(process.env.REPLICATE_API_TOKEN);
+const hasRunway = () => Boolean(env.RUNWAY_API_KEY?.trim());
+const hasReplicate = () => Boolean(env.REPLICATE_API_TOKEN?.trim());
 
 /* ═══════════════════════════════════════════════════════════════════ */
 /* Catalog                                                              */
@@ -1158,7 +1158,7 @@ async function generateRunwayVideo(
   const createRes = await fetch(endpoint, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${process.env.RUNWAY_API_KEY!}`,
+      Authorization: `Bearer ${env.RUNWAY_API_KEY!}`,
       'X-Runway-Version': '2024-11-06',
       'Content-Type': 'application/json',
     },
@@ -1184,7 +1184,7 @@ async function generateRunwayVideo(
       `https://api.dev.runwayml.com/v1/tasks/${id}`,
       {
         headers: {
-          Authorization: `Bearer ${process.env.RUNWAY_API_KEY!}`,
+          Authorization: `Bearer ${env.RUNWAY_API_KEY!}`,
           'X-Runway-Version': '2024-11-06',
         },
       },

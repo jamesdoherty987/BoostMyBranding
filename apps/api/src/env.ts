@@ -11,6 +11,23 @@ import { z } from 'zod';
 
 loadRepoRootEnv();
 
+/** Dotenv-style `KEY=` is an empty string — treat like unset so `.default()` and `.optional()` behave. */
+function blankToUndefined(val: unknown): unknown {
+  if (val === '' || val === null || val === undefined) return undefined;
+  if (typeof val === 'string' && !val.trim()) return undefined;
+  return val;
+}
+
+function preprocessBlank<S extends z.ZodTypeAny>(schema: S) {
+  return z.preprocess(blankToUndefined, schema);
+}
+
+/** Escape hatch: boot in NODE_ENV=production without DATABASE_URL / real AUTH_SECRET (sandboxes only). */
+function allowIncompleteProductionBoot(): boolean {
+  const v = String(process.env.ALLOW_INCOMPLETE_PRODUCTION ?? '').trim().toLowerCase();
+  return ['1', 'true', 'yes', 'on'].includes(v);
+}
+
 // Render and most PaaS hosts inject $PORT. Map it to API_PORT if not already set
 // so the schema picks it up transparently.
 if (!process.env.API_PORT && process.env.PORT) {
@@ -27,8 +44,8 @@ if (
 }
 
 const schema = z.object({
-  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
-  API_PORT: z.coerce.number().default(4000),
+  NODE_ENV: preprocessBlank(z.enum(['development', 'production', 'test']).default('development')),
+  API_PORT: preprocessBlank(z.coerce.number().int().min(1).max(65535).default(4000)),
   /**
    * Public origin of this API (e.g. https://api.example.com). Used for `/uploads/…`
    * when R2 is off so URLs hit the server that serves `express.static('/uploads')`.
@@ -36,13 +53,15 @@ const schema = z.object({
    */
   API_PUBLIC_URL: z.string().url().optional().or(z.literal('')),
 
-  APP_URL: z.string().url().default('http://localhost:3000'),
-  PORTAL_URL: z.string().url().default('http://localhost:3000/portal'),
-  DASHBOARD_URL: z.string().url().default('http://localhost:3000/dashboard'),
+  APP_URL: preprocessBlank(z.string().url().default('http://localhost:3000')),
+  PORTAL_URL: preprocessBlank(z.string().url().default('http://localhost:3000/portal')),
+  DASHBOARD_URL: preprocessBlank(z.string().url().default('http://localhost:3000/dashboard')),
 
-  AUTH_SECRET: z.string().min(16).default('dev-secret-change-me-0000000000000000'),
+  AUTH_SECRET: preprocessBlank(
+    z.string().min(16).default('dev-secret-change-me-0000000000000000'),
+  ),
 
-  DATABASE_URL: z.string().optional(),
+  DATABASE_URL: preprocessBlank(z.string().optional()),
 
   ANTHROPIC_API_KEY: z.string().optional(),
   FAL_KEY: z.string().optional(),
@@ -50,7 +69,7 @@ const schema = z.object({
    * Max concurrent fal.ai `subscribe` jobs for this process (1–10). Default 8.
    * fal often caps ~10; personal director + cron + inspiration can overlap.
    */
-  FAL_MAX_CONCURRENT: z.coerce.number().int().min(1).max(10).optional(),
+  FAL_MAX_CONCURRENT: preprocessBlank(z.coerce.number().int().min(1).max(10).optional()),
 
   R2_ACCOUNT_ID: z.string().optional(),
   R2_ACCESS_KEY_ID: z.string().optional(),
@@ -76,49 +95,55 @@ const schema = z.object({
   STRIPE_PRICE_FULL: z.string().optional(),
 
   RESEND_API_KEY: z.string().optional(),
-  FROM_EMAIL: z.string().default('contact@boostmybranding.com'),
+  FROM_EMAIL: preprocessBlank(z.string().default('contact@boostmybranding.com')),
 
   CONTENTSTUDIO_API_KEY: z.string().optional(),
   CONTENTSTUDIO_WORKSPACE_ID: z.string().optional(),
   /** Optional dashboard URL shown in Personal → Posting (OAuth happens in Content Studio, not this app). */
-  CONTENTSTUDIO_APP_URL: z.string().url().optional(),
+  CONTENTSTUDIO_APP_URL: z.string().url().optional().or(z.literal('')),
 
   /**
    * Claude model for the **personal channel title** JSON step only (short prompt).
    * Default in code is `haiku` when unset — smaller model, usually better at
    * sticking to example-title format than Sonnet/Opus on the main script pass.
    */
-  PERSONAL_TITLE_MODEL: z.enum(['haiku', 'sonnet', 'opus']).optional(),
+  PERSONAL_TITLE_MODEL: preprocessBlank(z.enum(['haiku', 'sonnet', 'opus']).optional()),
   /**
    * Sampling temperature for the personal channel title JSON call (0–1).
    * Default in code is ~0.78 — low values (e.g. 0.2–0.35) repeat the same headline
    * for the same topic; raise toward 1 for more variation.
    */
-  PERSONAL_TITLE_TEMPERATURE: z.coerce.number().min(0).max(1).optional(),
+  PERSONAL_TITLE_TEMPERATURE: preprocessBlank(z.coerce.number().min(0).max(1).optional()),
   /**
    * Claude model for **topic invention** in the isolated title test script only
    * (when you run `pnpm test:isolated-channel-title` with no CLI topic).
    * Default in script is `sonnet` when unset — broader ideas than Haiku.
    */
-  PERSONAL_TOPIC_INVENT_MODEL: z.enum(['haiku', 'sonnet', 'opus']).optional(),
+  PERSONAL_TOPIC_INVENT_MODEL: preprocessBlank(z.enum(['haiku', 'sonnet', 'opus']).optional()),
 
   /**
    * Hard cap for a single personal director **AI image** shot (fal / Gemini).
    * Prevents `sourcing_media` from hanging forever when upstream never resolves.
    * Default in code is 4 minutes when unset.
    */
-  PERSONAL_AI_IMAGE_TIMEOUT_MS: z.coerce.number().int().min(30_000).max(900_000).optional(),
+  PERSONAL_AI_IMAGE_TIMEOUT_MS: preprocessBlank(
+    z.coerce.number().int().min(30_000).max(900_000).optional(),
+  ),
   /**
    * Hard cap for a single personal director **AI video** clip (fal).
    * Default in code is 10 minutes when unset.
    */
-  PERSONAL_AI_VIDEO_TIMEOUT_MS: z.coerce.number().int().min(60_000).max(1_800_000).optional(),
+  PERSONAL_AI_VIDEO_TIMEOUT_MS: preprocessBlank(
+    z.coerce.number().int().min(60_000).max(1_800_000).optional(),
+  ),
   /**
    * Hard cap for a single R2 `uploadFile` (e.g. after Gemini / fal image gen).
    * Prevents sourcing from hanging indefinitely on a stuck S3-compatible PUT.
    * Default in code is 2 minutes when unset.
    */
-  PERSONAL_R2_UPLOAD_TIMEOUT_MS: z.coerce.number().int().min(10_000).max(900_000).optional(),
+  PERSONAL_R2_UPLOAD_TIMEOUT_MS: preprocessBlank(
+    z.coerce.number().int().min(10_000).max(900_000).optional(),
+  ),
 
   /**
    * Vercel API credentials for programmatic custom-domain management.
@@ -139,7 +164,11 @@ const schema = z.object({
   CANVA_CLIENT_ID: z.string().optional(),
   CANVA_CLIENT_SECRET: z.string().optional(),
   /** Where Canva sends users after authorising. Usually {API_URL}/api/v1/canva/callback. */
-  CANVA_REDIRECT_URI: z.string().url().optional(),
+  CANVA_REDIRECT_URI: z.string().url().optional().or(z.literal('')),
+
+  /** Optional — Runway / Replicate keys for personal director models that use those providers. */
+  RUNWAY_API_KEY: z.string().optional(),
+  REPLICATE_API_TOKEN: z.string().optional(),
 
   CRON_SECRET: z.string().optional(),
 });
@@ -171,9 +200,6 @@ if (env.NODE_ENV === 'production') {
   if (env.AUTH_SECRET.startsWith('dev-secret-change-me'))
     errors.push('AUTH_SECRET must be a real 32+ char random string in production.');
   if (!env.DATABASE_URL) errors.push('DATABASE_URL is required in production.');
-  if (!env.STRIPE_SECRET_KEY) errors.push('STRIPE_SECRET_KEY is required in production.');
-  if (!env.STRIPE_WEBHOOK_SECRET)
-    errors.push('STRIPE_WEBHOOK_SECRET is required in production (signing secret).');
   const r2CredIntent = Boolean(
     env.R2_ACCOUNT_ID?.trim() ||
       env.R2_ACCESS_KEY_ID?.trim() ||
@@ -187,12 +213,22 @@ if (env.NODE_ENV === 'production') {
     );
   }
   if (errors.length > 0) {
-    console.error('❌ Production environment is misconfigured:');
-    for (const e of errors) console.error(`   - ${e}`);
-    console.error(
-      '   (Process exits before listening on PORT — e.g. Railway /health will show service unavailable until these are set. See docs/deployment-railway-vercel.md §2.)',
-    );
-    process.exit(1);
+    if (allowIncompleteProductionBoot()) {
+      console.warn(
+        '⚠️  ALLOW_INCOMPLETE_PRODUCTION is enabled — API starts with an incomplete configuration (not for public-facing production):',
+      );
+      for (const e of errors) console.warn(`   - ${e}`);
+    } else {
+      console.error('❌ Production environment is misconfigured:');
+      for (const e of errors) console.error(`   - ${e}`);
+      console.error(
+        '   (Process exits before listening on PORT — e.g. Railway /health will show service unavailable until these are set. See docs/deployment-railway-vercel.md §2.)',
+      );
+      console.error(
+        '   Sandboxes only: set ALLOW_INCOMPLETE_PRODUCTION=true to boot without DATABASE_URL / a real AUTH_SECRET (unsafe for real users).',
+      );
+      process.exit(1);
+    }
   }
 }
 
@@ -224,7 +260,7 @@ if (r2Partial) {
 export const features = {
   db: Boolean(env.DATABASE_URL),
   claude: Boolean(env.ANTHROPIC_API_KEY),
-  fal: Boolean(env.FAL_KEY),
+  fal: Boolean(env.FAL_KEY?.trim()),
   /** R2 only when every required field is set and not force-disabled (VO/music/stitcher fetch URLs). */
   r2: r2EnvLooksComplete() && env.R2_DISABLED !== 'true',
   stripe: Boolean(env.STRIPE_SECRET_KEY),
@@ -235,9 +271,19 @@ export const features = {
   /** Public Content Studio web app (for “connect social” links in the dashboard). */
   contentStudioAppUrl: env.CONTENTSTUDIO_APP_URL?.trim() || null,
   vercel: Boolean(env.VERCEL_API_TOKEN && env.VERCEL_PROJECT_ID),
-  /** Canva Connect API is only useful when all three OAuth bits are set. */
-  canva: Boolean(env.CANVA_CLIENT_ID && env.CANVA_CLIENT_SECRET && env.CANVA_REDIRECT_URI),
+  /** Canva Connect API is only useful when all three OAuth bits are set (non-blank). */
+  canva: Boolean(
+    env.CANVA_CLIENT_ID?.trim() &&
+      env.CANVA_CLIENT_SECRET?.trim() &&
+      env.CANVA_REDIRECT_URI?.trim(),
+  ),
 };
+
+if (env.NODE_ENV === 'production' && !features.stripe) {
+  console.warn(
+    '[env] Stripe is not configured — checkout, billing portal, and POST /api/v1/webhooks/stripe are disabled.',
+  );
+}
 
 /**
  * Zero-dep .env loader that walks up from this file looking for a monorepo

@@ -6,7 +6,7 @@ This app splits **Next.js** (Vercel) and **Express** (long-running Node: Railway
 
 1. **Database** — Create Neon (or Postgres); copy `DATABASE_URL`.
 2. **Railway** — Connect GitHub, deploy this repo, **Networking → Generate domain**, copy `https://….up.railway.app`.
-3. **Railway env vars** — Add everything in §2 (at least `NODE_ENV`, `DATABASE_URL`, `AUTH_SECRET`, Stripe keys, `APP_URL` / `PORTAL_URL` / `DASHBOARD_URL` matching your **Vercel** URL, plus R2/AI keys as needed). Redeploy until the service is **green** and `GET /health` returns `ok`.
+3. **Railway env vars** — Add everything in §2 (at least `NODE_ENV`, `DATABASE_URL`, `AUTH_SECRET`, and `APP_URL` / `PORTAL_URL` / `DASHBOARD_URL` matching your **Vercel** URL; add Stripe keys only if you use billing, plus R2/AI keys as needed). Redeploy until the service is **green** and `GET /health` returns `ok`.
 4. **Migrations** — On your machine: `DATABASE_URL='…prod…' pnpm --filter @boost/database db:migrate`
 5. **Vercel** — Same repo (or existing web project). Set `API_UPSTREAM` = Railway URL and the `NEXT_PUBLIC_*` vars from §3. Redeploy.
 6. **Smoke test** — Open your Vercel site → sign in → **Personal**; Network tab should show `/api/…` on your Vercel host.
@@ -51,13 +51,15 @@ Set these in the **API** service (copy from local `.env`, never commit secrets).
 | `NODE_ENV` | `production` |
 | `DATABASE_URL` | Neon (or Postgres) connection string |
 | `AUTH_SECRET` | Random string **32+ chars** (not the dev default) |
-| `STRIPE_SECRET_KEY` | Required for API boot in production (use **test** keys for personal use) |
-| `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret for the endpoint you configure |
+| `STRIPE_SECRET_KEY` | **Optional** — omit if you do not use Stripe billing; when set, enables Checkout and the customer portal |
+| `STRIPE_WEBHOOK_SECRET` | **Optional** — required only when `STRIPE_SECRET_KEY` is set and you receive Stripe webhooks at `/api/v1/webhooks/stripe` |
+| `STRIPE_PRICE_SOCIAL` / `STRIPE_PRICE_WEBSITE` / `STRIPE_PRICE_FULL` | **Optional** — Stripe price IDs when Checkout is enabled |
 | `APP_URL` | **Exact** browser origin of the marketing/dashboard site, e.g. `https://your-app.vercel.app` |
 | `PORTAL_URL` | e.g. `https://your-app.vercel.app/portal` |
 | `DASHBOARD_URL` | e.g. `https://your-app.vercel.app/dashboard` |
 | `API_PUBLIC_URL` | **Optional on Railway** — defaults from `RAILWAY_PUBLIC_DOMAIN` if unset. Use your public API URL (`https://….up.railway.app` or custom domain). Needed for `/uploads/…` when R2 is off. |
 | R2 / AI / Resend / etc. | As in `.env.example` |
+| `ALLOW_INCOMPLETE_PRODUCTION` | **Sandboxes only** — set to `true` / `1` / `yes` / `on` so the API **boots** in `NODE_ENV=production` even without `DATABASE_URL` or a real `AUTH_SECRET` (unsafe for real users). Omit for normal production. |
 
 **CORS:** the API allowlist is built from `APP_URL`, `PORTAL_URL`, and `DASHBOARD_URL`. They must match what users type in the browser (scheme + host + port).
 
@@ -77,21 +79,20 @@ In the Vercel project → **Settings → Environment Variables** (Production):
 
 | Variable | Example / note |
 |----------|----------------|
-| `API_UPSTREAM` | `https://your-api.up.railway.app` — **no trailing slash** |
+| `API_UPSTREAM` | `https://your-api.up.railway.app` — **no trailing slash**. **Recommended** before Production deploy so `/api/*` rewrites are baked in; the **Vercel build succeeds without it**, but `/api/*` will not proxy until you set it and redeploy. |
 | `NEXT_PUBLIC_APP_URL` | `https://your-app.vercel.app` (or custom domain) |
 | `NEXT_PUBLIC_DASHBOARD_URL` | `https://your-app.vercel.app/dashboard` |
 | `NEXT_PUBLIC_PORTAL_URL` | `https://your-app.vercel.app/portal` |
 | `NEXT_PUBLIC_API_URL` | **Leave unset** for the recommended setup: browser calls same-origin `/api/…` and Next rewrites to Railway. Only set if you intentionally want the browser to call the API directly (must match CORS + cookies strategy). |
 
-### Build-time requirement for `API_UPSTREAM`
+### Build-time note for `API_UPSTREAM`
 
 Next.js runs **`rewrites()` from `next.config.ts` at `next build` time**, not on every request. That means:
 
-- **`API_UPSTREAM` must be set in Vercel before the Production build** (same value you use at runtime is fine).
+- **Set `API_UPSTREAM` on Vercel before (or soon after) your first real Production deploy** so `/api/*` is proxied to Railway.
+- The **Production build no longer fails** if `API_UPSTREAM` is missing; you get a **console warning** and **no `/api` rewrite** until you set the variable and redeploy.
 - If you **change the Railway public URL**, run a **new Vercel deployment** so the rewrite destination is rebuilt.
 - **Preview** deployments: set `API_UPSTREAM` on the **Preview** environment too if previews should call an API; otherwise they may have no `/api` proxy unless you point Preview at a staging API.
-
-The Production build **fails fast** with a clear error if `API_UPSTREAM` is missing when `VERCEL_ENV=production`.
 
 **Turborepo:** `turbo.json` lists `API_UPSTREAM`, `VERCEL_*`, and `NEXT_PUBLIC_*` on the **`build`** task so they are **not stripped** in Turbo’s default strict env mode (otherwise `next build` would not see them).
 
@@ -139,7 +140,7 @@ Add a custom domain on Railway, set `API_PUBLIC_URL` and Vercel `API_UPSTREAM` t
 
 **Cause:** The Node process **never binds to `PORT`** — almost always because it **exits during startup** before `app.listen` runs. Common reasons:
 
-1. **Production env validation** (`apps/api/src/env.ts`) — in `NODE_ENV=production` the API **refuses to start** unless **`DATABASE_URL`**, **`AUTH_SECRET`** (not the dev default), **`STRIPE_SECRET_KEY`**, and **`STRIPE_WEBHOOK_SECRET`** are set, and R2 is not half-configured. Fix: add the variables from **§2**, redeploy, and read **Deploy / Runtime logs** for the `❌ Production environment is misconfigured` lines.
+1. **Production env validation** (`apps/api/src/env.ts`) — in `NODE_ENV=production` the API **refuses to start** unless **`DATABASE_URL`**, **`AUTH_SECRET`** (not the dev default), and R2 are not half-configured. **Stripe keys are optional** if you are not using billing. **Sandboxes:** set **`ALLOW_INCOMPLETE_PRODUCTION=true`** to boot anyway (see §2 — not for public production). Fix: add the variables from **§2**, redeploy, and read **Deploy / Runtime logs** for the `❌ Production environment is misconfigured` lines.
 2. **Invalid Zod env** (malformed URL, etc.) — logs show `❌ Invalid environment` with field errors.
 3. **Wrong health path** — this API serves **`GET /health`** at the **root** (not under `/api/v1`). Railway’s default **`/health`** path matches the app.
 

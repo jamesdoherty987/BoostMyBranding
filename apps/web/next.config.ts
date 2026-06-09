@@ -13,31 +13,46 @@ import type { NextConfig } from 'next';
  * separate deployments. Only the API lives elsewhere because it needs a
  * long-running Node process (cron, websockets, 30s+ generation jobs).
  *
- * Recommended for Vercel: set **API_UPSTREAM** before `next build` so rewrites bake in your API origin.
- * If it is missing, `next build` still succeeds but `/api/*` is not proxied until you set it and redeploy.
- * A warning is logged on Vercel **Production** and **Preview** when `API_UPSTREAM` is absent. Local dev defaults to http://127.0.0.1:4000.
+ * **API_UPSTREAM** must be a full URL including the scheme, e.g. `https://your-api.up.railway.app`
+ * (not `your-api.up.railway.app` alone). Otherwise Next throws **Invalid rewrite** at build time.
  */
 
-/** Upstream Express API for Next rewrites (`/api/*` → API). In local dev, default to the API port so you do not need API_UPSTREAM in `.env`. */
-const API =
-  process.env.API_UPSTREAM?.trim() ||
-  (process.env.NODE_ENV === 'development' ? 'http://127.0.0.1:4000' : '');
+/** Next.js only allows rewrite destinations that start with `http://` or `https://`. */
+function isAbsoluteHttpUrl(s: string): boolean {
+  return /^https:\/\//i.test(s) || /^http:\/\//i.test(s);
+}
 
-let warnedMissingApiUpstream = false;
-
+const rawUpstream = process.env.API_UPSTREAM?.trim() ?? '';
 const vercelDeploy =
   process.env.VERCEL_ENV === 'production' || process.env.VERCEL_ENV === 'preview';
 
-// `rewrites()` is evaluated at **build time** (see Next.js discussions on build-time
-// rewrites). Set `API_UPSTREAM` before deploy so `/api/*` proxies to Railway; without it,
-// the build still succeeds but `/api/*` is not rewritten until you set the var and rebuild.
-if (vercelDeploy && !process.env.API_UPSTREAM?.trim()) {
-  if (!warnedMissingApiUpstream) {
-    warnedMissingApiUpstream = true;
-    console.warn(
-      `[next.config] Missing API_UPSTREAM (${process.env.VERCEL_ENV ?? 'unknown'}): add it in Vercel → Environment Variables for this environment, e.g. https://your-api.up.railway.app (no trailing slash), then redeploy so /api/* proxies to your API.`,
+let warnedApiUpstream = false;
+function warnApiUpstream(msg: string) {
+  if (warnedApiUpstream) return;
+  warnedApiUpstream = true;
+  console.warn(`[next.config] ${msg}`);
+}
+
+let API = '';
+if (rawUpstream && isAbsoluteHttpUrl(rawUpstream)) {
+  API = rawUpstream.replace(/\/+$/, '');
+} else if (rawUpstream && !isAbsoluteHttpUrl(rawUpstream)) {
+  if (vercelDeploy) {
+    warnApiUpstream(
+      `API_UPSTREAM must include the scheme (${process.env.VERCEL_ENV ?? 'unknown'}). Use e.g. https://your-api.up.railway.app — not "${rawUpstream.slice(0, 80)}${rawUpstream.length > 80 ? '…' : ''}". /api rewrites disabled until fixed.`,
     );
+  } else if (process.env.NODE_ENV === 'development') {
+    warnApiUpstream(
+      `API_UPSTREAM is set but is not an absolute http(s) URL — using http://127.0.0.1:4000 for rewrites in dev.`,
+    );
+    API = 'http://127.0.0.1:4000';
   }
+} else if (process.env.NODE_ENV === 'development') {
+  API = 'http://127.0.0.1:4000';
+} else if (vercelDeploy) {
+  warnApiUpstream(
+    `Missing API_UPSTREAM (${process.env.VERCEL_ENV ?? 'unknown'}): add https://your-api.up.railway.app in Vercel → Environment Variables, then redeploy so /api/* proxies to your API.`,
+  );
 }
 
 const nextConfig: NextConfig = {

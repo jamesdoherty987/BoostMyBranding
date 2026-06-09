@@ -79,7 +79,7 @@ In the Vercel project → **Settings → Environment Variables** (Production):
 
 | Variable | Example / note |
 |----------|----------------|
-| `API_UPSTREAM` | `https://your-api.up.railway.app` — **no trailing slash**. **Recommended** before Production deploy so `/api/*` rewrites are baked in; the **Vercel build succeeds without it**, but `/api/*` will not proxy until you set it and redeploy. |
+| `API_UPSTREAM` | `https://your-api.up.railway.app` — **must include `https://`** (Next.js rejects scheme-less hostnames at build time). **No trailing slash**. **Recommended** before Production deploy so `/api/*` rewrites are baked in; the **Vercel build succeeds without it** (or with a bad value: rewrites are skipped and you get a build log warning), but `/api/*` will not proxy until you set a valid URL and redeploy. |
 | `NEXT_PUBLIC_APP_URL` | `https://your-app.vercel.app` (or custom domain) |
 | `NEXT_PUBLIC_DASHBOARD_URL` | `https://your-app.vercel.app/dashboard` |
 | `NEXT_PUBLIC_PORTAL_URL` | `https://your-app.vercel.app/portal` |
@@ -90,7 +90,7 @@ In the Vercel project → **Settings → Environment Variables** (Production):
 Next.js runs **`rewrites()` from `next.config.ts` at `next build` time**, not on every request. That means:
 
 - **Set `API_UPSTREAM` on Vercel before (or soon after) your first real Production deploy** so `/api/*` is proxied to Railway.
-- The **Vercel build does not fail** if `API_UPSTREAM` is missing on **Production** or **Preview**; you get a **console warning** once per process and **no `/api` rewrite** until you set the variable and redeploy.
+- The **Vercel build does not fail** if `API_UPSTREAM` is missing on **Production** or **Preview**, or if it is set **without** `https://` / `http://` (e.g. `api.example.com` only); you get a **console warning** once per process and **no `/api` rewrite** until you set a full URL and redeploy.
 - If you **change the Railway public URL**, run a **new Vercel deployment** so the rewrite destination is rebuilt.
 - **Preview** deployments: set `API_UPSTREAM` on the **Preview** environment too if previews should call an API; otherwise they may have no `/api` proxy unless you point Preview at a staging API.
 

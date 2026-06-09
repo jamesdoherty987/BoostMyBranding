@@ -23,8 +23,9 @@
  * and encoded at full canvas resolution (30fps). Long storyboards mean
  * many sequential FFmpeg passes — the dominant cost is CPU, not I/O.
  * Tune `PERSONAL_STITCH_PRESET` / `PERSONAL_STITCH_CRF` in `.env` for
- * speed vs quality. `PERSONAL_STITCH_NORMALIZE_THREADS` caps FFmpeg threads on
- * each normalize pass (default 1) to avoid OOM on small workers with Ken Burns + libx264.
+ * speed vs quality. Per-shot **normalize** uses a lighter default x264 preset than title/xfade
+ * (`PERSONAL_STITCH_NORMALIZE_PRESET` / see `stitchH264PresetNormalize`) so small workers survive
+ * Ken Burns + libx264. `PERSONAL_STITCH_NORMALIZE_THREADS` caps FFmpeg threads (default 1).
  *
  * Frozen last-frame + VO continues: usually **audio longer than real video**
  * after concat (bad container `Duration`). `mixAudio` caps `apad` to the
@@ -88,14 +89,37 @@ function stitchH264Preset(encodeTier?: StitchEncodePreset): string {
   if (raw && H264_ALLOWED_PRESETS.has(raw)) return raw;
   switch (encodeTier) {
     case 'high':
-      // `slow` spikes RAM (refs/b-frames) and routinely OOMs 512MB–1GB hosts on long director
-      // stitches (Ken Burns @ 1080×1920 × dozens of shots). `medium` matches typical dev
-      // defaults and stays stable in production; override with PERSONAL_STITCH_PRESET if needed.
+      // Title cards / rare re-encode paths only — not per-shot normalize (see `stitchH264PresetNormalize`).
+      // `medium` is a good quality default when RAM is not the bottleneck.
       return 'medium';
     case 'fast':
       return 'ultrafast';
     case 'balanced':
       return 'faster';
+    default:
+      return 'veryfast';
+  }
+}
+
+/**
+ * x264 preset for **per-shot normalize** only (Ken Burns / trim / scale). Concat is `-c copy`, so this
+ * pass sets delivered quality; we still bias toward presets that survive 512MiB–1GiB workers.
+ *
+ * Precedence: `PERSONAL_STITCH_NORMALIZE_PRESET` → `PERSONAL_STITCH_PRESET` → tier defaults below.
+ */
+function stitchH264PresetNormalize(encodeTier?: StitchEncodePreset): string {
+  const n = process.env.PERSONAL_STITCH_NORMALIZE_PRESET?.trim().toLowerCase();
+  if (n && H264_ALLOWED_PRESETS.has(n)) return n;
+  const global = process.env.PERSONAL_STITCH_PRESET?.trim().toLowerCase();
+  if (global && H264_ALLOWED_PRESETS.has(global)) return global;
+  switch (encodeTier) {
+    case 'high':
+      // `medium` still SIGKILL/OOMs many small containers on zoompan @ 1080p+; `veryfast` is the safe default.
+      return 'veryfast';
+    case 'balanced':
+      return 'veryfast';
+    case 'fast':
+      return 'ultrafast';
     default:
       return 'veryfast';
   }
@@ -139,8 +163,12 @@ function stitchH264VArgs(opts?: {
   encodeTier?: StitchEncodePreset;
   /** Omit `-profile:v high` for this encode (intermediate segments default true — avoids fragile Linux/docker + MJPEG paths). */
   omitProfile?: boolean;
+  /** Per-shot normalize uses {@link stitchH264PresetNormalize}; other encodes use {@link stitchH264Preset}. */
+  encodePass?: 'normalize';
 }): string[] {
   const tier = opts?.encodeTier;
+  const preset =
+    opts?.encodePass === 'normalize' ? stitchH264PresetNormalize(tier) : stitchH264Preset(tier);
   return [
     '-c:v',
     'libx264',
@@ -149,7 +177,7 @@ function stitchH264VArgs(opts?: {
     'yuv420p',
     ...(opts?.omitProfile ? [] : stitchH264ProfileArgs()),
     '-preset',
-    stitchH264Preset(tier),
+    preset,
     '-crf',
     stitchH264Crf(tier),
   ];
@@ -819,13 +847,15 @@ export async function stitchShots(args: StitchArgs): Promise<StitchResult> {
           aspectRatio: args.aspectRatio ?? '9:16',
           encodeTier,
           resolved: {
-            libx264Preset: stitchH264Preset(encodeTier),
+            libx264PresetNormalize: stitchH264PresetNormalize(encodeTier),
+            libx264PresetTitleMux: stitchH264Preset(encodeTier),
             libx264Crf: stitchH264Crf(encodeTier),
             normalizeThreadArgv: normalizeFfmpegThreadArgs(),
           },
           env: {
             NODE_ENV: process.env.NODE_ENV ?? null,
             PERSONAL_STITCH_PRESET: process.env.PERSONAL_STITCH_PRESET ?? null,
+            PERSONAL_STITCH_NORMALIZE_PRESET: process.env.PERSONAL_STITCH_NORMALIZE_PRESET ?? null,
             PERSONAL_STITCH_CRF: process.env.PERSONAL_STITCH_CRF ?? null,
             PERSONAL_STITCH_NORMALIZE_THREADS: process.env.PERSONAL_STITCH_NORMALIZE_THREADS ?? null,
             PERSONAL_LOG_STITCH_NORMALIZE_SHOTS: process.env.PERSONAL_LOG_STITCH_NORMALIZE_SHOTS ?? null,
@@ -1703,7 +1733,8 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
       // differ slightly; a sliver crop beats black bars under Ken Burns zoom.
       filters.push(
         'select=eq(n\\,0),setpts=PTS-STARTPTS',
-        `scale=${a.width}:${a.height}:force_original_aspect_ratio=increase:flags=lanczos,` +
+        // bilinear: less CPU/RAM than lanczos on zoompan long runs; static still path uses the same.
+        `scale=${a.width}:${a.height}:force_original_aspect_ratio=increase:flags=bilinear,` +
           `crop=${a.width}:${a.height},` +
           `zoompan=z='min(zoom+${zoomStep},1.10)':x=${xExpr}:y=${yExpr}:` +
           `d=${imageOutFrames}:s=${a.width}x${a.height}:fps=${a.fps},` +
@@ -1932,6 +1963,7 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
     // Intermediate segment encodes: omit `-profile:v high` everywhere (not only Windows).
     // Linux/Docker FFmpeg + mjpeg→yuv420p→libx264 has failed with profile high; matches stable Windows path.
     omitProfile: true,
+    encodePass: 'normalize',
   });
   args.push(...vEnc);
   args.push('-an'); // strip audio — we mix separately
@@ -2052,7 +2084,8 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
         imageOutFrames: useKenBurnsOnImage ? imageOutFrames : undefined,
         staticStillFrames: staticStillFrames > 0 ? staticStillFrames : undefined,
         drawtextCount,
-        libx264Preset: stitchH264Preset(tier),
+        libx264PresetNormalize: stitchH264PresetNormalize(tier),
+        libx264PresetTitleMux: stitchH264Preset(tier),
         libx264Crf: stitchH264Crf(tier),
         h264SegmentProfile: 'omitted',
         normalizeThreadArgs,

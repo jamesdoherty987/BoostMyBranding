@@ -1408,8 +1408,9 @@ export interface PersonalGeneratorConfig {
   longformIntroSeconds?: number;
 
   /**
-   * FFmpeg encode quality when `PERSONAL_STITCH_PRESET` / `PERSONAL_STITCH_CRF`
-   * are unset: `fast` = drafts, `balanced` = default, `high` = cleaner masters (more CPU).
+   * FFmpeg quality tier when server env presets are unset: CRF nudge + title-card x264 preset.
+   * Per-shot normalize uses a separate lighter default preset on the API (`stitchH264PresetNormalize`) unless
+   * `PERSONAL_STITCH_PRESET` / `PERSONAL_STITCH_NORMALIZE_PRESET` override — see personalStitcher.
    */
   stitchEncodePreset?: 'fast' | 'balanced' | 'high';
 }

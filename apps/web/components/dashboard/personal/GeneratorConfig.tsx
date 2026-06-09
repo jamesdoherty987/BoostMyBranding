@@ -1316,7 +1316,7 @@ export function GeneratorConfigPanel({
               </Field>
               <Field
                 label="Final encode quality (FFmpeg)"
-                hint="Used when the server has not set PERSONAL_STITCH_PRESET. High = cleaner, more CPU time."
+                hint="Dashboard tier sets CRF and title-card preset. Per-shot normalize uses a lighter default x264 preset on the server unless PERSONAL_STITCH_PRESET / PERSONAL_STITCH_NORMALIZE_PRESET override it (small RAM workers)."
               >
                 <select
                   value={gen.stitchEncodePreset ?? 'balanced'}

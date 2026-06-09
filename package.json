@@ -19,7 +19,8 @@
     "db:seed": "pnpm --filter @boost/database db:seed",
     "db:studio": "pnpm --filter @boost/database db:studio",
     "test:isolated-channel-title": "pnpm --filter api test:isolated-channel-title",
-    "print:personal-title-test-env": "pnpm --filter api print:personal-title-test-env"
+    "print:personal-title-test-env": "pnpm --filter api print:personal-title-test-env",
+    "vercel:build-web": "node apps/web/scripts/clear-core-incremental.mjs && pnpm --filter @boost/core run build && pnpm --filter @boost/api-client run build && pnpm --filter @boost/ui run build && pnpm --filter web run build"
   },
   "devDependencies": {
     "prettier": "^3.3.3",

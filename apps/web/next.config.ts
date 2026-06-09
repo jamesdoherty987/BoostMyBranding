@@ -42,6 +42,10 @@ if (vercelDeploy && !process.env.API_UPSTREAM?.trim()) {
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  /** No flat ESLint config here; `lint` uses `tsc`. Next 15 + ESLint 9 can fail the default build lint step on Vercel without this. */
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
   transpilePackages: ['@boost/ui', '@boost/core', '@boost/api-client'],
   images: {
     remotePatterns: [

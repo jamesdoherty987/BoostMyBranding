@@ -99,9 +99,9 @@ The Production build **fails fast** with a clear error if `API_UPSTREAM` is miss
 
 1. **Root Directory:** `apps/web` (not the monorepo root).
 2. **Framework Preset:** Next.js (auto-detected from `apps/web/vercel.json`).
-3. **Install / Build:** Leave the dashboard **Install Command** and **Build Command** **empty** so Vercel uses **`apps/web/vercel.json`**, which runs:
-   - Install: `cd ../.. && … && pnpm install --frozen-lockfile` (full workspace)
-   - Build: `cd ../.. && pnpm exec turbo run build --filter=web`
+3. **Install / Build:** Leave the dashboard **Install Command** and **Build Command** **empty** so Vercel uses **`apps/web/vercel.json`**, which runs from **`apps/web`** (pnpm discovers the monorepo root automatically):
+   - Install: `corepack enable && corepack prepare pnpm@9.12.0 --activate && pnpm install --frozen-lockfile`
+   - Build: `pnpm exec turbo run build --filter=web`
 4. If you previously set a custom command like `pnpm --filter @boost/core build && … && next build`, **delete it** — it runs from `apps/web` without the workspace root and breaks; the `vercel.json` commands replace it.
 
 After changing env vars, **redeploy** Vercel so `next.config.ts` is re-evaluated at build.
@@ -132,3 +132,15 @@ Add a custom domain on Railway, set `API_PUBLIC_URL` and Vercel `API_UPSTREAM` t
 - **Dockerfile (this repo):** Uses `NODE_ENV=development` for install + build, then sets `production` for runtime. Pull the latest `Dockerfile` and redeploy.
 - **Railpack / custom install:** Run install with dev deps, e.g. prefix install with `NODE_ENV=development` if the platform forces production.
 - **Always:** Prefer `pnpm exec turbo run build --filter=api` over `pnpm turbo …` so pnpm resolves the local binary explicitly once it is installed.
+
+## 8. Troubleshooting: healthcheck fails on `/health` (“service unavailable”, replica never healthy)
+
+**Symptom:** Docker build succeeds, deploy runs, then Railway (or similar) retries **`GET /health`** and eventually reports **replica never became healthy**.
+
+**Cause:** The Node process **never binds to `PORT`** — almost always because it **exits during startup** before `app.listen` runs. Common reasons:
+
+1. **Production env validation** (`apps/api/src/env.ts`) — in `NODE_ENV=production` the API **refuses to start** unless **`DATABASE_URL`**, **`AUTH_SECRET`** (not the dev default), **`STRIPE_SECRET_KEY`**, and **`STRIPE_WEBHOOK_SECRET`** are set, and R2 is not half-configured. Fix: add the variables from **§2**, redeploy, and read **Deploy / Runtime logs** for the `❌ Production environment is misconfigured` lines.
+2. **Invalid Zod env** (malformed URL, etc.) — logs show `❌ Invalid environment` with field errors.
+3. **Wrong health path** — this API serves **`GET /health`** at the **root** (not under `/api/v1`). Railway’s default **`/health`** path matches the app.
+
+After fixing env, redeploy and confirm logs show **`🚀 BoostMyBranding API → …`** before assuming networking issues.

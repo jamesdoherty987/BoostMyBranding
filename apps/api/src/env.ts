@@ -147,6 +147,9 @@ const schema = z.object({
 const parsed = schema.safeParse(process.env);
 if (!parsed.success) {
   console.error('❌ Invalid environment', parsed.error.flatten().fieldErrors);
+  console.error(
+    '   (Fix env var shapes/URLs above — the API exits before listening on PORT, so platform healthchecks will fail.)',
+  );
   process.exit(1);
 }
 
@@ -186,6 +189,9 @@ if (env.NODE_ENV === 'production') {
   if (errors.length > 0) {
     console.error('❌ Production environment is misconfigured:');
     for (const e of errors) console.error(`   - ${e}`);
+    console.error(
+      '   (Process exits before listening on PORT — e.g. Railway /health will show service unavailable until these are set. See docs/deployment-railway-vercel.md §2.)',
+    );
     process.exit(1);
   }
 }

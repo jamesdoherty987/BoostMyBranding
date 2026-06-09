@@ -6,7 +6,7 @@
  * Reachable from the dashboard sidebar ("Personal") or ⌘K → "Personal channels" (g then p).
  */
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import useSWR from 'swr';
 import { motion } from 'framer-motion';
 import {
@@ -1833,27 +1833,35 @@ function PostsGrid({
   return (
     <Card>
       <CardContent className="p-6">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-sm font-bold uppercase tracking-wide text-slate-600">
-            Recent posts ({list.length})
-          </h3>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="gap-1.5 border-rose-200 text-rose-700 hover:bg-rose-50"
-            disabled={clearingFailed}
-            onClick={() => void clearAllFailed()}
-            title="Deletes every post in failed status for this channel (not only the ones visible here)"
-          >
-            {clearingFailed ? <Spinner className="h-3.5 w-3.5" /> : <Trash2 className="h-3.5 w-3.5" />}
-            Delete all failed
-            {failedInView.length > 0 ? (
-              <span className="ml-0.5 rounded-full bg-rose-100 px-1.5 py-0 text-[10px] font-bold tabular-nums text-rose-800">
-                {failedInView.length}
-              </span>
-            ) : null}
-          </Button>
+        <div className="mb-4 flex flex-col gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-sm font-bold uppercase tracking-wide text-slate-600">
+              Recent posts ({list.length})
+            </h3>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-1.5 border-rose-200 text-rose-700 hover:bg-rose-50"
+              disabled={clearingFailed}
+              onClick={() => void clearAllFailed()}
+              title="Deletes every post in failed status for this channel (not only the ones visible here)"
+            >
+              {clearingFailed ? <Spinner className="h-3.5 w-3.5" /> : <Trash2 className="h-3.5 w-3.5" />}
+              Delete all failed
+              {failedInView.length > 0 ? (
+                <span className="ml-0.5 rounded-full bg-rose-100 px-1.5 py-0 text-[10px] font-bold tabular-nums text-rose-800">
+                  {failedInView.length}
+                </span>
+              ) : null}
+            </Button>
+          </div>
+          <p className="text-xs leading-snug text-slate-500">
+            Each finished post has{' '}
+            <span className="font-semibold text-slate-600">Add video to Camera Roll</span> and{' '}
+            <span className="font-semibold text-slate-600">Add thumbnail to Camera Roll</span> (when a thumbnail
+            exists). On iPhone, the share sheet opens after a second tap once the file is ready.
+          </p>
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {list.map((p) => (
@@ -1948,7 +1956,9 @@ async function sharePostVideoForCameraRoll(
 ): Promise<{ outcome: 'done' } | { outcome: 'secondTap'; prepared: PreparedMediaShare }> {
   const nav = typeof navigator !== 'undefined' ? navigator : undefined;
   if (!nav?.share) {
-    throw new Error('Your browser does not support sharing — use Download instead.');
+    throw new Error(
+      'Sharing is not available in this browser. On your phone expand "Need the file?" for MP4/JPEG, or use Download on a wider screen.',
+    );
   }
 
   const prepared = await preparePostVideoForShare(post);
@@ -2044,7 +2054,9 @@ async function sharePostThumbnailForCameraRoll(
 ): Promise<{ outcome: 'done' } | { outcome: 'secondTap'; prepared: PreparedMediaShare }> {
   const nav = typeof navigator !== 'undefined' ? navigator : undefined;
   if (!nav?.share) {
-    throw new Error('Your browser does not support sharing — use Download JPEG instead.');
+    throw new Error(
+      'Sharing is not available in this browser. On your phone expand "Need the file?" for MP4/JPEG, or use Download on a wider screen.',
+    );
   }
 
   const prepared = await preparePostThumbnailForShare(post);
@@ -2086,139 +2098,145 @@ async function sharePostThumbnailForCameraRoll(
   return { outcome: 'secondTap', prepared };
 }
 
-/** Second-step share: must run from a fresh tap (iOS WebKit user-gesture requirement). */
-function ShareToPhotosGestureDialog({
-  gesture,
-  onClose,
-}: {
-  gesture: SharePhotosGesture | null;
-  onClose: () => void;
-}) {
-  const open = gesture != null;
-  const variant = gesture?.variant ?? 'video';
-  const prepared = gesture?.prepared ?? null;
-  const toastLabel = variant === 'thumbnail' ? 'Save thumbnail' : 'Save to Photos';
-  const dialogTitle = variant === 'thumbnail' ? 'Save thumbnail to Photos' : 'Save to Photos';
-  const dialogDescription =
-    variant === 'thumbnail'
-      ? 'Your phone only allows the share sheet right after you tap a button. Tap below, then choose Save Image or Add to Photos. Use this JPEG as a YouTube custom thumbnail or cover image.'
-      : 'Your phone only allows the share sheet right after you tap a button. Tap below, then choose Save Video or Save to Photos.';
-  return (
-    <Dialog
-      open={open}
-      onClose={onClose}
-      title={dialogTitle}
-      description={dialogDescription}
-      footer={
-        <div className="flex flex-wrap justify-end gap-2">
-          <Button type="button" variant="ghost" size="sm" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button
-            type="button"
-            variant="primary"
-            size="sm"
-            disabled={!prepared}
-            onClick={() => {
-              if (!prepared) return;
-              const nav = navigator;
-              if (!nav.share) {
-                toast.error(toastLabel, 'Sharing is not supported in this browser.');
-                return;
-              }
-              const { file, title, shareUrl } = prepared;
+/** `navigator.share({ files })` must run in a direct tap after `fetch` (iOS WebKit). */
+async function sharePreparedToCameraRoll(
+  variant: 'video' | 'thumbnail',
+  prepared: PreparedMediaShare,
+  onDismiss: () => void,
+): Promise<void> {
+  const nav = navigator;
+  if (!nav.share) {
+    toast.error(
+      variant === 'thumbnail' ? 'Thumbnail' : 'Video',
+      'Sharing is not available. Expand "Need the file?" on your phone, or use Download on a wider screen.',
+    );
+    return;
+  }
+  const { file, title, shareUrl } = prepared;
+  const toastLabel = variant === 'thumbnail' ? 'Thumbnail' : 'Video';
 
-              const finishFileShare = () => {
-                onClose();
-                toast.success(
-                  'Done',
-                  variant === 'thumbnail'
-                    ? 'Pick Save Image or Add to Photos if the share sheet opened.'
-                    : 'Pick Save Video or Save to Photos if the share sheet opened.',
-                );
-              };
-
-              const tryShareUrl = (fileShareErr?: unknown) => {
-                const detail =
-                  fileShareErr instanceof Error
-                    ? fileShareErr.message
-                    : fileShareErr != null
-                      ? String(fileShareErr)
-                      : '';
-                if (!nav.canShare?.({ url: shareUrl })) {
-                  toast.error(
-                    toastLabel,
-                    `${variant === 'thumbnail' ? 'Could not share the image.' : 'Could not share the video.'}${detail ? ` ${detail}` : ''} Use ${variant === 'thumbnail' ? 'Download JPEG' : 'Download'}, or open this page in Safari (not an in-app browser).`,
-                  );
-                  return;
-                }
-                void nav
-                  .share({
-                    title,
-                    text:
-                      variant === 'thumbnail'
-                        ? 'Open this link in Safari (stay signed in), then long-press the image → Save to Photos.'
-                        : 'Open this link in Safari (stay signed in), then use Share → Save Video.',
-                    url: shareUrl,
-                  })
-                  .then(() => {
-                    onClose();
-                    toast.success(
-                      'Link shared',
-                      'Open it in Safari while signed in, then save the file from the browser.',
-                    );
-                  })
-                  .catch((e2: unknown) => {
-                    const n2 = (e2 as { name?: string })?.name;
-                    if (n2 === 'AbortError') {
-                      onClose();
-                      return;
-                    }
-                    toast.error(toastLabel, e2 instanceof Error ? e2.message : String(e2));
-                  });
-              };
-
-              // iOS: `canShare({ files })` is often wrong — still try file share first from this tap.
-              void nav
-                .share({ files: [file], title })
-                .then(finishFileShare)
-                .catch((e: unknown) => {
-                  const name = (e as { name?: string })?.name;
-                  if (name === 'AbortError') {
-                    onClose();
-                    return;
-                  }
-                  tryShareUrl(e);
-                });
-            }}
-          >
-            Open share sheet
-          </Button>
-        </div>
+  const tryShareUrl = async (fileShareErr?: unknown): Promise<void> => {
+    const detail =
+      fileShareErr instanceof Error
+        ? fileShareErr.message
+        : fileShareErr != null
+          ? String(fileShareErr)
+          : '';
+    if (!nav.canShare?.({ url: shareUrl })) {
+      toast.error(
+        toastLabel,
+        `${variant === 'thumbnail' ? 'Could not share the image.' : 'Could not share the video.'}${detail ? ` ${detail}` : ''} Open in Safari (not an in-app browser). On a phone, expand "Need the file?" below for MP4 / JPEG, or use a wider window.`,
+      );
+      return;
+    }
+    try {
+      await nav.share({
+        title,
+        text:
+          variant === 'thumbnail'
+            ? 'Open in Safari while signed in, then save the image to Photos.'
+            : 'Open in Safari while signed in, then save the video to Photos.',
+        url: shareUrl,
+      });
+      queueMicrotask(() => onDismiss());
+    } catch (e2: unknown) {
+      const n2 = (e2 as { name?: string })?.name;
+      if (n2 === 'AbortError') {
+        queueMicrotask(() => onDismiss());
+        return;
       }
+      toast.error(toastLabel, e2 instanceof Error ? e2.message : String(e2));
+    }
+  };
+
+  try {
+    await nav.share({ files: [file], title });
+    /** Defer so callers can clear UI state (e.g. `setShareBusy`) before this unmounts the prompt. */
+    queueMicrotask(() => onDismiss());
+  } catch (e: unknown) {
+    const name = (e as { name?: string })?.name;
+    if (name === 'AbortError') {
+      queueMicrotask(() => onDismiss());
+      return;
+    }
+    await tryShareUrl(e);
+  }
+}
+
+function ShareToPhotosInlinePrompt({
+  variant,
+  prepared,
+  onDismiss,
+}: {
+  variant: 'video' | 'thumbnail';
+  prepared: PreparedMediaShare;
+  onDismiss: () => void;
+}) {
+  const [shareBusy, setShareBusy] = useState(false);
+  const bannerRef = useRef<HTMLDivElement>(null);
+  const hint =
+    variant === 'thumbnail'
+      ? 'Ready. Tap Share, then Save Image or Add to Camera Roll.'
+      : 'Ready. Tap Share, then Save Video or Add to Camera Roll.';
+
+  useLayoutEffect(() => {
+    bannerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+  }, []);
+
+  return (
+    <div
+      ref={bannerRef}
+      role="status"
+      aria-live="polite"
+      aria-label={variant === 'thumbnail' ? 'Thumbnail ready to add to Camera Roll' : 'Video ready to add to Camera Roll'}
+      className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50/95 px-2.5 py-2.5 max-sm:py-3"
     >
-      <p className="text-sm leading-snug text-slate-600">
-        {variant === 'thumbnail' ? (
-          <>
-            YouTube Studio accepts a 1280×720 (16:9) custom thumbnail when your video uses that aspect; other
-            sizes still save here for manual cropping if needed. If the share sheet does not offer &quot;Save
-            Image&quot;, use <strong>Download JPEG</strong>.
-          </>
-        ) : (
-          <>
-            Large videos may take a few seconds to load before this step appears. If the share sheet does not list
-            &quot;Save Video&quot;, try <strong>Download</strong> instead, then save the file from your downloads
-            list.
-          </>
-        )}
-        <p className="mt-3 border-t border-slate-100 pt-2 text-[11px] leading-snug text-slate-500">
-          In-app browsers (Instagram, Facebook, etc.) often block saving. Use <strong>Safari</strong> for the most
-          reliable flow: open the ··· or Share menu, then <strong>Open in Safari</strong>, sign in, and try again
-          here.
-        </p>
-      </p>
-    </Dialog>
+      <p className="text-xs font-medium leading-snug text-emerald-950 max-sm:text-[13px]">{hint}</p>
+      <div className="mt-2.5 flex flex-wrap items-stretch gap-2">
+        <Button
+          type="button"
+          variant="primary"
+          size="sm"
+          className="touch-manipulation min-h-11 min-w-[7.5rem] gap-2 px-4 text-sm max-sm:min-h-[48px] max-sm:text-[15px]"
+          disabled={shareBusy}
+          onClick={() => {
+            if (shareBusy) return;
+            setShareBusy(true);
+            void sharePreparedToCameraRoll(variant, prepared, onDismiss).finally(() => setShareBusy(false));
+          }}
+        >
+          {shareBusy ? <Spinner className="h-4 w-4" /> : <Share2 className="h-4 w-4" />}
+          Share
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="touch-manipulation min-h-11 px-3 text-sm text-slate-600 max-sm:min-h-[48px]"
+          onClick={onDismiss}
+        >
+          Cancel
+        </Button>
+      </div>
+    </div>
   );
+}
+
+function useIsNarrowScreen(): boolean {
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mq = window.matchMedia('(max-width: 639px)');
+    const apply = () => setNarrow(mq.matches);
+    apply();
+    if (typeof mq.addEventListener === 'function') {
+      mq.addEventListener('change', apply);
+      return () => mq.removeEventListener('change', apply);
+    }
+    mq.addListener(apply);
+    return () => mq.removeListener(apply);
+  }, []);
+  return narrow;
 }
 
 /** One combined progress readout for the whole pipeline (not encode-only). */
@@ -2292,6 +2310,15 @@ function PostCard({
   const [thumbShareSaveBusy, setThumbShareSaveBusy] = useState(false);
   /** iOS WebKit: `share()` must run on a second tap after `fetch` (see share helpers above). */
   const [shareGesture, setShareGesture] = useState<SharePhotosGesture | null>(null);
+  const narrow = useIsNarrowScreen();
+  const [clientShare] = useState(
+    () => typeof navigator !== 'undefined' && typeof navigator.share === 'function',
+  );
+  /** On phones with Web Share, hide top-level file downloads to keep one obvious path to Photos. */
+  const simplifyMobileSave = narrow && clientShare;
+  const shareSheetOpen = shareGesture != null;
+  const saveRowBusy = downloadBusy || shareSaveBusy || thumbDownloadBusy || thumbShareSaveBusy;
+  const saveRowDisabled = saveRowBusy || shareSheetOpen;
   useEffect(() => {
     setPlaying(false);
     setShareGesture(null);
@@ -2520,7 +2547,8 @@ function PostCard({
             type="button"
             variant="ghost"
             size="sm"
-            className="h-7 gap-1 px-2 text-[11px] text-slate-600"
+            className="touch-manipulation max-sm:min-h-11 max-sm:px-3 h-7 gap-1 px-2 text-[11px] text-slate-600 max-sm:text-xs"
+            disabled={saveRowDisabled}
             onClick={() => setInfoOpen(true)}
           >
             <Info className="h-3.5 w-3.5" />
@@ -2532,8 +2560,8 @@ function PostCard({
                 type="button"
                 variant="outline"
                 size="sm"
-                className="h-7 gap-1 px-2 text-[11px]"
-                disabled={downloadBusy || shareSaveBusy || thumbDownloadBusy || thumbShareSaveBusy}
+                className={`touch-manipulation max-sm:min-h-11 max-sm:px-3 h-7 gap-1 px-2 text-[11px] ${simplifyMobileSave ? 'hidden' : ''}`}
+                disabled={saveRowDisabled}
                 title="Saves an MP4 to your device (streams through the API so the browser can save it)."
                 onClick={(e) => {
                   e.stopPropagation();
@@ -2557,9 +2585,13 @@ function PostCard({
                 type="button"
                 variant="outline"
                 size="sm"
-                className="h-7 gap-1 px-2 text-[11px]"
-                disabled={downloadBusy || shareSaveBusy || thumbDownloadBusy || thumbShareSaveBusy}
-                title="Phones: loads the video, then you tap once more to open the system share sheet (required on iPhone). Choose Save Video / Photos."
+                className="touch-manipulation max-sm:min-h-11 max-sm:px-3 max-sm:text-[10px] max-sm:leading-snug h-7 gap-1 px-2 text-[11px] whitespace-normal text-left"
+                disabled={saveRowDisabled}
+                title={
+                  simplifyMobileSave
+                    ? 'Add this video to your Camera Roll via the share sheet. On iPhone: when you see Ready, tap Share, then Save Video.'
+                    : 'Add this video to your Camera Roll (Photos) via the share sheet. On iPhone you tap twice: first prepares the file, then Share opens the sheet.'
+                }
                 onClick={(e) => {
                   e.stopPropagation();
                   void (async () => {
@@ -2568,23 +2600,18 @@ function PostCard({
                       const result = await sharePostVideoForCameraRoll(post);
                       if (result.outcome === 'secondTap') {
                         setShareGesture({ variant: 'video', prepared: result.prepared });
-                        toast.info(
-                          'Almost there',
-                          'Tap Open share sheet in the dialog, then choose Save Video or Save to Photos.',
-                        );
                         return;
                       }
-                      toast.success('Done', 'If the share sheet opened, pick Save Video or Save to Photos.');
                     } catch (err) {
-                      toast.error('Save to Photos', (err as Error).message);
+                      toast.error('Video', (err as Error).message);
                     } finally {
                       setShareSaveBusy(false);
                     }
                   })();
                 }}
               >
-                {shareSaveBusy ? <Spinner className="h-3 w-3" /> : <Share2 className="h-3 w-3" />}
-                Save to Photos
+                {shareSaveBusy ? <Spinner className="h-3 w-3 shrink-0" /> : <Share2 className="h-3 w-3 shrink-0" />}
+                <span>Add video to Camera Roll</span>
               </Button>
             </>
           ) : null}
@@ -2594,8 +2621,8 @@ function PostCard({
                 type="button"
                 variant="outline"
                 size="sm"
-                className="h-7 gap-1 px-2 text-[11px]"
-                disabled={downloadBusy || shareSaveBusy || thumbDownloadBusy || thumbShareSaveBusy}
+                className={`touch-manipulation max-sm:min-h-11 max-sm:px-3 h-7 gap-1 px-2 text-[11px] ${simplifyMobileSave ? 'hidden' : ''}`}
+                disabled={saveRowDisabled}
                 title="Saves the poster / YouTube-style thumbnail as a JPEG (same-origin API proxy)."
                 onClick={(e) => {
                   e.stopPropagation();
@@ -2619,9 +2646,13 @@ function PostCard({
                 type="button"
                 variant="outline"
                 size="sm"
-                className="h-7 gap-1 px-2 text-[11px]"
-                disabled={downloadBusy || shareSaveBusy || thumbDownloadBusy || thumbShareSaveBusy}
-                title="Save the thumbnail image to Photos (same two-step flow as video on iPhone)."
+                className="touch-manipulation max-sm:min-h-11 max-sm:px-3 max-sm:text-[10px] max-sm:leading-snug h-7 gap-1 px-2 text-[11px] whitespace-normal text-left"
+                disabled={saveRowDisabled}
+                title={
+                  simplifyMobileSave
+                    ? 'Add this thumbnail image to your Camera Roll via the share sheet.'
+                    : 'Add this thumbnail JPEG to your Camera Roll (Photos) via the share sheet (same two-step flow as video on iPhone).'
+                }
                 onClick={(e) => {
                   e.stopPropagation();
                   void (async () => {
@@ -2630,23 +2661,18 @@ function PostCard({
                       const result = await sharePostThumbnailForCameraRoll(post);
                       if (result.outcome === 'secondTap') {
                         setShareGesture({ variant: 'thumbnail', prepared: result.prepared });
-                        toast.info(
-                          'Almost there',
-                          'Tap Open share sheet in the dialog, then choose Save Image or Add to Photos.',
-                        );
                         return;
                       }
-                      toast.success('Done', 'If the share sheet opened, pick Save Image or Add to Photos.');
                     } catch (err) {
-                      toast.error('Save thumbnail', (err as Error).message);
+                      toast.error('Thumbnail', (err as Error).message);
                     } finally {
                       setThumbShareSaveBusy(false);
                     }
                   })();
                 }}
               >
-                {thumbShareSaveBusy ? <Spinner className="h-3 w-3" /> : <Share2 className="h-3 w-3" />}
-                Thumb → Photos
+                {thumbShareSaveBusy ? <Spinner className="h-3 w-3 shrink-0" /> : <Share2 className="h-3 w-3 shrink-0" />}
+                <span>Add thumbnail to Camera Roll</span>
               </Button>
             </>
           ) : null}
@@ -2655,8 +2681,8 @@ function PostCard({
               type="button"
               variant="outline"
               size="sm"
-              className="h-7 gap-1 px-2 text-[11px]"
-              disabled={thumbBusy || thumbDownloadBusy || thumbShareSaveBusy}
+              className="touch-manipulation max-sm:min-h-11 max-sm:px-3 h-7 gap-1 px-2 text-[11px]"
+              disabled={thumbBusy || saveRowDisabled}
               onClick={() => void regenerateThumbnail()}
             >
               {thumbBusy ? <Spinner className="h-3 w-3" /> : <RefreshCw className="h-3 w-3" />}
@@ -2686,6 +2712,74 @@ function PostCard({
             ) : null}
           </div>
         </div>
+        {shareGesture ? (
+          <ShareToPhotosInlinePrompt
+            variant={shareGesture.variant}
+            prepared={shareGesture.prepared}
+            onDismiss={() => setShareGesture(null)}
+          />
+        ) : null}
+        {simplifyMobileSave && (canSaveOrDownloadPostVideo(post) || canSaveOrDownloadPostThumbnail(post)) ? (
+          <details className="mt-2 rounded-lg border border-slate-200 bg-slate-50/90 sm:hidden">
+            <summary className="cursor-pointer select-none px-2 py-2.5 text-[12px] font-medium text-slate-700 hover:bg-slate-100/80">
+              Need the MP4 or JPEG file?
+            </summary>
+            <div className="flex flex-wrap gap-2 border-t border-slate-200/90 px-2 pb-2.5 pt-2">
+              {canSaveOrDownloadPostVideo(post) ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="touch-manipulation min-h-10 gap-1.5 px-3 text-[12px]"
+                  disabled={saveRowBusy}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void (async () => {
+                      setDownloadBusy(true);
+                      try {
+                        await downloadPostVideoFile(post);
+                        toast.success('Download started', 'Check your downloads for the MP4.');
+                      } catch (err) {
+                        toast.info('Download', (err as Error).message);
+                      } finally {
+                        setDownloadBusy(false);
+                      }
+                    })();
+                  }}
+                >
+                  {downloadBusy ? <Spinner className="h-3.5 w-3.5" /> : <Download className="h-3.5 w-3.5" />}
+                  Video (MP4)
+                </Button>
+              ) : null}
+              {canSaveOrDownloadPostThumbnail(post) ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="touch-manipulation min-h-10 gap-1.5 px-3 text-[12px]"
+                  disabled={saveRowBusy}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void (async () => {
+                      setThumbDownloadBusy(true);
+                      try {
+                        await downloadPostThumbnailFile(post);
+                        toast.success('Download started', 'Check your downloads for the JPEG.');
+                      } catch (err) {
+                        toast.info('Download JPEG', (err as Error).message);
+                      } finally {
+                        setThumbDownloadBusy(false);
+                      }
+                    })();
+                  }}
+                >
+                  {thumbDownloadBusy ? <Spinner className="h-3.5 w-3.5" /> : <ImageDown className="h-3.5 w-3.5" />}
+                  Thumbnail (JPEG)
+                </Button>
+              ) : null}
+            </div>
+          </details>
+        ) : null}
         {(post.renderActivityLog?.length ?? 0) > 0 ? (
           <details className="mt-2 rounded-md border border-slate-200 bg-slate-50/90 text-left">
             <summary className="cursor-pointer select-none px-2 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-100">
@@ -2730,7 +2824,6 @@ function PostCard({
         info={post.generationSummary ?? null}
         postTemplateId={post.templateId}
       />
-      <ShareToPhotosGestureDialog gesture={shareGesture} onClose={() => setShareGesture(null)} />
     </motion.div>
   );
 }

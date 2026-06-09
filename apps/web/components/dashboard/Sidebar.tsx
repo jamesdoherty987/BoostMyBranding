@@ -23,8 +23,9 @@ import {
   LogOut,
 } from 'lucide-react';
 import { api } from '@/lib/dashboard/api';
+import { PUBLIC_API_BASE_URL } from '@/lib/publicApiBaseUrl';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+const API_URL = PUBLIC_API_BASE_URL;
 
 const nav = [
   { href: '/dashboard', label: 'Overview', icon: LayoutDashboard },

@@ -20,8 +20,9 @@ import {
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { SystemStatus } from '@/components/dashboard/SystemStatus';
 import { api } from '@/lib/dashboard/api';
+import { PUBLIC_API_BASE_URL } from '@/lib/publicApiBaseUrl';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+const API_URL = PUBLIC_API_BASE_URL;
 
 export default function OverviewPage() {
   const { data: clients, isLoading: loadingClients } = useSWR('dashboard:clients', async () => {

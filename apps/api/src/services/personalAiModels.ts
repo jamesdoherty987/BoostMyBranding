@@ -64,7 +64,13 @@ async function fitGeneratedRasterToExportFrame(
   const meta = await sharp(buffer, { failOn: 'none' }).metadata();
   const mw = meta.width;
   const mh = meta.height;
-  if (mw === W && mh === H) return buffer;
+  if (mw === W && mh === H) {
+    if (meta.format === 'jpeg' || meta.format === 'jpg') return buffer;
+    return sharp(buffer, { failOn: 'none' })
+      .flatten({ background: { r: 0, g: 0, b: 0 } })
+      .jpeg({ quality: 92, mozjpeg: true })
+      .toBuffer();
+  }
   if (mw == null || mh == null || mw < 1 || mh < 1) {
     return sharp(buffer, { failOn: 'none' })
       .resize(W, H, {
@@ -72,6 +78,7 @@ async function fitGeneratedRasterToExportFrame(
         position: 'centre',
         background: { r: 0, g: 0, b: 0, alpha: 1 },
       })
+      .flatten({ background: { r: 0, g: 0, b: 0 } })
       .jpeg({ quality: 92, mozjpeg: true })
       .toBuffer();
   }
@@ -88,6 +95,7 @@ async function fitGeneratedRasterToExportFrame(
         ? { background: { r: 0, g: 0, b: 0, alpha: 1 } }
         : {}),
     })
+    .flatten({ background: { r: 0, g: 0, b: 0 } })
     .jpeg({ quality: 92, mozjpeg: true })
     .toBuffer();
 }
@@ -744,7 +752,8 @@ async function generateOpenAIImage(
     '9:16': '1024x1792',
     '16:9': '1792x1024',
     '1:1': '1024x1024',
-    '4:5': '1024x1792',
+    /** DALL·E 3 only supports 1024² and 1024×1792 / 1792×1024 — closest box to 4:5 before export resize. */
+    '4:5': '1024x1024',
   };
   const res = await fetch('https://api.openai.com/v1/images/generations', {
     method: 'POST',

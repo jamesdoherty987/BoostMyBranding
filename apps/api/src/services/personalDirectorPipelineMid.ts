@@ -25,6 +25,8 @@ import {
   PERSONAL_SCRIPT_CK_SRC,
   filterKeywordCardsByVoiceover,
   aiOnImageFactLabelsOnly,
+  resyncImageCaptionsAfterVoiceEdits,
+  compositionUniquenessHintForShot,
   type Storyboard,
 } from './personalDirector.js';
 import { searchAssets, pickGameplayLoop } from './personalScraper.js';
@@ -33,8 +35,10 @@ import {
   estimateDurationSeconds,
   joinNarrationParts,
   joinNarrationPartsWithShotCharSpans,
+  joinNarrationPartsWithVisualShotRanges,
   keywordStitchCardsFromVoiceAlignment,
   shotDurationsFromVoicePartition,
+  shotDurationsFromVoiceAlignment,
   stripLeadingHookFromFirstVoiceover,
   minShotsForVoiceAndAvgClip,
   type VoiceCharacterAlignment,
@@ -263,14 +267,15 @@ export async function directorPipelineFromResolvedStoryboard(
     postId,
     `References ready: ${resolvedStyleRefImageUrls.length} still URL(s), ${characterAnchors.length} character anchor(s).`,
   ).catch(() => {});
+  const topicLine = topic.replace(/\s+/g, ' ').trim().slice(0, 160);
   const inspirationPixelContract =
     resolvedStyleRefImageUrls.length > 0
-      ? 'Match palette, lighting, lens/codec character, grain, and motion energy of the account reference stills (including frames extracted from reference videos).'
+      ? `Match palette, lighting, lens/codec character, grain, and motion energy of the account reference stills (including frames extracted from reference videos). EPISODE SUBJECT (hard lock): «${topicLine.replace(/"/g, "'")}» — refs are **look only**, not a second storyline (no food/hunting/travel detours unless the VO says so).`
       : '';
   const inspirationStyleHintForShots = [inspirationStyleHint, inspirationPixelContract]
     .filter((s) => s && s.length > 0)
     .join(' ')
-    .slice(0, 520);
+    .slice(0, 560);
 
   /**
    * Intended flow (fresh runs only — resume keeps checkpoint shot ids):
@@ -334,10 +339,13 @@ export async function directorPipelineFromResolvedStoryboard(
       const perShotMax =
         perShotSecondsMaxFromAverageClip(genConfig.averageClipSeconds, { longform: longformEnabled }) ??
         (longformEnabled ? 10 : 8);
-      const nMinMux = minShotsForVoiceAndAvgClip(planVoSec, perShotMax + 0.12);
-      const nFromAvg = Math.ceil(planVoSec / avgClipSec);
+      const perShotCeil = perShotMax + 0.12;
+      const nMinMux = minShotsForVoiceAndAvgClip(planVoSec, perShotCeil);
+      /** Tighter effective ceiling → more stills so cuts can stay snappy when VO is long. */
+      const nMinSnappy = minShotsForVoiceAndAvgClip(planVoSec, perShotCeil * 0.88);
+      const nFromAvg = Math.ceil(planVoSec / Math.max(0.9, avgClipSec * 0.9));
       const maxCap = longformEnabled ? 96 : 32;
-      const nTarget = Math.min(maxCap, Math.max(3, flatPreVo.length, nFromAvg, nMinMux));
+      const nTarget = Math.min(maxCap, Math.max(3, flatPreVo.length, nFromAvg, nMinMux, nMinSnappy));
       const beforeN = flatPreVo.length;
       if (nTarget !== beforeN) {
         storyboard = rebalanceStoryboardToTargetShots(storyboard, nTarget);
@@ -414,6 +422,9 @@ export async function directorPipelineFromResolvedStoryboard(
     genConfig.videoModelId ?? pickDefaultModel('video', genConfig.qualityTier ?? 'balanced')?.id;
 
   const flat = flattenStoryboard(storyboard);
+  if (aiOnImageFactLabelsOnly(genConfig)) {
+    resyncImageCaptionsAfterVoiceEdits(flat.map((f) => f.shot));
+  }
   const stitchMusicDuck = resolveMusicDuckUnderVoice(genConfig);
   const stitchMusicSolo = resolveMusicSoloVolume(genConfig);
   const shotAssets: Array<{
@@ -532,6 +543,7 @@ export async function directorPipelineFromResolvedStoryboard(
       genConfig.allowSparseImageText === true
         ? [
             'The on-image words are narration-locked in the prompt — never replace them with scene-description titles or "what the photo shows".',
+            'If the locked string contains numbers, render them crisply with correct % or currency symbols — no invented digits or alternate phrasing.',
             styleBible.typography?.trim() &&
               `Account style-bible typography for any on-image label: ${styleBible.typography.trim()}.`,
             resolvedStyleRefImageUrls.length > 0 &&
@@ -540,6 +552,26 @@ export async function directorPipelineFromResolvedStoryboard(
             .filter((s): s is string => typeof s === 'string' && s.length > 0)
             .join(' ')
         : undefined;
+
+    const storyStructureHint = [
+      fs.actName?.trim() && `Act «${fs.actName.replace(/\s+/g, ' ').trim().slice(0, 100)}»`,
+      fs.beatTitle?.trim() &&
+        `Beat «${fs.beatTitle.replace(/\s+/g, ' ').trim().slice(0, 140)}» (${fs.beatPhase})`,
+    ]
+      .filter(Boolean)
+      .join('; ');
+
+    const prevFs = timelineIndex > 0 ? flat[timelineIndex - 1] : undefined;
+    const previousShotOneLiner = prevFs
+      ? [
+          prevFs.shot.description?.replace(/\s+/g, ' ').trim().slice(0, 130),
+          prevFs.shot.imageCaption?.trim()
+            ? `on-image: "${prevFs.shot.imageCaption.trim().replace(/"/g, "'")}"`
+            : undefined,
+        ]
+          .filter(Boolean)
+          .join(' — ')
+      : undefined;
 
     const basePrompt = shotToPrompt({
       shot: fs.shot,
@@ -553,6 +585,15 @@ export async function directorPipelineFromResolvedStoryboard(
       factLabelImagePromptExtra,
       timelineShotIndex: timelineIndex + 1,
       timelineShotTotal: flat.length,
+      storyStructureHint: storyStructureHint || undefined,
+      seriesTopic: topic,
+      episodeTitle: storyboard.title,
+      plannerHoldSeconds:
+        Number.isFinite(fs.shot.durationSeconds) && fs.shot.durationSeconds > 0
+          ? fs.shot.durationSeconds
+          : undefined,
+      previousShotOneLiner: previousShotOneLiner || undefined,
+      compositionUniquenessHint: compositionUniquenessHintForShot(fs.shot.id, timelineIndex),
     });
     const refNoCopy =
       (fs.shot.kind === 'ai_image' || fs.shot.kind === 'ai_video') &&
@@ -564,6 +605,25 @@ export async function directorPipelineFromResolvedStoryboard(
     const negativePrompt = [
       ...(styleBible.donts ?? []),
       ...(character?.negativePrompt ? [character.negativePrompt] : []),
+      ...(timelineIndex > 0 && (fs.shot.kind === 'ai_image' || fs.shot.kind === 'ai_video')
+        ? [
+            'near-duplicate composition of the previous shot',
+            'same poster layout or same hero prop as the last frame',
+            'symmetrical stock-photo composition',
+            'generic AI portrait framing repeated from prior cut',
+          ]
+        : []),
+      ...(genConfig.allowSparseImageText === true &&
+      timelineIndex > 0 &&
+      flat[timelineIndex - 1]?.shot.imageCaption?.trim()
+        ? ['reusing the same on-image phrase as the previous shot']
+        : []),
+      ...(fs.shot.kind === 'ai_image'
+        ? [
+            'same generic interior and lighting as a typical multi-shot AI batch',
+            'identical posterised colour wash across the whole frame',
+          ]
+        : []),
       ...(genConfig.allowSparseImageText === true && fs.shot.imageCaption?.trim()
         ? [
             'wrong or paraphrased text versus the requested label',
@@ -1063,12 +1123,10 @@ export async function directorPipelineFromResolvedStoryboard(
      * here; that defeated the setting (ceilings jumped to ~10–14s whenever narration
      * was long, so one beat could legally hold most of the video).
      */
-    maxPerPartition = Math.min(14, ac * 1.32);
+    maxPerPartition = Math.min(11, ac * 1.14);
   } else {
-    maxPerPartition = Math.min(
-      14,
-      Math.max(6, (perShotSecondsMax ?? 8) * 2.05, 7, voNeedPerShot > 0 ? voNeedPerShot + 0.5 : 0),
-    );
+    const fallbackCap = perShotSecondsMax ?? 7.5;
+    maxPerPartition = Math.min(10, Math.max(2.8, fallbackCap * 1.1));
   }
 
   /**
@@ -1176,6 +1234,23 @@ export async function directorPipelineFromResolvedStoryboard(
     }
   }
 
+  const narrJoinForAlign = joinNarrationParts([
+    storyboard.hook,
+    ...shotVosForNarration,
+    storyboard.outro,
+  ]);
+  const { narration: narrSpanCheck, shotSpanByIndex } = joinNarrationPartsWithShotCharSpans(
+    storyboard.hook ?? '',
+    shotVosForNarration,
+    storyboard.outro ?? '',
+  );
+  const alignmentForStitch =
+    voiceCharacterAlignment &&
+    voiceCharacterAlignment.narrationText === narrJoinForAlign &&
+    narrSpanCheck === narrJoinForAlign
+      ? voiceCharacterAlignment
+      : undefined;
+
   let visualDurations: number[] | null = null;
   if (
     useVoiceover &&
@@ -1184,6 +1259,35 @@ export async function directorPipelineFromResolvedStoryboard(
     measuredVoiceSeconds > 0.25 &&
     resolved.length > 0
   ) {
+    const joinedRanges = joinNarrationPartsWithVisualShotRanges({
+      hook: storyboard.hook ?? '',
+      shotVoiceovers: shotVosForNarration,
+      outro: storyboard.outro ?? '',
+    });
+    if (
+      joinedRanges &&
+      joinedRanges.narration === narrJoinForAlign &&
+      alignmentForStitch &&
+      joinedRanges.visualShotRanges.length === resolved.length
+    ) {
+      const aligned = shotDurationsFromVoiceAlignment({
+        alignment: alignmentForStitch,
+        shotCharRanges: joinedRanges.visualShotRanges,
+        voiceSeconds: measuredVoiceSeconds,
+        minPerShot: minPerShotPartition,
+        maxPerShot: maxPerPartition,
+      });
+      if (aligned && aligned.length === resolved.length) {
+        visualDurations = aligned;
+        logVisualPacing('director-mid', 'shot durations from ElevenLabs alignment (wall-clock)', {
+          postId,
+          measuredVoiceSeconds,
+          durations: aligned.map((x) => Math.round(x * 100) / 100),
+          sum: Math.round(aligned.reduce((a, b) => a + b, 0) * 100) / 100,
+        });
+      }
+    }
+    if (visualDurations == null) {
     let vd = shotDurationsFromVoicePartition({
       voiceSeconds: measuredVoiceSeconds,
       hook: storyboard.hook ?? '',
@@ -1263,27 +1367,12 @@ export async function directorPipelineFromResolvedStoryboard(
       }
       visualDurations = vd;
     }
+    }
   }
 
-  const narrJoinForAlign = joinNarrationParts([
-    storyboard.hook,
-    ...shotVosForNarration,
-    storyboard.outro,
-  ]);
-  const { narration: narrSpanCheck, shotSpanByIndex } = joinNarrationPartsWithShotCharSpans(
-    storyboard.hook ?? '',
-    shotVosForNarration,
-    storyboard.outro ?? '',
-  );
   if (narrSpanCheck !== narrJoinForAlign) {
     console.warn('[director-mid] narration / span string mismatch; ElevenLabs keyword alignment skipped.');
   }
-  const alignmentForStitch =
-    voiceCharacterAlignment &&
-    voiceCharacterAlignment.narrationText === narrJoinForAlign &&
-    narrSpanCheck === narrJoinForAlign
-      ? voiceCharacterAlignment
-      : undefined;
 
   /** VO is delayed in mux by this many seconds; aligns ElevenLabs times to per-shot video timeline. */
   const voiceLeadInForKeywordTiming =

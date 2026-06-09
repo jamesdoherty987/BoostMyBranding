@@ -14,7 +14,7 @@ import type { NextConfig } from 'next';
  * long-running Node process (cron, websockets, 30s+ generation jobs).
  *
  * Required env vars for production:
- *   API_UPSTREAM — e.g. https://boost-api.onrender.com (omit in local dev:
+ *   API_UPSTREAM — e.g. https://your-api.up.railway.app (omit in local dev:
  *   defaults to http://127.0.0.1:4000 so `/api/*` rewrites work without .env)
  */
 

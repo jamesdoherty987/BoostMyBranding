@@ -1575,13 +1575,13 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
       const xExpr = `'iw*${safeFocalX}-(iw/zoom/2)'`;
       const yExpr = `'ih*${safeFocalY}-(ih/zoom/2)'`;
       const te = Math.max(0.05, a.durationSeconds).toFixed(3);
-      // Fit entire still inside the canvas (letterbox / pillarbox with black) instead of
-      // centre-fill crop — fill-crop cuts edges and clips AI-painted or graphic text when
-      // source aspect differs slightly from output. Ken Burns zoom runs on this full frame.
+      // Fill the output frame (scale up + centre crop) — no letterboxing. AI stills are
+      // pre-normalized to exact WxH in `personalAiModels`; user/scrape assets may still
+      // differ slightly; a sliver crop beats black bars under Ken Burns zoom.
       filters.push(
         'select=eq(n\\,0),setpts=PTS-STARTPTS',
-        `scale=${a.width}:${a.height}:force_original_aspect_ratio=decrease:flags=lanczos,` +
-          `pad=${a.width}:${a.height}:(ow-iw)/2:(oh-ih)/2:color=black,` +
+        `scale=${a.width}:${a.height}:force_original_aspect_ratio=increase:flags=lanczos,` +
+          `crop=${a.width}:${a.height},` +
           `zoompan=z='min(zoom+${zoomStep},1.10)':x=${xExpr}:y=${yExpr}:` +
           `d=${imageOutFrames}:s=${a.width}x${a.height}:fps=${a.fps},` +
           `tpad=stop_mode=clone:stop_duration=6,trim=end=${te},setpts=PTS-STARTPTS`,
@@ -1591,10 +1591,10 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
       // Do not use `select=eq(n\,0)` here — one decoded frame + fps produced ~1/fps s clips.
       // Do not use `fps=` in -vf with looped PNG on some Windows FFmpeg builds (filter init EINVAL).
       // Use bilinear instead of lanczos here — lanczos + yuv format + duration quirks has also tripped bad builds.
-      // Contain + pad keeps the full image (no edge crop) so on-image text is not clipped.
+      // Fill frame (centre crop) — matches video stills; avoids black bars on 9:16 export.
       filters.push(
-        `scale=${a.width}:${a.height}:force_original_aspect_ratio=decrease:flags=bilinear,` +
-          `pad=${a.width}:${a.height}:(ow-iw)/2:(oh-ih)/2:color=black`,
+        `scale=${a.width}:${a.height}:force_original_aspect_ratio=increase:flags=bilinear,` +
+          `crop=${a.width}:${a.height}`,
       );
     }
   } else {

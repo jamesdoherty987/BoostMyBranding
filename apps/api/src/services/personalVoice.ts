@@ -483,6 +483,133 @@ export function joinNarrationPartsWithShotCharSpans(
   return { narration, shotSpanByIndex };
 }
 
+/**
+ * Same narration string as {@link joinNarrationParts}([hook, ...shotVos, outro]), plus the
+ * **[start,end)** character span in that string for each **visual** shot index:
+ * hook audio → shot 0, each shot's VO → that shot, outro → last shot.
+ * Used with ElevenLabs character timings so per-shot still lengths track **wall-clock** speech.
+ */
+export function joinNarrationPartsWithVisualShotRanges(args: {
+  hook: string;
+  shotVoiceovers: readonly string[];
+  outro: string;
+}): { narration: string; visualShotRanges: Array<{ start: number; end: number }> } | null {
+  const n = args.shotVoiceovers.length;
+  if (n === 0) return null;
+
+  type Seg = { text: string; visualShot: number };
+  const segments: Seg[] = [];
+  const push = (raw: string | undefined, visualShot: number) => {
+    const t = (raw ?? '').trim();
+    if (!t) return;
+    const last = segments[segments.length - 1]?.text;
+    if (last !== undefined && last.toLowerCase() === t.toLowerCase()) return;
+    segments.push({ text: t, visualShot });
+  };
+
+  push(args.hook, 0);
+  for (let i = 0; i < n; i++) {
+    push(args.shotVoiceovers[i], i);
+  }
+  push(args.outro, Math.max(0, n - 1));
+
+  let narration = '';
+  const visualShotRanges: Array<{ start: number; end: number }> = Array.from({ length: n }, () => ({
+    start: -1,
+    end: -1,
+  }));
+
+  for (const seg of segments) {
+    if (narration.length > 0) narration += ' ';
+    const start = narration.length;
+    narration += seg.text;
+    const end = narration.length;
+    const vs = seg.visualShot;
+    if (vs < 0 || vs >= n) continue;
+    if (visualShotRanges[vs]!.start < 0) visualShotRanges[vs]!.start = start;
+    visualShotRanges[vs]!.end = end;
+  }
+
+  for (let i = 0; i < n; i++) {
+    if (visualShotRanges[i]!.start < 0 || visualShotRanges[i]!.end <= visualShotRanges[i]!.start) {
+      return null;
+    }
+  }
+
+  return { narration, visualShotRanges };
+}
+
+/**
+ * Per-shot **visual** durations from ElevenLabs character times (sums to ~`voiceSeconds`).
+ * Falls back to {@link shotDurationsFromVoicePartition} when alignment is missing or ranges invalid.
+ */
+export function shotDurationsFromVoiceAlignment(args: {
+  alignment: VoiceCharacterAlignment;
+  shotCharRanges: Array<{ start: number; end: number }>;
+  voiceSeconds: number;
+  minPerShot: number;
+  maxPerShot: number;
+}): number[] | null {
+  const { alignment, shotCharRanges, voiceSeconds, minPerShot, maxPerShot } = args;
+  const n = shotCharRanges.length;
+  if (n === 0 || !Number.isFinite(voiceSeconds) || voiceSeconds < 0.35) return null;
+
+  const starts = alignment.characterStartTimesSeconds;
+  const ends = alignment.characterEndTimesSeconds;
+  const narrLen = alignment.narrationText.length;
+  const L = Math.min(narrLen, starts.length, ends.length);
+  if (L < 1) return null;
+
+  const raw: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const r = shotCharRanges[i]!;
+    if (r.end <= r.start) return null;
+    const a = Math.max(0, Math.min(r.start, L - 1));
+    const b = Math.max(a, Math.min(r.end - 1, L - 1));
+    const t0 = starts[a]!;
+    const t1 = ends[b]!;
+    if (!Number.isFinite(t0) || !Number.isFinite(t1) || t1 <= t0) return null;
+    const wall = t1 - t0 + 0.05;
+    raw.push(Math.max(minPerShot, Math.min(maxPerShot, wall)));
+  }
+
+  let sum = raw.reduce((x, y) => x + y, 0);
+  if (sum < 0.2) return null;
+  let scaled = raw.map((x) => (x * voiceSeconds) / sum);
+
+  for (let iter = 0; iter < 48; iter++) {
+    scaled = scaled.map((x) => Math.max(minPerShot, Math.min(maxPerShot, x)));
+    sum = scaled.reduce((a, b) => a + b, 0);
+    const drift = voiceSeconds - sum;
+    if (Math.abs(drift) < 0.06) break;
+    scaled = scaled.map((x) => x + drift / n);
+  }
+
+  scaled = scaled.map((x) => Math.max(minPerShot, Math.min(maxPerShot, x)));
+  let drift = voiceSeconds - scaled.reduce((a, b) => a + b, 0);
+  const order = [...scaled.keys()].sort((a, b) => scaled[b]! - scaled[a]!);
+  for (let g = 0; g < 44 && Math.abs(drift) > 0.05; g++) {
+    let progressed = false;
+    for (const idx of order) {
+      if (Math.abs(drift) < 0.04) break;
+      if (drift > 0) {
+        const room = maxPerShot - scaled[idx]!;
+        if (room < 0.02) continue;
+        scaled[idx]! += Math.min(room, drift * 0.45);
+      } else {
+        const room = scaled[idx]! - minPerShot;
+        if (room < 0.02) continue;
+        scaled[idx]! -= Math.min(room, Math.abs(drift) * 0.45);
+      }
+      drift = voiceSeconds - scaled.reduce((a, b) => a + b, 0);
+      progressed = true;
+    }
+    if (!progressed) break;
+  }
+
+  return scaled.map((x) => Math.round(Math.max(minPerShot, Math.min(maxPerShot, x)) * 20) / 20);
+}
+
 /** Keyword overlay times for one shot (matches {@link personalStitcher.StitchKeywordCard} shape). */
 export interface VoKeywordStitchCard {
   text: string;
@@ -711,7 +838,9 @@ export function minShotsForVoiceAndAvgClip(
  * trusting storyboard `durationSeconds`, which rarely matches real audio.
  *
  * Hook / outro weight is folded into the first / last shot when they are not duplicates
- * of that shot's `voiceover` (same rule as {@link joinNarrationParts}).
+ * of that shot's `voiceover` (same rule as {@link joinNarrationParts}). Hook/outro use a
+ * **sublinear proxy weight** so long written hooks do not steal most of the timeline from
+ * the first still.
  */
 export function shotDurationsFromVoicePartition(args: {
   /** Measured or estimated narration length (seconds). */
@@ -738,8 +867,9 @@ export function shotDurationsFromVoicePartition(args: {
   let total = args.voiceSeconds;
   if (!Number.isFinite(total) || total <= 0) return [];
 
-  /** Per-shot ceiling from caller (e.g. dashboard avg clip × ~1.3). Must allow sum ≥ voiceSeconds when shot count is sufficient. */
-  const maxE = Math.min(22, baseMax);
+  /** Per-shot ceiling: caller cap + adaptive snappy bound so one beat cannot absorb most of the runtime. */
+  const avgShare = total / n;
+  const maxE = Math.min(22, baseMax, Math.max(minE * 1.55, avgShare * 2.05));
 
   const floor = Math.max(0.35, Math.min(minE, total / n));
 
@@ -748,21 +878,29 @@ export function shotDurationsFromVoicePartition(args: {
   const vos = args.shotVoiceovers.map((v) => (v ?? '').trim());
 
   const baseWeight = (text: string) => Math.max(4, text.trim().length);
-  /** Extra hook/outro text must not dominate partition — long CTAs were inflating the last shot. */
-  const cappedFoldWeight = (text: string, cap: number) =>
-    Math.max(4, Math.min(cap, text.trim().length));
+  /**
+   * Hook / outro are usually a few seconds of wall-clock vs a long line of characters.
+   * Folding raw char length (previously up to 96) into shot 0 / n-1 made the **first still**
+   * hold 2–3× too long compared to the rest.
+   */
+  const spokenOverlayPartitionWeight = (text: string) => {
+    const c = text.trim().length;
+    if (c <= 0) return 0;
+    const capped = Math.min(c, 360);
+    return Math.round(Math.min(46, 8 + 4.75 * Math.sqrt(capped)));
+  };
 
   const weights = vos.map((v) => baseWeight(v));
   if (h.length > 0) {
     const first = vos[0] ?? '';
     if (!first || first.toLowerCase() !== h.toLowerCase()) {
-      weights[0] = (weights[0] ?? 0) + cappedFoldWeight(h, 96);
+      weights[0] = (weights[0] ?? 0) + spokenOverlayPartitionWeight(h);
     }
   }
   if (o.length > 0 && n > 0) {
     const last = vos[n - 1] ?? '';
     if (!last || last.toLowerCase() !== o.toLowerCase()) {
-      weights[n - 1]! += cappedFoldWeight(o, 96);
+      weights[n - 1]! += spokenOverlayPartitionWeight(o);
     }
   }
 
@@ -858,6 +996,40 @@ export function shotDurationsFromVoicePartition(args: {
       d = d.map((x, i) =>
         Math.max(floor, Math.min(maxE, Math.round((x + (headroom[i]! / hrSum) * miss) * 20) / 20)),
       );
+    }
+  }
+
+  /** Drift fixes can still leave shot 0 oversized; cap vs fair share when hook is a separate cold open. */
+  if (n >= 2 && h.length > 0) {
+    const firstV = (vos[0] ?? '').trim();
+    if (!firstV || firstV.toLowerCase() !== h.toLowerCase()) {
+      const fair = total / n;
+      const cap0 = Math.min(maxE, Math.max(floor + 0.12, fair * 1.72));
+      if (d[0]! > cap0 + 0.1) {
+        const surplus = d[0]! - cap0;
+        d[0] = cap0;
+        const tail = n - 1;
+        const share = surplus / tail;
+        for (let i = 1; i < n; i++) {
+          d[i] = Math.min(maxE, Math.round((d[i]! + share) * 20) / 20);
+        }
+        for (let g = 0; g < 30; g++) {
+          d = d.map((x) => Math.max(floor, Math.min(maxE, x)));
+          const drift2 = total - d.reduce((a, b) => a + b, 0);
+          if (Math.abs(drift2) < 0.03) break;
+          if (drift2 > 0) {
+            const hr = d.map((x) => maxE - x);
+            const hrS = hr.reduce((a, b) => a + b, 0);
+            if (hrS < 1e-6) break;
+            d = d.map((x, i) => x + (hr[i]! / hrS) * drift2);
+          } else {
+            const sl = d.map((x) => x - floor);
+            const slS = sl.reduce((a, b) => a + b, 0);
+            if (slS < 1e-6) break;
+            d = d.map((x, i) => x + (sl[i]! / slS) * drift2);
+          }
+        }
+      }
     }
   }
 

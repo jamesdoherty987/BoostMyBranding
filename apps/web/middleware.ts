@@ -22,22 +22,10 @@
 
 import { NextResponse, type NextRequest } from 'next/server';
 
-/**
- * API URL — in production, middleware runs server-side at the edge and
- * needs the full URL to reach the API deployment. In dev it's set to the
- * local API port. The public `NEXT_PUBLIC_API_URL` is a relative path
- * (`/api`) in prod for browser calls; this internal one has to be absolute.
- *
- * If `API_UPSTREAM` isn't set and `NEXT_PUBLIC_API_URL` isn't an absolute
- * URL, custom-domain resolution is disabled (middleware just passes requests
- * through to the app). Better to silently pass than to try a relative fetch
- * that will always fail.
- */
-const RAW_API_URL =
-  process.env.API_UPSTREAM ??
-  process.env.NEXT_PUBLIC_API_URL ??
-  'http://localhost:4000';
-const API_URL = /^https?:\/\//i.test(RAW_API_URL) ? RAW_API_URL : null;
+import { SERVER_API_BASE_URL } from './lib/serverApiBaseUrl';
+
+/** Absolute origin for edge middleware fetches (same rules as `site-loader`). */
+const API_URL = /^https?:\/\//i.test(SERVER_API_BASE_URL) ? SERVER_API_BASE_URL : null;
 
 /** Hosts the middleware should always pass through without a lookup. */
 function isReservedHost(host: string): boolean {

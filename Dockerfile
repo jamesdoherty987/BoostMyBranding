@@ -10,7 +10,10 @@ RUN apt-get update \
 
 WORKDIR /app
 
-ENV NODE_ENV=production
+# Do **not** set NODE_ENV=production before `pnpm install`. Root `turbo` lives in
+# devDependencies; with NODE_ENV=production pnpm skips dev deps and `turbo` is
+# missing → `ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL Command "turbo" not found`.
+ENV NODE_ENV=development
 
 RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
 
@@ -21,7 +24,9 @@ RUN touch .env
 
 RUN pnpm install --frozen-lockfile
 
-RUN pnpm turbo run build --filter=api...
+RUN pnpm exec turbo run build --filter=api
+
+ENV NODE_ENV=production
 
 EXPOSE 4000
 

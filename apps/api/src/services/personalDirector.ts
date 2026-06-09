@@ -542,6 +542,7 @@ export async function planStoryboard(args: DirectArgs): Promise<Storyboard> {
   if (args.allowSparseImageText === true && (args.keywordPopStyle ?? 'off') === 'off') {
     stripKeywordCardsForAiImageStoryboard(allShots);
     thinSparseImageCaptionsOnShots(allShots, 0.28);
+    resyncImageCaptionsAfterVoiceEdits(allShots);
   }
 
   return out;
@@ -635,6 +636,441 @@ function keywordTokenInVoiceover(token: string, vo: string): boolean {
   return new RegExp(`(^|[^a-z0-9])${esc}([^a-z0-9]|$)`, 'i').test(vo);
 }
 
+/** Same tokens must appear as whole words in VO, in the same order (not scattered). */
+function tokensAppearInOrderInVoiceover(voRaw: string, tokens: string[]): boolean {
+  if (tokens.length === 0) return false;
+  let idx = 0;
+  const voLo = voRaw.toLowerCase();
+  for (const tok of tokens) {
+    const t = tok.toLowerCase();
+    if (!t || t.length < 2) continue;
+    if (/^[0-9.,$€£%+]+$/i.test(t)) {
+      const normT = t.replace(/,/g, '');
+      const rest = voLo.slice(idx).replace(/,/g, '');
+      const j = rest.indexOf(normT);
+      if (j < 0) return false;
+      idx += j + normT.length;
+      continue;
+    }
+    const esc = t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const slice = voLo.slice(idx);
+    const m = slice.match(new RegExp(`(?:^|[^a-z0-9])${esc}(?:[^a-z0-9]|$)`, 'i'));
+    if (!m || m.index === undefined) return false;
+    idx += m.index + m[0].length;
+  }
+  return true;
+}
+
+function normalizeDirectorCaptionSpaces(s: string): string {
+  return s.replace(/\s+/g, ' ').trim();
+}
+
+/** Generic / hedge / vague tokens — on-image labels should not be *only* these. */
+const IMAGE_CAPTION_FILLER = new Set([
+  'a',
+  'an',
+  'the',
+  'and',
+  'or',
+  'but',
+  'if',
+  'so',
+  'to',
+  'of',
+  'in',
+  'on',
+  'at',
+  'for',
+  'with',
+  'by',
+  'from',
+  'as',
+  'is',
+  'are',
+  'was',
+  'were',
+  'been',
+  'be',
+  'being',
+  'it',
+  'its',
+  'this',
+  'that',
+  'these',
+  'those',
+  'there',
+  'here',
+  'i',
+  'you',
+  'we',
+  'they',
+  'he',
+  'she',
+  'him',
+  'her',
+  'them',
+  'me',
+  'my',
+  'your',
+  'our',
+  'their',
+  'what',
+  'which',
+  'who',
+  'whom',
+  'whose',
+  'how',
+  'when',
+  'where',
+  'why',
+  'can',
+  'could',
+  'would',
+  'should',
+  'may',
+  'might',
+  'must',
+  'will',
+  'just',
+  'really',
+  'actually',
+  'basically',
+  'literally',
+  'maybe',
+  'perhaps',
+  'probably',
+  'some',
+  'any',
+  'no',
+  'not',
+  'nor',
+  'only',
+  'even',
+  'ever',
+  'very',
+  'too',
+  'also',
+  'then',
+  'than',
+  'into',
+  'out',
+  'up',
+  'down',
+  'all',
+  'each',
+  'every',
+  'both',
+  'few',
+  'more',
+  'most',
+  'other',
+  'such',
+  'one',
+  'two',
+  'three',
+  'first',
+  'last',
+  'next',
+  'got',
+  'get',
+  'gets',
+  'getting',
+  'go',
+  'goes',
+  'going',
+  'went',
+  'come',
+  'came',
+  'comes',
+  'see',
+  'saw',
+  'seen',
+  'know',
+  'knew',
+  'known',
+  'think',
+  'thought',
+  'say',
+  'said',
+  'says',
+  'tell',
+  'told',
+  'make',
+  'made',
+  'makes',
+  'like',
+  'want',
+  'wants',
+  'need',
+  'needs',
+  'way',
+  'ways',
+  'thing',
+  'things',
+  'stuff',
+  'people',
+  'person',
+  'someone',
+  'somebody',
+  'something',
+  'anything',
+  'nothing',
+  'everyone',
+  'everybody',
+  'anybody',
+  'anyone',
+  'nobody',
+  'somewhere',
+  'anywhere',
+  'everywhere',
+  'life',
+  'lives',
+  'time',
+  'times',
+  'day',
+  'days',
+  'year',
+  'years',
+  'world',
+  'story',
+  'video',
+  'part',
+  'lot',
+  'bit',
+  'kind',
+  'sort',
+  'type',
+  'big',
+  'small',
+  'old',
+  'new',
+  'long',
+  'short',
+  'high',
+  'low',
+  'good',
+  'bad',
+  'great',
+  'right',
+  'left',
+  'well',
+  'still',
+  'again',
+  'once',
+  'twice',
+  'never',
+  'always',
+  'sometimes',
+  'often',
+  'already',
+  'yet',
+  'though',
+  'although',
+  'because',
+  'while',
+  'until',
+  'unless',
+  'about',
+  'around',
+  'over',
+  'under',
+  'between',
+  'through',
+  'during',
+  'before',
+  'after',
+  'since',
+  'now',
+  'today',
+  'tomorrow',
+  'yesterday',
+]);
+
+function truncateImageCaptionWords(caption: string, maxWords: number): string {
+  const w = caption.trim().split(/\s+/).filter(Boolean);
+  if (w.length <= maxWords) return caption.trim();
+  return w.slice(0, maxWords).join(' ');
+}
+
+/**
+ * Keep on-image text only when it is **worth burning in**: stats, money, dates,
+ * acronyms, multi-word proper nouns, or substantive keywords — not hedges / filler alone.
+ * Returns undefined to omit the label (better than weak type).
+ */
+export function imageCaptionIsHighSignal(caption: string, _voiceover: string): boolean {
+  const raw = caption.trim();
+  if (raw.length < 2) return false;
+  if (/\d/.test(raw)) return true;
+  if (/[%$€£]/.test(raw)) return true;
+  /** Acronyms (US, GDP, NASA). */
+  if (/\b[A-Z]{2,}\b/.test(raw)) return true;
+  /** Two title-case words — likely person or place. */
+  if (/\b[A-Z][a-z]+\s+[A-Z][a-z]+\b/.test(raw)) return true;
+
+  const lower = raw.toLowerCase();
+  const tokens = lower
+    .replace(/[^a-z0-9%$€£]+/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+  if (tokens.length === 0) return false;
+
+  const substantive5 = tokens.some((w) => w.length >= 5 && !IMAGE_CAPTION_FILLER.has(w));
+  if (substantive5) return true;
+
+  const good4 = tokens.filter((w) => w.length >= 4 && !IMAGE_CAPTION_FILLER.has(w));
+  if (good4.length >= 2) return true;
+  if (tokens.length === 1 && good4.length === 1) return true;
+
+  return false;
+}
+
+export function filterImageCaptionToHighSignal(
+  caption: string | undefined,
+  voiceover: string,
+  maxWords = 4,
+): string | undefined {
+  if (!caption?.trim()) return undefined;
+  let t = normalizeDirectorCaptionSpaces(caption);
+  t = truncateImageCaptionWords(t, maxWords);
+  if (t.length < 2) return undefined;
+  if (!imageCaptionIsHighSignal(t, voiceover)) return undefined;
+  return t.slice(0, 48);
+}
+
+/** Deterministic variety cue so each AI frame gets a different compositional brief. */
+const COMPOSITION_VARIETY_HINTS: readonly string[] = [
+  'Favour asymmetrical framing — avoid dead-centre stock symmetry.',
+  'Emphasise depth: foreground element, clear mid-ground, receding background.',
+  'Environmental scale first; the subject may read small with strong context.',
+  'Texture- or detail-forward (hands, props, surfaces) — not a generic portrait.',
+  'Rim light, silhouette edge, or partial masking — skip textbook three-quarter view.',
+  'Low horizon or layered verticals — avoid flat eyeline webcam energy.',
+  'One chromatic accent on a restrained palette — avoid flat mushy grading.',
+  'Slight oblique camera energy — readable, not chaotic; no mirrored hero poses.',
+];
+
+function cheapStringHash(s: string): number {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+export function compositionUniquenessHintForShot(shotId: string, timelineIndex: number): string {
+  const h = cheapStringHash(`${shotId}\0${timelineIndex}`);
+  return COMPOSITION_VARIETY_HINTS[h % COMPOSITION_VARIETY_HINTS.length]!;
+}
+
+/**
+ * Reduce on-image junk: keep only wording that appears verbatim in the spoken line,
+ * preferring the longest caption slice that exists in VO (preserves VO spelling for that span).
+ */
+export function clampImageCaptionToVoiceover(
+  voiceover: string,
+  caption: string,
+  maxLen = 48,
+): string | undefined {
+  const vo = normalizeDirectorCaptionSpaces(voiceover);
+  const cap = normalizeDirectorCaptionSpaces(caption).slice(0, maxLen);
+  if (!vo || !cap) return undefined;
+  const voL = vo.toLowerCase();
+
+  /** Single-char / two-char letter matches are too easy to hit inside unrelated words. */
+  function substringAllowedInVo(sub: string): boolean {
+    const t = sub.trim();
+    if (t.length < 2) return /\d/.test(t);
+    if (/\d/.test(t)) return true;
+    if (t.includes(' ')) return true;
+    if (t.length === 2 && TWO_LETTER_NOISE.has(t.toLowerCase())) return false;
+    return keywordTokenInVoiceover(t.toLowerCase(), vo);
+  }
+
+  let best: string | undefined;
+  let bestLen = 0;
+  /** Among equal-length matches, prefer text that appears earlier in the VO (reads with the opening of the line, not only the tail). */
+  let bestIdx = Number.POSITIVE_INFINITY;
+  const maxL = Math.min(maxLen, cap.length);
+  for (let len = maxL; len >= 1; len--) {
+    for (let start = 0; start + len <= cap.length; start++) {
+      const sub = cap.slice(start, start + len);
+      const subL = sub.toLowerCase();
+      if (subL.length < 1) continue;
+      const idx = voL.indexOf(subL);
+      if (idx < 0) continue;
+      if (!substringAllowedInVo(sub)) continue;
+      if (len > bestLen || (len === bestLen && idx < bestIdx)) {
+        bestLen = len;
+        bestIdx = idx;
+        best = vo.slice(idx, idx + sub.length);
+      }
+    }
+  }
+  return best ? normalizeDirectorCaptionSpaces(best).slice(0, maxLen) : undefined;
+}
+
+/** After high-signal filter + dedupe: keep only the strongest ~⅓ of in-image labels so most frames stay clean. */
+function sparseImageCaptionsToBudget(shots: DirectorShot[], maxFraction = 0.34): void {
+  const withCap = shots
+    .map((s, i) => ({ s, i }))
+    .filter((x) => x.s.kind === 'ai_image' && x.s.imageCaption?.trim());
+  const nAi = shots.filter((s) => s.kind === 'ai_image').length;
+  if (nAi === 0 || withCap.length === 0) return;
+  const maxKeep = Math.max(1, Math.floor(nAi * maxFraction + 1e-9));
+  if (withCap.length <= maxKeep) return;
+
+  const score = (cap: string) => {
+    const t = cap.trim();
+    let sc = Math.min(55, t.length);
+    if (/\d/.test(t)) sc += 42;
+    if (/[%$€£]/.test(t)) sc += 28;
+    if (/\b[A-Z]{2,}\b/.test(t)) sc += 18;
+    if (/\b[A-Z][a-z]+\s+[A-Z][a-z]+\b/.test(t)) sc += 12;
+    return sc;
+  };
+
+  const sorted = [...withCap].sort(
+    (a, b) => score(b.s.imageCaption!) - score(a.s.imageCaption!),
+  );
+  const drop = new Set(sorted.slice(maxKeep));
+  for (const { s } of drop) {
+    s.imageCaption = undefined;
+  }
+}
+
+/** Drop duplicate on-image labels so the same phrase never burns into back-to-back stills. */
+function dedupeImageCaptionsInShotOrder(shots: readonly DirectorShot[]): void {
+  const seen = new Set<string>();
+  for (const s of shots) {
+    if (s.kind !== 'ai_image' || !s.imageCaption?.trim()) continue;
+    const key = s.imageCaption.trim().toLowerCase().replace(/\s+/g, ' ');
+    if (key.length < 2) continue;
+    if (seen.has(key)) {
+      s.imageCaption = undefined;
+    } else {
+      seen.add(key);
+    }
+  }
+}
+
+/**
+ * Re-clamp every `ai_image` caption to that shot's current `voiceover`, then dedupe.
+ * Call after repartition / merge / split so inherited `imageCaption` cannot stick on the wrong line.
+ */
+export function resyncImageCaptionsAfterVoiceEdits(shots: DirectorShot[]): void {
+  for (const s of shots) {
+    if (s.kind !== 'ai_image' || !s.imageCaption?.trim()) continue;
+    const vo = (s.voiceover ?? '').trim();
+    s.imageCaption = filterImageCaptionToHighSignal(
+      clampImageCaptionToVoiceover(vo, s.imageCaption),
+      vo,
+    );
+  }
+  dedupeImageCaptionsInShotOrder(shots);
+  sparseImageCaptionsToBudget(shots);
+}
+
 function keywordCardGroundedInVoiceover(cardText: string, voiceover: string): boolean {
   const voRaw = voiceover.trim();
   const cardRaw = cardText.trim();
@@ -643,16 +1079,28 @@ function keywordCardGroundedInVoiceover(cardText: string, voiceover: string): bo
   const cardLo = cardRaw.toLowerCase().replace(/\u2019/g, "'");
   const voSp = voLo.replace(/\s+/g, ' ');
   const cardSp = cardLo.replace(/\s+/g, ' ');
-  /** Phrase / label appears as contiguous substring (handles "New York", "June 6, 1944"). */
-  if (cardSp.length >= 2 && voSp.includes(cardSp)) return true;
+  if (cardSp.length < 2) return false;
+  /** Multi-word: contiguous phrase in VO. Single token: whole-word match only (not inside unrelated words). */
+  if (cardSp.includes(' ')) {
+    if (voSp.includes(cardSp)) return true;
+  } else if (keywordTokenInVoiceover(cardSp, voRaw)) {
+    return true;
+  }
   /** Ignore light punctuation between letters so "U.S." / "covid-19" match spoken forms. */
   const voFold = voLo.replace(/[^a-z0-9]+/g, ' ');
   const cardFold = cardLo.replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
-  if (cardFold.length >= 2 && voFold.replace(/\s+/g, ' ').includes(cardFold)) return true;
+  if (cardFold.length >= 2) {
+    if (cardFold.includes(' ')) {
+      if (voFold.replace(/\s+/g, ' ').includes(cardFold)) return true;
+    } else if (keywordTokenInVoiceover(cardFold, voRaw)) {
+      return true;
+    }
+  }
 
   const cA = alnumCollapsed(cardRaw);
   const vA = alnumCollapsed(voRaw);
-  if (cA.length >= 3 && vA.includes(cA)) return true;
+  /** Long collapsed runs only — short runs false-positive inside other words ("room" in "broom"). */
+  if (cA.length >= 8 && vA.includes(cA)) return true;
   if (
     cA.length === 2 &&
     /^[a-z]{2}$/i.test(cA) &&
@@ -674,10 +1122,12 @@ function keywordCardGroundedInVoiceover(cardText: string, voiceover: string): bo
   const cardForTokens = cardLo.replace(/'/g, '');
   const tokens = cardForTokens.split(/[^a-z0-9%$€£]+/).filter((w) => w.length >= 2);
   if (tokens.length === 0) {
-    if (cA.length >= 2 && vA.includes(cA) && !TWO_LETTER_NOISE.has(cA)) return true;
+    if (cA.length >= 2 && cA.length <= 7 && vA.includes(cA) && !TWO_LETTER_NOISE.has(cA)) {
+      return keywordTokenInVoiceover(cA, voRaw);
+    }
     return false;
   }
-  return tokens.every((tok) => keywordTokenInVoiceover(tok, voRaw));
+  return tokensAppearInOrderInVoiceover(voRaw, tokens);
 }
 
 /** Same rules as keyword cards — on-image fact labels must match spoken VO. */
@@ -720,6 +1170,7 @@ function thinSparseImageCaptionsOnShots(shots: DirectorShot[], maxFraction: numb
     if (/[A-Z][a-z]+ [A-Z]/.test(vo)) n += 3;
     const cap = (s.imageCaption ?? '').trim();
     if (cap.length >= 2 && vo.includes(cap)) n += 4;
+    if (cap && imageCaptionIsHighSignal(cap, vo)) n += 8;
     return n;
   }
 
@@ -839,13 +1290,16 @@ function normaliseShot(
     typeof (s as { imageCaption?: unknown }).imageCaption === 'string'
       ? (s as { imageCaption: string }).imageCaption.trim()
       : undefined;
-  if (!opts?.allowSparseImageText) imageCaption = undefined;
-  else if (imageCaption && imageCaption.length > 48) imageCaption = imageCaption.slice(0, 48);
-  if (
-    imageCaption &&
-    !overlayFactLabelGroundedInVoiceover(imageCaption, (s.voiceover ?? '').trim())
-  ) {
+  if (!opts?.allowSparseImageText) {
     imageCaption = undefined;
+  } else if (imageCaption) {
+    if (imageCaption.length > 48) imageCaption = imageCaption.slice(0, 48);
+    const vo = (s.voiceover ?? '').trim();
+    imageCaption = filterImageCaptionToHighSignal(
+      clampImageCaptionToVoiceover(vo, imageCaption),
+      vo,
+    );
+    if (!imageCaption) imageCaption = undefined;
   }
 
   return {
@@ -924,11 +1378,11 @@ function buildDirectorPrompt(args: DirectArgs): string {
     : '';
 
   const refBlock = args.referenceMediaDigest
-    ? `\n\nUSER REFERENCE LIBRARY (these images are available to pass into the video model as visual anchors — cite by index where relevant):\n${args.referenceMediaDigest}`
+    ? `\n\nUSER REFERENCE LIBRARY (these images are available to pass into the video model as visual anchors — cite by index where relevant):\n${args.referenceMediaDigest}\n\nOnly cite a reference when it fits **this episode's topic** ("${args.topic.replace(/\s+/g, ' ').replace(/"/g, '\\"').slice(0, 200)}"); do not let random library thumbnails (food, travel, unrelated products) steer the script or shot subjects.`
     : '';
 
   const inspirationBlock = args.inspirationStyleBlock
-    ? `\n\nINSPIRATION VISUAL LANGUAGE (the account chose these references — stills and/or short clips; representative frames from clips are passed into ai_image and ai_video as pixel anchors — every generated shot must feel coherently on-brand with them, not generic theme stock):\n${args.inspirationStyleBlock}\n\nTreat palette, contrast, grain, lens character, motion rhythm, and editorial cut feel as hard requirements wherever they appear in the references.`
+    ? `\n\nINSPIRATION / STYLE REFERENCES (still images and/or short clips the account uploaded with roles "inspiration" or "style_reference"):\n${args.inspirationStyleBlock}\n\n**CRITICAL — LOOK ONLY, NOT A SECOND TOPIC:** These files define **palette, contrast, grain, lens character, typography personality, motion rhythm, and editorial cut feel**. They do **not** define what this episode is *about*. The episode subject is **only** "${args.topic}" (and the JSON title / hook you write for that topic). **Do not** import recurring subjects from the references (e.g. food, restaurants, hunting, unrelated travel) into \`description\`, \`voiceover\`, \`subjectAction\`, or \`imageQuery\` unless the **narration for this video** explicitly discusses those subjects. If a reference shows food but the topic is music, you still write a music story — borrow the **visual treatment**, not the food props.`
     : '';
 
   const viralFormatPromptBlock = args.viralFormatBlock
@@ -944,7 +1398,7 @@ function buildDirectorPrompt(args: DirectArgs): string {
     : '';
 
   const newsBlock = args.newsContext
-    ? `\n\nGROUNDED CONTEXT (cite only facts present here):\n${args.newsContext}`
+    ? `\n\nGROUNDED CONTEXT (headlines / wiki — cite only facts present here **that clearly relate to the episode topic** "${args.topic}"):\n${args.newsContext}\n\nIf any headline or paragraph reads **off-topic** compared to "${args.topic}", **ignore it completely** — do not let unrelated domains (food, travel, other hobbies) appear in hook, voiceovers, descriptions, or imageQuery.`
     : '';
 
   const blacklist =
@@ -1056,14 +1510,23 @@ function buildDirectorPrompt(args: DirectArgs): string {
     args.allowSparseImageText && aiImageFactsOnly
       ? `\n\nON-IMAGE FACT LABELS ONLY (\`imageCaption\` — **this account**; the **image model** paints text into pixels — **no FFmpeg keyword pops**, no slate cards — **omit \`keywordCards\` entirely** for every shot):\n` +
           `- **Narration only — never picture labels:** \`imageCaption\` must be a **verbatim substring** of that shot's \`voiceover\` (the spoken script line). It is **not** a title for the frame, not a mood line, not "what we see" (\`Forest trail\`, \`Busy kitchen\`, \`Sunset city\`, \`Scientist at work\`) unless those **exact** words are spoken in \`voiceover\`. If you cannot copy 1–4 words straight from \`voiceover\`, **omit** \`imageCaption\`.\n` +
+          `- **Short & snappy:** **1–3 words** whenever possible (max 4). Pick the **most memorable** noun/verb/number chunk from that line — not a whole clause unless unavoidable.\n` +
+          `- **Unique per shot:** never reuse the **exact same** \`imageCaption\` string on another shot; each labelled still needs its **own** phrase from **that** line only. If two beats would share the same label, **omit** on one of them.\n` +
+          `- **One clear purpose per still:** every \`ai_image\` must show a **different** story beat and composition from the shot before and after — no filler wallpaper, no near-duplicate angles.\n` +
+          `- **Server quality bar:** labels that are only vague filler (no names, numbers, money, acronyms, or sharp keywords) are **removed** — **omit** \`imageCaption\` rather than forcing weak type.\n` +
+          `- **Digits and symbols:** When the VO states a stat, copy the **exact** digit string and symbols from that line (\`76%\` vs \`76 percent\`, \`$4.2T\` vs words) — never a different number or format than the narrator uses on this beat.\n` +
           `- **Script source only:** Do **not** invent labels from \`description\`, props, or "what would look good on screen". \`description\` only decides **where** type sits (sign, ticket, phone); **wording** is always from \`voiceover\`.\n` +
           `- **Sparse:** use \`imageCaption\` on **at most ~25–30%** of \`ai_image\` shots — **most** \`ai_image\` shots must have **no** \`imageCaption\` field (or empty). Never label every still.\n` +
+          `- **Density check:** if you are unsure, **omit** — **≥ ~70%** of \`ai_image\` frames in the whole storyboard should have **no** \`imageCaption\` at all.\n` +
           `- **Max 4 words** when set. Never title, hook, channel name, or style-bible examples.\n` +
-          `- **Inspiration:** match on-image typography from reference stills when the account provides them.\n` +
+          `- **Inspiration:** when reference stills show typography, **match that lettering style** (serif vs sans, weight, case, colour); do not default to generic "bold tech sans" unless the refs look like that.\n` +
           `- Omit when the same words are already visible in the scene or the shot is not \`ai_image\`.`
       : args.allowSparseImageText
         ? `\n\nON-IMAGE INFORMATION LABELS (\`imageCaption\` — **enabled** for this account; the **image model** paints text into the pixels — **no** FFmpeg lower-thirds or keyword pops for these facts):\n- **Narration only:** \`imageCaption\` must be words **spoken in that shot's \`voiceover\`** — not a visual caption of the photo (\`Mountain vista\`, \`Coffee close-up\`) unless the narrator literally says those words on this line.\n` +
             `- Only when **this shot's** voiceover states a memorable **proper noun or number** viewers must retain — **dates, years, people's names, places, money, %, ages** — set \`imageCaption\` on that **\`ai_image\`** shot (max **4 words**). Examples of valid labels: "June 6, 1944", "Marie Curie", "Lagos", "$4.2T", "76%".\n` +
+            `- **Short & snappy:** prefer **1–3 words**; never paste a long clause. **Never** reuse the exact same \`imageCaption\` on two shots.\n` +
+            `- **Server quality bar:** if the line has no strong name/number/keyword worth burning in, **omit** \`imageCaption\` — the server strips filler-only phrases.\n` +
+            `- **Digits:** copy stats **exactly** as spoken on that line (same digits and symbols); do not round, reformat, or substitute a synonym for a place or name.\n` +
             `- **Hard rule:** \`imageCaption\` MUST repeat **words or digits actually spoken in that shot's \`voiceover\`** (same line). The server **strips** labels that are not in the VO.\n` +
             `- **Never** put the video JSON \`title\`, hook line, channel name, or **any** style-bible example headline/script line into \`imageCaption\` — those are not spoken facts and become random on-screen junk.\n` +
             `- **Composition:** Prefer a shot \`description\` where the label has a believable in-world anchor (signage, device screen, ticket, map tag, magazine line, museum placard) — avoid "text floating on empty sky".\n` +
@@ -1080,7 +1543,7 @@ function buildDirectorPrompt(args: DirectArgs): string {
 
   const imageCaptionJsonLine = args.allowSparseImageText
     ? aiImageFactsOnly
-      ? '              "imageCaption": "<ai_image only, usually omit: ≤4 words copied from THIS shot voiceover only — never from description; omit keywordCards>"'
+      ? '              "imageCaption": "<ai_image only, usually omit: 1–3 high-signal words — name / place / number / stat from THIS shot voiceover only; omit if nothing worth burning in; omit keywordCards>"'
       : '              "imageCaption": "<ai_image only: ≤4 words, ONLY a date/year/name/place/stat explicitly spoken in THIS shot\'s voiceover — never title/hook/example lines; usually omit>"'
     : '              "imageCaption": "<optional ≤4 words on rare ai_image shots>"';
 
@@ -1100,7 +1563,16 @@ function buildDirectorPrompt(args: DirectArgs): string {
   const visualPurposeRule =
     '- **Every shot earns the cut:** each \`description\` (and scraper \`imageQuery\` when used) must advance a **new** idea aligned with that shot\'s \`voiceover\` — no run of near-duplicate frames for the same beat. If the story does not need another angle, merge beats instead of padding with redundant \`ai_image\` / \`ai_video\`.\n' +
     '- **Script-locked visuals:** a viewer should infer what this line of \`voiceover\` is about from \`description\` alone — no generic stock mood that could apply to any line. If the VO names a place, object, era, or action, the frame must show that (or a clear metaphor the beat explains), not unrelated beauty shots.\n' +
-    '- **Consecutive shots must differ:** back-to-back shots may not share the same "hero object + same framing + same room corner" — change at least **two** of: primary subject in frame, scale (e.g. wide → detail), camera move, setting zone, or time/mood beat. Avoid "same scene, tiny tweak" slideshows.\n';
+    '- **Single episode subject:** the entire storyboard is for **one** topic: "' +
+    args.topic.replace(/\s+/g, ' ').replace(/"/g, '\\"').slice(0, 200) +
+    '". Title, hook, every voiceover line, and every \`imageQuery\` must stay in that lane — never merge beats or B-roll from a different video idea.\n' +
+    '- **Consecutive shots must differ:** back-to-back shots may not share the same "hero object + same framing + same room corner" — change at least **two** of: primary subject in frame, scale (e.g. wide → detail), camera move, setting zone, or time/mood beat. Avoid "same scene, tiny tweak" slideshows.\n' +
+    '- **Cinematography grid:** for consecutive \`ai_image\` / \`ai_video\` shots, **never** reuse the same \`camera\` + \`framing\` + \`lighting\` triple as the previous shot — change at least one field clearly (prefer two). Alternate wide vs close, static vs moving camera, and warm vs cool light when the story allows so the edit does not look like one repeated still.\n' +
+    '- **On-image text:** if you use \`imageCaption\`, it must be **unique** to that shot (never the same string twice) and tied to **that** line\'s opening or key stat — not filler text that could belong to any frame.\n';
+
+  const narrationQualityRule =
+    '- **Narration quality:** Hook and every \`voiceover\` line must **earn** the listen — concrete **nouns, verbs, and facts** (who, where, what changed, how much). Ban vague hype ("insane", "you won\'t believe", "crazy", "wild") unless the style bible demands that register. Avoid filler stacks ("this thing", "that stuff", "something about"). **Vary** how adjacent lines **start**; do not chain many lines that all open with "So…", "And…", or "But…". Prefer active voice; cut throat-clearing ("ok so basically", "here\'s the thing") unless the account voice is explicitly casual that way.\n' +
+    '- **Outro + caption:** \`outro\` = one decisive CTA line (no ramble). \`caption\` reads like a human editor wrote it — complete sentences, no hashtag stuffing inside the prose; keep \`hashtags\` short and on-topic.\n';
 
   const locked = args.lockedVideoTitle?.trim();
   const exampleTitleCount = (args.styleBible?.exampleVideoTitles ?? []).filter(Boolean).length;
@@ -1136,10 +1608,11 @@ PREFERRED PLATFORMS: ${args.theme.preferredPlatforms.join(', ')}${styleBibleBloc
 
 DIRECTING RULES (non-negotiable):
 ${shotCountRule}
-${avgClipOperatorRule}${visualPurposeRule}${namesNumbersDirectingRule}${sparseDirectingRule}- Give every shot a CONCRETE subject action (verb + object), a camera move, a framing, a lighting description, and a palette. Abstract = slop.
+${narrationQualityRule}${avgClipOperatorRule}${visualPurposeRule}${namesNumbersDirectingRule}${sparseDirectingRule}- Give every shot a CONCRETE subject action (verb + object), a camera move, a framing, a lighting description, and a palette. Abstract = slop.
 - Use intentional CUTS. Default transition is 'hard_cut'. Save 'whip_pan' / 'match_cut' / 'flash_cut' for moments that earn them.
 - Reuse the SAME character / setting descriptors across shots so AI models keep consistency. Don't say "a woman" once and "she" the next shot — re-describe every time.
 - When reference stills/clips or character sheets are passed into models, treat them as **continuity anchors only** — never plan shots that simply remake a reference frame (same pose, crop, and layout). Each shot must be a new editorial frame in the same visual world.
+- **Inspiration media are not a second script:** style/inspiration uploads control **look** (colour, light, grain, lens). They do **not** override the episode topic — do not steer the story toward whatever objects happen to appear in those reference files unless the VO is literally about them.
 - Mark each shot as ONE of: ai_video (expensive — use sparingly for money-shots and motion-critical moments), ai_image (cheap, animated at render with Ken Burns), scraped_video, scraped_image, user_media, b_roll.
 - Cap ai_video to at most ${args.maxAiVideoShots ?? (longform ? 5 : 3)} per storyboard. Use ai_image or scraped_image for the rest.
 - If user references (character refs) are relevant to a shot, add their index to \`referenceIndices\`. The video model will use them to anchor identity.
@@ -1159,7 +1632,7 @@ ${longform && !locked ? `\n\nTOP-LEVEL JSON "title" (no saved example titles —
 OUTPUT contract — return ONLY JSON:
 {
 ${titleJsonLine}
-  "hook": "<opening spoken line, ≤3 seconds>",
+  "hook": "<opening line ≤3s: one sharp claim or curiosity; concrete nouns; no stacked clichés>",
   "outro": "<closing CTA, one sentence>",
   "caption": "<post caption, 1-3 sentences, ≤3 emoji>",
   "hashtags": ["tag", ...],
@@ -1190,7 +1663,7 @@ ${titleJsonLine}
               "role": "<narrative role>",
               "description": "<what the camera sees, 1-2 sentences>",
               "onScreen": "<3-8 words OR empty>",
-              "voiceover": "<spoken line OR empty>",
+              "voiceover": "<one spoken line: one clear idea; specific nouns/verbs; no filler — OR empty>",
               "eyebrow": "<optional chapter label>",
               "durationSeconds": 3,
               "camera": "slow_push_in",
@@ -1300,6 +1773,29 @@ export function shotToPrompt(args: {
   timelineShotIndex?: number;
   /** Total AI / timeline shots in this storyboard (omit or 0 to skip timeline cue). */
   timelineShotTotal?: number;
+  /**
+   * Act / beat labels from the flattened storyboard. Used when this shot has no
+   * `voiceover` line so image models still anchor to the story arc (not random stock).
+   */
+  storyStructureHint?: string;
+  /** Planner topic for this post — prevents style refs from hijacking subject matter. */
+  seriesTopic?: string;
+  /** Storyboard `title` — must align with topic and narration. */
+  episodeTitle?: string;
+  /**
+   * Storyboard `durationSeconds` for this shot (after VO repartition) — hints composition
+   * pacing so the image matches how long the line will read on screen.
+   */
+  plannerHoldSeconds?: number;
+  /**
+   * Short recap of the previous timeline shot (description + prior on-image label).
+   * Forces a clearly different composition and label from the prior cut.
+   */
+  previousShotOneLiner?: string;
+  /**
+   * Deterministic compositional bias so consecutive AI stills are not near-clones.
+   */
+  compositionUniquenessHint?: string;
 }): string {
   const {
     shot,
@@ -1315,6 +1811,12 @@ export function shotToPrompt(args: {
     factLabelImagePromptExtra,
     timelineShotIndex,
     timelineShotTotal,
+    storyStructureHint,
+    seriesTopic,
+    episodeTitle,
+    plannerHoldSeconds,
+    previousShotOneLiner,
+    compositionUniquenessHint,
   } = args;
 
   // 1. IDENTITY — character / subject description (identity anchor).
@@ -1344,14 +1846,22 @@ export function shotToPrompt(args: {
 
   if (thumbnailCoverMode) {
     if (shot.kind === 'ai_image' && shot.imageCaption?.trim()) {
-      styleStr += ` Include very large bold simple title text reading "${shot.imageCaption.trim()}" — 2-6 words max, geometric sans-serif, extreme legibility, high contrast; centre or lower third. No extra small type, subtitles, or paragraphs.`;
+      const cap = shot.imageCaption.trim();
+      if (inspirationStyleHint?.trim()) {
+        styleStr += ` Cover title: paint the exact phrase "${cap}" (2–6 words) as bold hero type — **match the lettering family, weight, case, and colour treatment from the account inspiration references** when they show typography; do not substitute a generic geometric sans if the refs use serif, condensed, handwritten, or display faces. Extreme legibility; centre or lower third; no extra subtitles.`;
+      } else {
+        styleStr += ` Include very large bold simple title text reading "${cap}" — 2-6 words max, geometric sans-serif, extreme legibility, high contrast; centre or lower third. No extra small type, subtitles, or paragraphs.`;
+      }
     } else {
       styleStr +=
         ' THUMBNAIL / COVER ROLE: single poster frame for the same video — visual language must match the other AI stills in this project. No words, numbers, watermarks, or logos on the image.';
     }
   } else if (shot.kind === 'ai_image' && shot.imageCaption?.trim()) {
     const extra = factLabelImagePromptExtra?.trim();
-    styleStr += ` One in-scene typographic label only (signage, print, device UI, ticket, or subtle editorial burn-in). **Exact characters are SCRIPT-LOCKED in the opening block** — do not substitute scene-descriptive or "title of the photo" wording. ${extra ? `${extra} ` : ''}Legible at HD; visually secondary to the subject.`;
+    const typoLock = inspirationStyleHint?.trim()
+      ? `Lettering must **echo inspiration references** (serif vs sans, weight, case, colour) when those stills show type — avoid a default "tech sans" look unless the refs use it.`
+      : `Use one restrained editorial type style consistent with the scene — avoid novelty decorative fonts unless the set is literally signage or a poster.`;
+    styleStr += ` One in-scene typographic label only (signage, print, device UI, ticket, or subtle editorial burn-in). **Exact characters are SCRIPT-LOCKED in the opening block** — do not substitute scene-descriptive or "title of the photo" wording. ${typoLock} ${extra ? `${extra} ` : ''}Legible at HD; visually secondary to the subject.`;
   }
 
   const imageCaptionScriptLock =
@@ -1365,10 +1875,79 @@ export function shotToPrompt(args: {
           return (
             `SCRIPT-LOCKED ON-IMAGE TEXT — Paint this exact string as intrinsic pixels (sign, screen, print, etc.): "${cap}". ` +
             `It MUST be a contiguous substring of the narration below; do **not** swap in visual captions (e.g. skyline, ruins, lab, coffee) unless those exact words appear in the narration. ` +
+            `Prefer a **short** 1–3 word phrase taken from the **opening or middle** of the line so the label lands with how the beat **starts**, not only its tail — unless the only number or proper noun is at the end. ` +
             `NARRATION: "${vo}". ` +
             `FORBIDDEN: any different wording, paraphrase, or "what you see" label not spoken above.`
           );
         })()
+      : '';
+
+  const voTrim = (shot.voiceover ?? '').trim();
+  /** Explicit spoken-line grounding for image/video models (VO was only implicit in `description` before). */
+  const narrationClause = (() => {
+    if (thumbnailCoverMode) return '';
+    if (shot.kind !== 'ai_image' && shot.kind !== 'ai_video') return '';
+    if (!voTrim) return '';
+    if (shot.imageCaption?.trim()) return '';
+    const vo = voTrim.replace(/"/g, "'").slice(0, 520);
+    const on = (shot.onScreen ?? '').trim().replace(/"/g, "'").slice(0, 120);
+    const parts = [
+      `NARRATION LOCK — The frame must visually support what the viewer hears on this beat: concrete props, setting, people, or a single clear metaphor explained by the script — not unrelated stock mood.`,
+      `Spoken line for this shot: "${vo}".`,
+    ];
+    if (on) parts.push(`Optional short on-screen type (only if it fits the scene): "${on}".`);
+    return parts.join(' ');
+  })();
+
+  const structureClause =
+    !thumbnailCoverMode &&
+    (shot.kind === 'ai_image' ||
+      shot.kind === 'ai_video' ||
+      shot.kind === 'scraped_image' ||
+      shot.kind === 'scraped_video') &&
+    !voTrim &&
+    storyStructureHint?.trim()
+      ? `STORY PLACEMENT: ${storyStructureHint.trim().slice(0, 340)} The image must fit this segment of the arc (not a generic unrelated scene).`
+      : '';
+
+  const topicT = (seriesTopic ?? '').replace(/\s+/g, ' ').trim().slice(0, 200);
+  const titleT = (episodeTitle ?? '').replace(/\s+/g, ' ').trim().slice(0, 140);
+  const topicKinds: ShotKind[] = ['ai_image', 'ai_video', 'scraped_image', 'scraped_video'];
+  const topicAnchorClause =
+    !thumbnailCoverMode &&
+    topicT.length > 0 &&
+    topicKinds.includes(shot.kind)
+      ? `EPISODE SUBJECT LOCK — This render is for **one** video only: topic «${topicT.replace(/"/g, "'")}»${titleT ? `; title «${titleT.replace(/"/g, "'")}»` : ''}. ` +
+        `Do not depict recurring subjects from unrelated niches (food service, hunting, random travel vignettes, etc.) unless this shot's narration explicitly discusses them. Inspiration/style reference pixels inform **colour, light, grain, and lens only** — not a second storyline.`
+      : '';
+
+  const consecutiveDistinctClause =
+    !thumbnailCoverMode &&
+    previousShotOneLiner?.trim() &&
+    (shot.kind === 'ai_image' || shot.kind === 'ai_video')
+      ? `CONSECUTIVE-CUT DISTINCTNESS — Previous shot: ${previousShotOneLiner.trim().replace(/"/g, "'").slice(0, 240)}. Invent a **new** hero idea, environment, and camera geometry — not the same room corner, same poster layout, or same single-prop hero as that frame. If this shot uses on-image text, it must be **different wording** from the prior shot's label (never duplicate the same line across consecutive stills).`
+      : '';
+
+  const compositionVarietyClause =
+    !thumbnailCoverMode &&
+    compositionUniquenessHint?.trim() &&
+    (shot.kind === 'ai_image' || shot.kind === 'ai_video')
+      ? `SHOT VISUAL DIVERSITY (mandatory): ${compositionUniquenessHint.trim()}`
+      : '';
+
+  const hold =
+    plannerHoldSeconds != null && Number.isFinite(plannerHoldSeconds)
+      ? Math.min(14, Math.max(0.8, plannerHoldSeconds))
+      : null;
+  const timingClause =
+    !thumbnailCoverMode &&
+    hold != null &&
+    (shot.kind === 'ai_image' || shot.kind === 'ai_video')
+      ? `READABILITY vs HOLD — This still is planned for **~${hold.toFixed(1)}s** on screen with the spoken line below; put the **main idea** in a single readable glance (no tiny background-only gags). The frame must match **this** line only, not earlier or later lines.${
+          shot.imageCaption?.trim()
+            ? ` The typographic label is the **hero hook** for this beat — size and contrast so it reads in the **first third** of the hold with the opening of the narration, not as tiny fine print that only matches words at the very end of the line.`
+            : ''
+        }`
       : '';
 
   const styleLock = [
@@ -1384,7 +1963,20 @@ export function shotToPrompt(args: {
 
   // 5. NEGATIVE — implied by missing banned terms; handled per-model.
 
-  let out = [styleLock, imageCaptionScriptLock, identity, image, motion, styleStr]
+  let out = [
+    topicAnchorClause,
+    consecutiveDistinctClause,
+    compositionVarietyClause,
+    styleLock,
+    imageCaptionScriptLock,
+    narrationClause,
+    timingClause,
+    structureClause,
+    identity,
+    image,
+    motion,
+    styleStr,
+  ]
     .filter((s) => s && s.trim().length > 0)
     .join(' ');
 
@@ -1534,29 +2126,39 @@ export function rebalanceStoryboardToTargetShots(sb: Storyboard, targetShots: nu
     voiceover: (f.shot.voiceover ?? '').trim(),
   }));
 
-  const mergePair = (a: DirectorShot, b: DirectorShot): DirectorShot => ({
-    ...a,
-    id: randomUUID(),
-    voiceover: [a.voiceover, b.voiceover].filter(Boolean).join(' ').trim(),
-    description: `${a.description ?? ''} ${b.description ?? ''}`.replace(/\s+/g, ' ').trim().slice(0, 1400),
-    onScreen:
-      (a.onScreen?.trim() || '').length >= (b.onScreen?.trim() || '').length
-        ? (a.onScreen ?? '').trim()
-        : (b.onScreen ?? '').trim(),
-    imageQuery:
-      [a.imageQuery, b.imageQuery]
-        .map((x) => (x ?? '').trim())
-        .filter(Boolean)
-        .join('; ')
-        .slice(0, 480) ||
-      (a.imageQuery ?? b.imageQuery),
-    durationSeconds: Math.min(24, (a.durationSeconds ?? 3) + (b.durationSeconds ?? 3)),
-    kind: a.kind,
-    referenceIndices:
-      (a.referenceIndices?.length ?? 0) >= (b.referenceIndices?.length ?? 0)
-        ? a.referenceIndices
-        : b.referenceIndices,
-  });
+  const mergePair = (a: DirectorShot, b: DirectorShot): DirectorShot => {
+    const mergedVo = [a.voiceover, b.voiceover].filter(Boolean).join(' ').trim();
+    const captionCand = [a.imageCaption, b.imageCaption].find((x) => x?.trim())?.trim();
+    const mergedCaptionRaw =
+      captionCand && mergedVo
+        ? clampImageCaptionToVoiceover(mergedVo, captionCand)
+        : undefined;
+    const mergedCaption = filterImageCaptionToHighSignal(mergedCaptionRaw, mergedVo);
+    return {
+      ...a,
+      id: randomUUID(),
+      voiceover: mergedVo,
+      description: `${a.description ?? ''} ${b.description ?? ''}`.replace(/\s+/g, ' ').trim().slice(0, 1400),
+      onScreen:
+        (a.onScreen?.trim() || '').length >= (b.onScreen?.trim() || '').length
+          ? (a.onScreen ?? '').trim()
+          : (b.onScreen ?? '').trim(),
+      imageQuery:
+        [a.imageQuery, b.imageQuery]
+          .map((x) => (x ?? '').trim())
+          .filter(Boolean)
+          .join('; ')
+          .slice(0, 480) ||
+        (a.imageQuery ?? b.imageQuery),
+      durationSeconds: Math.min(24, (a.durationSeconds ?? 3) + (b.durationSeconds ?? 3)),
+      kind: a.kind,
+      referenceIndices:
+        (a.referenceIndices?.length ?? 0) >= (b.referenceIndices?.length ?? 0)
+          ? a.referenceIndices
+          : b.referenceIndices,
+      imageCaption: mergedCaption,
+    };
+  };
 
   while (shots.length > targetShots) {
     let bestI = 0;
@@ -1597,12 +2199,20 @@ export function rebalanceStoryboardToTargetShots(sb: Storyboard, targetShots: nu
       voiceover: vo1,
       durationSeconds: Math.max(1.2, dur * r),
       transitionOut: 'hard_cut',
+      imageCaption: filterImageCaptionToHighSignal(
+        clampImageCaptionToVoiceover(vo1, s.imageCaption ?? '') ?? undefined,
+        vo1,
+      ),
     };
     const shot2: DirectorShot = {
       ...s,
       id: randomUUID(),
       voiceover: vo2,
       durationSeconds: Math.max(1.2, dur * (1 - r)),
+      imageCaption: filterImageCaptionToHighSignal(
+        clampImageCaptionToVoiceover(vo2, s.imageCaption ?? '') ?? undefined,
+        vo2,
+      ),
     };
     shots.splice(bestI, 1, shot1, shot2);
   }
@@ -1617,6 +2227,8 @@ export function rebalanceStoryboardToTargetShots(sb: Storyboard, targetShots: nu
     }
     return sb;
   }
+
+  resyncImageCaptionsAfterVoiceEdits(shots);
 
   return {
     ...sb,

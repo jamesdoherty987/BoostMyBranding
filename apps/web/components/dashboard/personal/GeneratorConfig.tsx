@@ -34,6 +34,7 @@ import {
   type PersonalGeneratorConfig,
 } from '@boost/api-client';
 import { api } from '@/lib/dashboard/api';
+import { PUBLIC_API_BASE_URL } from '@/lib/publicApiBaseUrl';
 import { TTS_VOICE_PRESETS, matchTtsPresetId, ttsPresetOptionLabel } from '@/lib/ttsVoicePresets';
 
 type TitleExampleRow = { id: string; text: string };
@@ -1613,7 +1614,7 @@ function CustomAudioCard({
       const form = new FormData();
       form.append('file', file);
       if (attribution.trim()) form.append('attribution', attribution.trim());
-      const base = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000').replace(/\/$/, '');
+      const base = PUBLIC_API_BASE_URL;
       const res = await fetch(`${base}/api/v1/personal/accounts/${account.id}/audio`, {
         method: 'POST',
         credentials: 'include',
@@ -1645,7 +1646,7 @@ function CustomAudioCard({
     }
     setBusy(true);
     try {
-      const base = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000').replace(/\/$/, '');
+      const base = PUBLIC_API_BASE_URL;
       const res = await fetch(`${base}/api/v1/personal/accounts/${account.id}/audio`, {
         method: 'DELETE',
         credentials: 'include',

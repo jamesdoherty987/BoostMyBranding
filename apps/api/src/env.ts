@@ -17,6 +17,15 @@ if (!process.env.API_PORT && process.env.PORT) {
   process.env.API_PORT = process.env.PORT;
 }
 
+// Railway (and similar) inject the public hostname without scheme — use it for
+// `/uploads/…` and other absolute API URLs when `API_PUBLIC_URL` wasn't set manually.
+if (
+  !String(process.env.API_PUBLIC_URL ?? '').trim() &&
+  String(process.env.RAILWAY_PUBLIC_DOMAIN ?? '').trim()
+) {
+  process.env.API_PUBLIC_URL = `https://${String(process.env.RAILWAY_PUBLIC_DOMAIN).trim()}`;
+}
+
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   API_PORT: z.coerce.number().default(4000),

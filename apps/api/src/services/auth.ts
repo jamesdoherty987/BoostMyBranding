@@ -234,19 +234,24 @@ export async function resolveSession(token: string | undefined) {
 
 export function setSessionCookie(res: Response, token: string) {
   const isProd = env.NODE_ENV === 'production';
+  const domain = isProd && env.APP_URL.includes('://') ? sessionCookieDomain(env.APP_URL) : undefined;
+  // Vercel / Railway / Render preview hosts live on public suffixes — browsers reject
+  // `Domain=.vercel.app` etc. Omit `domain` so the cookie is host-only (works with
+  // Next.js `/api` rewrites to Railway). Use `SameSite=None` only when we set a real
+  // private apex domain (www + api on the same `.brand.com`).
+  const sameSite: 'lax' | 'none' = !isProd ? 'lax' : domain ? 'none' : 'lax';
+
   res.cookie(SESSION_COOKIE, token, {
     httpOnly: true,
     secure: isProd,
-    sameSite: isProd ? 'none' : 'lax',
+    sameSite,
     path: '/',
     maxAge: SESSION_TTL_MS,
-    // Setting domain only in prod so cookie is shared across subdomains.
-    ...(isProd && env.APP_URL.includes('://')
-      ? { domain: apexDomain(env.APP_URL) }
-      : {}),
+    ...(domain ? { domain } : {}),
   });
 }
 
+/** `.example.com` for cookie Domain — only for registrable domains you control. */
 function apexDomain(url: string): string | undefined {
   try {
     const host = new URL(url).hostname;
@@ -256,8 +261,40 @@ function apexDomain(url: string): string | undefined {
   return undefined;
 }
 
+/**
+ * Never return a `Domain=` for shared / public-suffix hosts — Chrome rejects those
+ * cookies, which breaks sign-in on `*.vercel.app` and similar.
+ */
+function sessionCookieDomain(appUrl: string): string | undefined {
+  try {
+    const host = new URL(appUrl).hostname.toLowerCase();
+    if (host === 'localhost' || host.endsWith('.localhost')) return undefined;
+    if (host === '127.0.0.1' || host === '[::1]') return undefined;
+    const noDomain = (h: string) =>
+      h === 'vercel.app' ||
+      h.endsWith('.vercel.app') ||
+      h.endsWith('.vercel.dev') ||
+      h.endsWith('.netlify.app') ||
+      h.endsWith('.github.io') ||
+      h.endsWith('.railway.app') ||
+      h.endsWith('.onrender.com') ||
+      h.endsWith('.cloudflarepages.dev') ||
+      h.endsWith('.ngrok.io') ||
+      h.endsWith('.ngrok-free.app');
+    if (noDomain(host)) return undefined;
+    return apexDomain(appUrl);
+  } catch {
+    return undefined;
+  }
+}
+
 export function clearSessionCookie(res: Response) {
-  res.clearCookie(SESSION_COOKIE, { path: '/' });
+  const isProd = env.NODE_ENV === 'production';
+  const domain = isProd && env.APP_URL.includes('://') ? sessionCookieDomain(env.APP_URL) : undefined;
+  res.clearCookie(SESSION_COOKIE, {
+    path: '/',
+    ...(domain ? { domain } : {}),
+  });
 }
 
 export function getSessionToken(req: Request) {

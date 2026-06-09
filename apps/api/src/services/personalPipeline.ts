@@ -342,37 +342,40 @@ async function generateForAccountScript(
       topic,
     });
 
-    const script = await generateScript({
-      theme,
-      topic,
-      targetDurationSeconds: longformScript
-        ? clampLongformTargetSeconds(genConfig.longformTargetSeconds ?? theme.targetDurationSeconds)
-        : undefined,
-      customDirection: account.customDirection ?? undefined,
-      blacklist: account.topicBlacklist ?? undefined,
-      language: account.language,
-      longform: longformScript,
-      newsContext,
-      styleBible,
-      characterGuide: character
-        ? {
-            name: character.name,
-            promptFragment: character.promptFragment ?? undefined,
-            voiceTone:
-              (character.characterSheet as any)?.voice?.tone,
-            voicePace:
-              (character.characterSheet as any)?.voice?.pace,
-            catchphrases:
-              (character.characterSheet as any)?.voice?.catchphrases,
-          }
-        : undefined,
-      referenceMediaDigest: refMediaDigest,
-      promptAppendix: scriptPromptAppendix || undefined,
-      averageClipSeconds: genConfig.averageClipSeconds,
-      scriptModel: genConfig.scriptModel,
-      recentVideoTitles: usedVideoTitles,
-      lockedVideoTitle: channelTitlePass ?? undefined,
-    });
+    const script = await withAbortWhenPersonalPostFailed(
+      postId,
+      generateScript({
+        theme,
+        topic,
+        targetDurationSeconds: longformScript
+          ? clampLongformTargetSeconds(genConfig.longformTargetSeconds ?? theme.targetDurationSeconds)
+          : undefined,
+        customDirection: account.customDirection ?? undefined,
+        blacklist: account.topicBlacklist ?? undefined,
+        language: account.language,
+        longform: longformScript,
+        newsContext,
+        styleBible,
+        characterGuide: character
+          ? {
+              name: character.name,
+              promptFragment: character.promptFragment ?? undefined,
+              voiceTone:
+                (character.characterSheet as any)?.voice?.tone,
+              voicePace:
+                (character.characterSheet as any)?.voice?.pace,
+              catchphrases:
+                (character.characterSheet as any)?.voice?.catchphrases,
+            }
+          : undefined,
+        referenceMediaDigest: refMediaDigest,
+        promptAppendix: scriptPromptAppendix || undefined,
+        averageClipSeconds: genConfig.averageClipSeconds,
+        scriptModel: genConfig.scriptModel,
+        recentVideoTitles: usedVideoTitles,
+        lockedVideoTitle: channelTitlePass ?? undefined,
+      }),
+    );
     if (script.blocked) {
       await markFailed(postId, `Blocked by safety filter: ${script.blockReason ?? 'unspecified'}`);
       return {

@@ -770,7 +770,14 @@ export async function regeneratePersonalPostThumbnail(
   return { ok: true, thumbnailUrl: thumb.url };
 }
 
-/** True when post row is `failed` (e.g. user cancelled). On transient DB errors, returns false so generation is not aborted. */
+/**
+ * True when generation for this post should stop: row is `failed` (Stop / cancel),
+ * or the row no longer exists (user deleted the post). The latter is required so
+ * {@link withAbortWhenPersonalPostFailed} can unwind and the per-account in-memory
+ * queue does not stay blocked behind a deleted job.
+ *
+ * On transient DB errors, returns false so generation is not aborted.
+ */
 export async function personalPostIsFailed(postId: string): Promise<boolean> {
   try {
     assertDb();
@@ -779,7 +786,8 @@ export async function personalPostIsFailed(postId: string): Promise<boolean> {
       .select({ status: personalPosts.status })
       .from(personalPosts)
       .where(eq(personalPosts.id, postId));
-    return r?.status === 'failed';
+    if (!r) return true;
+    return r.status === 'failed';
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     const transient =
@@ -800,7 +808,8 @@ export async function personalPostIsFailed(postId: string): Promise<boolean> {
 
 /**
  * Thrown from {@link withAbortWhenPersonalPostFailed} when the post row was
- * marked `failed` (e.g. user pressed Stop) while a long async call was in flight.
+ * marked `failed`, removed (deleted), or otherwise triggers {@link personalPostIsFailed}
+ * while a long async call was in flight.
  */
 export const PERSONAL_POST_CANCELLED_MESSAGE = 'PERSONAL_POST_CANCELLED';
 
@@ -809,9 +818,9 @@ export function isPersonalPostCancelledError(e: unknown): boolean {
 }
 
 /**
- * Races `work` against a short poll of {@link personalPostIsFailed} so Stop
- * can break out of long fal/scraper/TTS waits and let the per-account generate
- * queue advance to the next job.
+ * Races `work` against a short poll of {@link personalPostIsFailed} so Stop,
+ * cancel, or **deleting the post** can break out of long LLM/scraper/TTS waits and
+ * let the per-account generate queue advance to the next job.
  */
 export async function withAbortWhenPersonalPostFailed<T>(postId: string, work: Promise<T>): Promise<T> {
   let timer: ReturnType<typeof setInterval> | undefined;

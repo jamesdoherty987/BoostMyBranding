@@ -219,8 +219,17 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
 });
 
 const server = app.listen(env.API_PORT, () => {
-  console.log(`🚀 BoostMyBranding API → http://localhost:${env.API_PORT}`);
-  if (env.NODE_ENV !== 'production') {
+  const publicUrl =
+    env.API_PUBLIC_URL?.trim() ||
+    (process.env.RAILWAY_PUBLIC_DOMAIN?.trim()
+      ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN.trim()}`
+      : null);
+  if (env.NODE_ENV === 'production') {
+    console.log(
+      `🚀 BoostMyBranding API → ${publicUrl ?? `listening on :${env.API_PORT} (set API_PUBLIC_URL or deploy on Railway for a public URL in logs)`}`,
+    );
+  } else {
+    console.log(`🚀 BoostMyBranding API → http://localhost:${env.API_PORT}`);
     console.log(
       `   Next.js UI → http://localhost:3000 (not started by this process). From repo root run: pnpm dev  or  pnpm dev:stack`,
     );

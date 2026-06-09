@@ -140,7 +140,9 @@ export default function PersonalDashboardPage() {
                       wrong, or CORS blocked the request). Confirm{' '}
                       <code className="rounded bg-rose-100 px-1 font-mono text-[11px]">NEXT_PUBLIC_API_URL</code>{' '}
                       in your web env matches a running API (default{' '}
-                      <code className="font-mono">http://localhost:4000</code>), then restart the API after
+                      <code className="font-mono">http://127.0.0.1:4000</code> in dev). In production, leave{' '}
+                      <code className="rounded bg-rose-100 px-1 font-mono text-[11px]">NEXT_PUBLIC_API_URL</code> unset
+                      so requests use same-origin <code className="font-mono">/api</code> (Vercel → Railway). Then restart the API after
                       pulling changes. Use either{' '}
                       <code className="font-mono">localhost</code> or <code className="font-mono">127.0.0.1</code>{' '}
                       consistently for both dashboard and API env URLs.
@@ -1114,7 +1116,10 @@ function PublishingCard({
         <p className="mb-3 min-w-0 text-pretty break-words text-xs leading-relaxed text-slate-500">
           When enabled, each finished render triggers an email from your API&apos;s{' '}
           <code className="rounded bg-slate-100 px-1">FROM_EMAIL</code> with a <strong>public download link</strong> to the MP4
-          (no file attachment — better for large videos and Resend limits). Requires <code className="rounded bg-slate-100 px-1">RESEND_API_KEY</code> in server <code className="rounded bg-slate-100 px-1">.env</code>.
+          (no file attachment — better for large videos and Resend limits). Requires{' '}
+          <code className="rounded bg-slate-100 px-1">RESEND_API_KEY</code> in server <code className="rounded bg-slate-100 px-1">.env</code>
+          , and the <strong>domain</strong> used in <code className="rounded bg-slate-100 px-1">FROM_EMAIL</code> must be verified in your Resend
+          project (otherwise Resend returns &quot;domain is not verified&quot; and no mail is sent).
         </p>
         {!resendOk ? (
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">

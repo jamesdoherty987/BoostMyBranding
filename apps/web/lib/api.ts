@@ -1,4 +1,6 @@
 import { createApi } from '@boost/api-client';
 
-export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+import { PUBLIC_API_BASE_URL } from './publicApiBaseUrl';
+
+export const API_URL = PUBLIC_API_BASE_URL;
 export const api = createApi(API_URL);

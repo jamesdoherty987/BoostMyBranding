@@ -1,0 +1,5 @@
+# Nixpacks (Railway / Docker build). Installs FFmpeg for personal video stitch.
+# See docs/deployment-railway-vercel.md for full setup.
+
+[phases.setup]
+aptPkgs = ["ffmpeg"]

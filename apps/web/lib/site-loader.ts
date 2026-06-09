@@ -12,6 +12,8 @@ import type { Metadata } from 'next';
 import type { WebsiteConfig, PageConfig } from '@boost/core';
 import { resolvePage } from '@boost/core';
 
+import { SERVER_API_BASE_URL } from './serverApiBaseUrl';
+
 export interface SiteData {
   businessName: string;
   slug: string;
@@ -22,18 +24,9 @@ export interface SiteData {
 }
 
 /**
- * API URL resolution.
- *
- *   In prod (Vercel/Render), `API_UPSTREAM` points at the Render API
- *   deployment. Server-rendered pages need an absolute URL since a
- *   relative `/api/*` doesn't work from a Node environment.
- *
- *   In dev, `NEXT_PUBLIC_API_URL` is the localhost:4000 fallback.
+ * API URL for **server-side** fetches. See `serverApiBaseUrl.ts`.
  */
-export const API_URL =
-  process.env.API_UPSTREAM ??
-  process.env.NEXT_PUBLIC_API_URL ??
-  'http://localhost:4000';
+export const API_URL = SERVER_API_BASE_URL;
 
 /**
  * Fetch the site payload by slug. Returns null on any failure so the caller

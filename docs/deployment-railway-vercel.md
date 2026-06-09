@@ -90,7 +90,7 @@ In the Vercel project → **Settings → Environment Variables** (Production):
 Next.js runs **`rewrites()` from `next.config.ts` at `next build` time**, not on every request. That means:
 
 - **Set `API_UPSTREAM` on Vercel before (or soon after) your first real Production deploy** so `/api/*` is proxied to Railway.
-- The **Production build no longer fails** if `API_UPSTREAM` is missing; you get a **console warning** and **no `/api` rewrite** until you set the variable and redeploy.
+- The **Vercel build does not fail** if `API_UPSTREAM` is missing on **Production** or **Preview**; you get a **console warning** once per process and **no `/api` rewrite** until you set the variable and redeploy.
 - If you **change the Railway public URL**, run a **new Vercel deployment** so the rewrite destination is rebuilt.
 - **Preview** deployments: set `API_UPSTREAM` on the **Preview** environment too if previews should call an API; otherwise they may have no `/api` proxy unless you point Preview at a staging API.
 
@@ -109,7 +109,7 @@ After changing env vars, **redeploy** Vercel so `next.config.ts` is re-evaluated
 
 ## 4. How URLs work in this repo
 
-- **Browser → API:** `apps/web/lib/publicApiBaseUrl.ts` defaults to an **empty** base URL in production when `NEXT_PUBLIC_API_URL` is unset, so fetches go to `/api/v1/...` on the **Vercel** origin. Next.js **rewrites** those to `API_UPSTREAM` + `/api/v1/...`.
+- **Browser → API:** `apps/web/lib/publicApiBaseUrl.ts` defaults to an **empty** base URL in production when `NEXT_PUBLIC_API_URL` is unset, so fetches go to `/api/v1/...` on the **Vercel** origin. Next.js **rewrites** those to `API_UPSTREAM` + `/api/v1/...` when `API_UPSTREAM` was present at **`next build`** time; if it was missing at build, same-origin `/api` will not reach Railway until you set `API_UPSTREAM` and redeploy.
 - **Server / middleware → API:** `apps/web/lib/serverApiBaseUrl.ts` prefers `API_UPSTREAM`, then an absolute `NEXT_PUBLIC_API_URL`, then on Vercel `https://${VERCEL_URL}` so RSC and middleware can reach the API without mis-typing localhost.
 - **Railway → public API URL:** `RAILWAY_PUBLIC_DOMAIN` is mapped to `API_PUBLIC_URL` in `apps/api/src/env.ts` when you did not set it manually (helps `/uploads/…` and logs).
 - **Session cookies (`bmb_session`):** On `*.vercel.app`, `*.railway.app`, and similar **public-suffix** hosts, the API **does not** set `Cookie: Domain=…` (browsers would reject it). Cookies are **host-only** for your Vercel hostname, which matches same-origin `/api` proxying. For your own apex domain (e.g. `app.brand.com` + `api.brand.com`), the API may set `Domain=.brand.com` and `SameSite=None` so cookies work across subdomains.

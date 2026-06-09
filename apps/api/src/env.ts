@@ -51,7 +51,9 @@ const schema = z.object({
    * when R2 is off so URLs hit the server that serves `express.static('/uploads')`.
    * In production, prefer this over APP_URL when the web app is on a different host.
    */
-  API_PUBLIC_URL: z.string().url().optional().or(z.literal('')),
+  API_PUBLIC_URL: preprocessBlank(
+    z.union([z.string().url(), z.literal('')]).optional(),
+  ),
 
   APP_URL: preprocessBlank(z.string().url().default('http://localhost:3000')),
   PORTAL_URL: preprocessBlank(z.string().url().default('http://localhost:3000/portal')),
@@ -75,7 +77,7 @@ const schema = z.object({
   R2_ACCESS_KEY_ID: z.string().optional(),
   R2_SECRET_ACCESS_KEY: z.string().optional(),
   R2_BUCKET_NAME: z.string().optional(),
-  R2_PUBLIC_URL: z.string().url().optional().or(z.literal('')),
+  R2_PUBLIC_URL: preprocessBlank(z.union([z.string().url(), z.literal('')]).optional()),
   /**
    * Force-disable R2. Accepts `true`/`false`, `1`/`0`, `yes`/`no`, `on`/`off` (case-insensitive).
    * Blank or unset uses R2 when all R2_* credentials + R2_PUBLIC_URL are set.
@@ -100,7 +102,9 @@ const schema = z.object({
   CONTENTSTUDIO_API_KEY: z.string().optional(),
   CONTENTSTUDIO_WORKSPACE_ID: z.string().optional(),
   /** Optional dashboard URL shown in Personal → Posting (OAuth happens in Content Studio, not this app). */
-  CONTENTSTUDIO_APP_URL: z.string().url().optional().or(z.literal('')),
+  CONTENTSTUDIO_APP_URL: preprocessBlank(
+    z.union([z.string().url(), z.literal('')]).optional(),
+  ),
 
   /**
    * Claude model for the **personal channel title** JSON step only (short prompt).
@@ -164,7 +168,9 @@ const schema = z.object({
   CANVA_CLIENT_ID: z.string().optional(),
   CANVA_CLIENT_SECRET: z.string().optional(),
   /** Where Canva sends users after authorising. Usually {API_URL}/api/v1/canva/callback. */
-  CANVA_REDIRECT_URI: z.string().url().optional().or(z.literal('')),
+  CANVA_REDIRECT_URI: preprocessBlank(
+    z.union([z.string().url(), z.literal('')]).optional(),
+  ),
 
   /** Optional — Runway / Replicate keys for personal director models that use those providers. */
   RUNWAY_API_KEY: z.string().optional(),
@@ -199,7 +205,7 @@ if (env.NODE_ENV === 'production') {
   const errors: string[] = [];
   if (env.AUTH_SECRET.startsWith('dev-secret-change-me'))
     errors.push('AUTH_SECRET must be a real 32+ char random string in production.');
-  if (!env.DATABASE_URL) errors.push('DATABASE_URL is required in production.');
+  if (!env.DATABASE_URL?.trim()) errors.push('DATABASE_URL is required in production.');
   const r2CredIntent = Boolean(
     env.R2_ACCOUNT_ID?.trim() ||
       env.R2_ACCESS_KEY_ID?.trim() ||
@@ -215,7 +221,7 @@ if (env.NODE_ENV === 'production') {
   if (errors.length > 0) {
     if (allowIncompleteProductionBoot()) {
       console.warn(
-        '⚠️  ALLOW_INCOMPLETE_PRODUCTION is enabled — API starts with an incomplete configuration (not for public-facing production):',
+        '⚠️ ALLOW_INCOMPLETE_PRODUCTION is enabled — API starts with an incomplete configuration (not for public-facing production):',
       );
       for (const e of errors) console.warn(`   - ${e}`);
     } else {
@@ -258,19 +264,19 @@ if (r2Partial) {
 }
 
 export const features = {
-  db: Boolean(env.DATABASE_URL),
-  claude: Boolean(env.ANTHROPIC_API_KEY),
+  db: Boolean(env.DATABASE_URL?.trim()),
+  claude: Boolean(env.ANTHROPIC_API_KEY?.trim()),
   fal: Boolean(env.FAL_KEY?.trim()),
   /** R2 only when every required field is set and not force-disabled (VO/music/stitcher fetch URLs). */
   r2: r2EnvLooksComplete() && env.R2_DISABLED !== 'true',
-  stripe: Boolean(env.STRIPE_SECRET_KEY),
-  resend: Boolean(env.RESEND_API_KEY),
-  contentStudio: Boolean(env.CONTENTSTUDIO_API_KEY),
+  stripe: Boolean(env.STRIPE_SECRET_KEY?.trim()),
+  resend: Boolean(env.RESEND_API_KEY?.trim()),
+  contentStudio: Boolean(env.CONTENTSTUDIO_API_KEY?.trim()),
   /** True when server .env has a default workspace (id never exposed via API). */
   contentStudioDefaultWorkspace: Boolean(env.CONTENTSTUDIO_WORKSPACE_ID?.trim()),
   /** Public Content Studio web app (for “connect social” links in the dashboard). */
   contentStudioAppUrl: env.CONTENTSTUDIO_APP_URL?.trim() || null,
-  vercel: Boolean(env.VERCEL_API_TOKEN && env.VERCEL_PROJECT_ID),
+  vercel: Boolean(env.VERCEL_API_TOKEN?.trim() && env.VERCEL_PROJECT_ID?.trim()),
   /** Canva Connect API is only useful when all three OAuth bits are set (non-blank). */
   canva: Boolean(
     env.CANVA_CLIENT_ID?.trim() &&

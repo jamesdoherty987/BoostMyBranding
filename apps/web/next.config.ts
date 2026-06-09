@@ -13,9 +13,9 @@ import type { NextConfig } from 'next';
  * separate deployments. Only the API lives elsewhere because it needs a
  * long-running Node process (cron, websockets, 30s+ generation jobs).
  *
- * Recommended for production (Vercel): **API_UPSTREAM** before `next build` so rewrites
- * bake in your API origin. If it is missing, `next build` still succeeds but `/api/*`
- * is not proxied until you set it and redeploy. Local dev defaults to http://127.0.0.1:4000.
+ * Recommended for Vercel: set **API_UPSTREAM** before `next build` so rewrites bake in your API origin.
+ * If it is missing, `next build` still succeeds but `/api/*` is not proxied until you set it and redeploy.
+ * A warning is logged on Vercel **Production** and **Preview** when `API_UPSTREAM` is absent. Local dev defaults to http://127.0.0.1:4000.
  */
 
 /** Upstream Express API for Next rewrites (`/api/*` → API). In local dev, default to the API port so you do not need API_UPSTREAM in `.env`. */
@@ -25,14 +25,17 @@ const API =
 
 let warnedMissingApiUpstream = false;
 
+const vercelDeploy =
+  process.env.VERCEL_ENV === 'production' || process.env.VERCEL_ENV === 'preview';
+
 // `rewrites()` is evaluated at **build time** (see Next.js discussions on build-time
 // rewrites). Set `API_UPSTREAM` before deploy so `/api/*` proxies to Railway; without it,
 // the build still succeeds but `/api/*` is not rewritten until you set the var and rebuild.
-if (process.env.VERCEL_ENV === 'production' && !process.env.API_UPSTREAM?.trim()) {
+if (vercelDeploy && !process.env.API_UPSTREAM?.trim()) {
   if (!warnedMissingApiUpstream) {
     warnedMissingApiUpstream = true;
     console.warn(
-      '[next.config] Missing API_UPSTREAM: add it in Vercel → Environment Variables (Production), e.g. https://your-api.up.railway.app (no trailing slash), then redeploy so /api/* proxies to your API.',
+      `[next.config] Missing API_UPSTREAM (${process.env.VERCEL_ENV ?? 'unknown'}): add it in Vercel → Environment Variables for this environment, e.g. https://your-api.up.railway.app (no trailing slash), then redeploy so /api/* proxies to your API.`,
     );
   }
 }

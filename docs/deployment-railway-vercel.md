@@ -96,7 +96,7 @@ Next.js runs **`rewrites()` from `next.config.ts` at `next build` time**, not on
 
 **Turborepo:** `turbo.json` lists `API_UPSTREAM`, `VERCEL_*`, and `NEXT_PUBLIC_*` on the **`build`** task so they are **included in the cache hash** when they change. The repo uses **`"envMode": "loose"`** (Turborepo 2 default is strict): strict mode only passes allowlisted env vars into tasks, which often breaks **`next build` on Vercel** because the platform injects many variables Next and tooling expect. Loose mode keeps those vars available while the `env` list still drives invalidation.
 
-**If the build still fails:** open the Vercel log, expand the **`web:build`** / **`next build`** step, and copy the **first error** (not only “exited with 1”). Common checks: **Root Directory** = `apps/web`, **Install Command** / **Build Command** overrides cleared (use `apps/web/vercel.json`), `pnpm-lock.yaml` committed and in sync, and **`API_UPSTREAM`** set for Production when you want `/api` to work after deploy.
+**If the build still fails:** copy the **first error** from the Vercel log (expand **Building**) or from a local **`vercel build`**. Common checks: **Root Directory** = `apps/web`, dashboard **Install / Build** overrides cleared, **`pnpm-lock.yaml`** committed and in sync with `package.json`, and **`API_UPSTREAM`** set when you want `/api` proxied after deploy.
 
 ### Vercel project settings (recommended)
 
@@ -104,8 +104,10 @@ Next.js runs **`rewrites()` from `next.config.ts` at `next build` time**, not on
 2. **Framework Preset:** Next.js (auto-detected from `apps/web/vercel.json`).
 3. **Install / Build:** Leave the dashboard **Install Command** and **Build Command** **empty** so Vercel uses **`apps/web/vercel.json`**, which runs from **`apps/web`** (pnpm discovers the monorepo root automatically):
    - Install: `corepack enable && corepack prepare pnpm@9.12.0 --activate && pnpm install --frozen-lockfile`
-   - Build: `pnpm exec turbo run build --filter=web`
-4. If you previously set a custom command like `pnpm --filter @boost/core build && … && next build`, **delete it** — it runs from `apps/web` without the workspace root and breaks; the `vercel.json` commands replace it.
+   - Build: **`pnpm run vercel-build`** — runs `@boost/core` → `@boost/api-client` → `@boost/ui` → **`next build`** (no Turbo on Vercel). A clean clone **must** compile `packages/core` into `dist/` before Next can resolve `@boost/core`; `pnpm exec turbo run build --filter=web` alone does not always run those workspace builds in a way that survives CI, and Turbo 2 **strict env** filtering has also broken Vercel in the wild.
+4. **Local monorepo builds** (optional): from repo root, `pnpm exec turbo run build --filter=web` still works and respects `turbo.json` caching.
+
+**If the dashboard build log never loads:** Vercel sometimes shows a spinner when the build fails before streaming (e.g. paused DB integration, account issue). From your machine, in the repo: **`npx vercel@latest build`** (or `pnpm dlx vercel build`) after `vercel link` — errors print in the terminal. See [Vercel: deployment logs](https://vercel.com/docs/deployments/logs) and [CLI `vercel build`](https://vercel.com/docs/cli/build).
 
 After changing env vars, **redeploy** Vercel so `next.config.ts` is re-evaluated at build.
 

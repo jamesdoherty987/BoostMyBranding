@@ -8,7 +8,7 @@
     "print:personal-title-test-env": "tsx --import ./scripts/load-root-env.ts scripts/print-personal-title-test-env.ts",
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js",
+    "start": "tsx src/index.ts",
     "lint": "tsc --noEmit",
     "upload:public-music-manifest": "node scripts/upload-public-music-from-manifest.mjs scripts/r2-public-music-manifest.json",
     "sync:r2-public-music-folder": "tsx --import ./scripts/load-root-env.ts ./scripts/sync-r2-public-music-folder.ts"
@@ -36,6 +36,7 @@
     "resend": "^4.0.1",
     "sharp": "^0.34.5",
     "stripe": "^17.4.0",
+    "tsx": "^4.19.2",
     "zod": "^3.23.8"
   },
   "devDependencies": {
@@ -45,7 +46,6 @@
     "@types/multer": "^1.4.12",
     "@types/node": "^22.9.0",
     "@types/node-cron": "^3.0.11",
-    "tsx": "^4.19.2",
     "typescript": "^5.6.3"
   }
 }

@@ -91,6 +91,9 @@ importers:
       stripe:
         specifier: ^17.4.0
         version: 17.7.0
+      tsx:
+        specifier: ^4.19.2
+        version: 4.21.0
       zod:
         specifier: ^3.23.8
         version: 3.25.76
@@ -113,9 +116,6 @@ importers:
       '@types/node-cron':
         specifier: ^3.0.11
         version: 3.0.11
-      tsx:
-        specifier: ^4.19.2
-        version: 4.21.0
       typescript:
         specifier: ^5.6.3
         version: 5.9.3

@@ -63,7 +63,7 @@ Set these in the **API** service (copy from local `.env`, never commit secrets).
 
 **Cron / scheduled routes:** if you use `CRON_SECRET`, set the same value on whatever pings your cron URLs.
 
-**Canva:** set `CANVA_REDIRECT_URI` to `https://<your-railway-host>/api/v1/canva/callback` (or custom API domain).
+**Canva:** set `CANVA_REDIRECT_URI` to the **URL the user’s browser will hit** after OAuth — usually **`https://<your-site>/api/v1/canva/callback`** when the Next app proxies `/api` to Railway (same host as `APP_URL`). Only use the raw Railway host if the browser is sent there directly without the Vercel rewrite. The URI must **exactly** match what you register in the Canva developer portal.
 
 **Migrations:** from your machine (or CI), with `DATABASE_URL` pointing at production:
 
@@ -83,7 +83,19 @@ In the Vercel project → **Settings → Environment Variables** (Production):
 | `NEXT_PUBLIC_PORTAL_URL` | `https://your-app.vercel.app/portal` |
 | `NEXT_PUBLIC_API_URL` | **Leave unset** for the recommended setup: browser calls same-origin `/api/…` and Next rewrites to Railway. Only set if you intentionally want the browser to call the API directly (must match CORS + cookies strategy). |
 
-After changing env vars, **redeploy** Vercel so `next.config.ts` and middleware pick up `API_UPSTREAM`.
+### Build-time requirement for `API_UPSTREAM`
+
+Next.js runs **`rewrites()` from `next.config.ts` at `next build` time**, not on every request. That means:
+
+- **`API_UPSTREAM` must be set in Vercel before the Production build** (same value you use at runtime is fine).
+- If you **change the Railway public URL**, run a **new Vercel deployment** so the rewrite destination is rebuilt.
+- **Preview** deployments: set `API_UPSTREAM` on the **Preview** environment too if previews should call an API; otherwise they may have no `/api` proxy unless you point Preview at a staging API.
+
+The Production build **fails fast** with a clear error if `API_UPSTREAM` is missing when `VERCEL_ENV=production`.
+
+After changing env vars, **redeploy** Vercel so `next.config.ts` is re-evaluated at build.
+
+**Build command:** Prefer installing from the **monorepo root** and running **`pnpm turbo run build --filter=web`** (or set Vercel **Root Directory** to `apps/web` and use **`pnpm build`**, with install still from root if your template requires it). If you use a custom chain like `pnpm --filter @boost/core build && …`, `@boost/ui` and `@boost/api-client` now define a **`build`** script (`tsc --noEmit`) so those steps do not fail with “Missing script: build”.
 
 ## 4. How URLs work in this repo
 

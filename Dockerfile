@@ -1,6 +1,7 @@
 # BoostMyBranding API for Render (or any Docker host): Node + FFmpeg + pnpm monorepo build.
 # Build: docker build -t boost-api .
-# Run:  docker run --rm -p 4000:4000 -e PORT=4000 --env-file .env.production boost-api
+# Run:  docker run --rm -e PORT=8080 -p 8080:8080 --env-file .env.production boost-api
+# (Use the same PORT the process listens on; Railway sets PORT automatically.)
 
 FROM node:22-bookworm-slim
 
@@ -30,4 +31,6 @@ ENV NODE_ENV=production
 
 EXPOSE 4000
 
-CMD ["node", "apps/api/dist/index.js"]
+# Run API with tsx so workspace packages that ship TypeScript (@boost/video, …)
+# resolve the same way as local `pnpm dev` (plain `node dist/index.js` cannot load them).
+CMD ["pnpm", "--filter", "api", "start"]

@@ -15,6 +15,7 @@
     "./postcss-preset.cjs": "./postcss-preset.cjs"
   },
   "scripts": {
+    "build": "tsc --noEmit",
     "lint": "tsc --noEmit"
   },
   "dependencies": {

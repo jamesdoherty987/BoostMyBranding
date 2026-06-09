@@ -597,6 +597,51 @@ export async function resolvePersonalPostVideoDownload(
   return { ok: true, videoUrl: url, filename: personalPostMp4Filename(row.script, row.topic) };
 }
 
+function personalPostThumbnailFilename(script: unknown, topic: string): string {
+  const title =
+    script && typeof script === 'object' && typeof (script as Record<string, unknown>).title === 'string'
+      ? String((script as Record<string, unknown>).title).trim()
+      : '';
+  const raw = (title || String(topic ?? '').trim() || 'thumbnail')
+    .replace(/[\\/:*?"<>|]+/g, '')
+    .replace(/\s+/g, '_')
+    .slice(0, 72);
+  const base = raw || 'thumbnail';
+  const lower = base.toLowerCase();
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return base;
+  return `${base}.jpg`;
+}
+
+/**
+ * Resolves the storage URL for a personal post thumbnail (poster) when the caller
+ * owns the account. Used by the download proxy route (avoids browser CORS on R2).
+ */
+export async function resolvePersonalPostThumbnailDownload(
+  userId: string,
+  accountId: string,
+  postId: string,
+): Promise<
+  { ok: true; imageUrl: string; filename: string } | { ok: false; error: 'not_found' | 'no_thumbnail' }
+> {
+  const account = await getAccount(userId, accountId);
+  if (!account) return { ok: false, error: 'not_found' };
+  if (!isDbConfigured()) return { ok: false, error: 'not_found' };
+  const db = getDb();
+  const [row] = await db
+    .select({
+      thumbnailUrl: personalPosts.thumbnailUrl,
+      topic: personalPosts.topic,
+      script: personalPosts.script,
+    })
+    .from(personalPosts)
+    .where(and(eq(personalPosts.id, postId), eq(personalPosts.accountId, accountId)))
+    .limit(1);
+  if (!row) return { ok: false, error: 'not_found' };
+  const url = (row.thumbnailUrl ?? '').trim();
+  if (!url) return { ok: false, error: 'no_thumbnail' };
+  return { ok: true, imageUrl: url, filename: personalPostThumbnailFilename(row.script, row.topic) };
+}
+
 /**
  * Inserts a `queued` personal post row immediately so the dashboard shows the
  * job while {@link enqueuePersonalGenerateForAccount} waits behind another run.
@@ -822,13 +867,39 @@ export function isPersonalPostCancelledError(e: unknown): boolean {
  * cancel, or **deleting the post** can break out of long LLM/scraper/TTS waits and
  * let the per-account generate queue advance to the next job.
  */
+/** ~60s at 1500ms poll — bumps `updated_at` so failStale* cron does not kill long healthy runs. */
+const PERSONAL_HEARTBEAT_TICKS = 40;
+
+/**
+ * Bumps `updated_at` while a post is still in-flight. Generation logs intentionally
+ * skip `updated_at`; this heartbeat keeps multi-hour director runs from looking “stale”.
+ */
+async function touchPersonalPostHeartbeat(postId: string): Promise<void> {
+  if (!isDbConfigured()) return;
+  const db = getDb();
+  await db
+    .update(personalPosts)
+    .set({ updatedAt: new Date() })
+    .where(
+      and(
+        eq(personalPosts.id, postId),
+        inArray(personalPosts.status, ['queued', 'scripting', 'sourcing_media', 'rendering']),
+      ),
+    );
+}
+
 export async function withAbortWhenPersonalPostFailed<T>(postId: string, work: Promise<T>): Promise<T> {
   let timer: ReturnType<typeof setInterval> | undefined;
+  let ticks = 0;
   try {
     return await Promise.race([
       work,
       new Promise<T>((_, reject) => {
         timer = setInterval(() => {
+          ticks += 1;
+          if (ticks % PERSONAL_HEARTBEAT_TICKS === 0) {
+            void touchPersonalPostHeartbeat(postId).catch(() => {});
+          }
           void personalPostIsFailed(postId)
             .then((failed) => {
               if (failed) {
@@ -853,8 +924,8 @@ const MAX_GENERATION_ACTIVITY_LOG = 220;
 
 /**
  * Appends one line to `render_activity_log` for dashboard debugging (sourcing,
- * stitch, etc.). Does **not** update `updated_at` so heartbeat / stale-job
- * logic still reflects real pipeline progress.
+ * stitch, etc.). Does **not** update `updated_at` (see {@link withAbortWhenPersonalPostFailed}
+ * heartbeat for stale-job protection during long steps).
  */
 export async function appendPersonalGenerationLog(postId: string, message: string): Promise<void> {
   if (!isDbConfigured()) return;
@@ -899,7 +970,7 @@ const BOOT_RENDERING_RESET_MSG =
 
 /** Shown when boot sweep fails queued / scripting / non-resumable sourcing from a prior process. */
 const BOOT_EARLY_PHASE_RESET_MSG =
-  'The API restarted while this post was queued, writing the script, or sourcing media (Ctrl+C, deploy, or a second API on the same port). Work from the old process is not carried over. Press Generate again.';
+  'The API process restarted while this post was queued, writing the script, or sourcing media (deploy, memory limit, health check, host sleep, or a second API instance on the same database). That work does not survive the restart. Press Generate again. If this happens often, set NODE_ENV=production on the API host and enable director resume (see deployment docs).';
 
 /**
  * Director `sourcing_media` with a storyboard survives the first boot query, but when
@@ -907,7 +978,7 @@ const BOOT_EARLY_PHASE_RESET_MSG =
  * they do not sit "in progress" forever—must match user expectation vs a hung job.
  */
 const BOOT_DIRECTOR_SOURCING_NO_RESUME_MSG =
-  'Director post was in media sourcing when the API restarted. PERSONAL_RESUME_DIRECTOR_ON_BOOT is off, so this run was not auto-resumed and the row was marked failed. Press Generate again, or set PERSONAL_RESUME_DIRECTOR_ON_BOOT=true on a single API host. The Generation log on this card was kept so you can still read prior steps (e.g. provider errors).';
+  'Director post was in media sourcing when the API restarted and auto-resume was disabled (PERSONAL_RESUME_DIRECTOR_ON_BOOT=false, e.g. multi-replica). Press Generate again. The Generation log on this card was kept so you can still read prior steps (e.g. provider errors).';
 
 const BOOT_ERR_DISPLAY_MAX = 1200;
 
@@ -918,17 +989,18 @@ const BOOT_ERR_DISPLAY_MAX = 1200;
  * work cannot resume from the DB alone after the process exits), **except**
  * director-mode rows that can resume (pre-stitch checkpoint or storyboard in DB).
  *
- * - Default: **on** when `NODE_ENV` is not `production`.
- * - Production default: **off** (rolling multi-instance deploys could
- *   otherwise mark a job still running on another instance). Set
- *   `PERSONAL_RESET_RENDERING_ON_BOOT=true` on a single-node host if you want
- *   the same behaviour there.
+ * - Default: **on** only when `NODE_ENV` is `development` or `test`.
+ * - Staging/production: **off** unless you set `PERSONAL_RESET_RENDERING_ON_BOOT=true`
+ *   (single-node only — multi-instance can mark another replica’s in-flight job as dead).
  */
 function personalRenderingBootResetEnabled(): boolean {
   const raw = process.env.PERSONAL_RESET_RENDERING_ON_BOOT?.trim().toLowerCase();
   if (raw === 'true' || raw === '1') return true;
   if (raw === 'false' || raw === '0') return false;
-  return process.env.NODE_ENV !== 'production';
+  // Only auto-fail “orphan” in-flight rows on explicit local dev/test. When NODE_ENV
+  // is unset (some PaaS builders) or mis-set, `!== 'production'` used to wipe runs
+  // after every harmless API restart — users saw “restarted while queued” on mobile.
+  return process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test';
 }
 
 /**
@@ -936,16 +1008,21 @@ function personalRenderingBootResetEnabled(): boolean {
  * checkpoints). {@link resumeInterruptedDirectorPersonalPostsOnBoot} in
  * `personalDirectorPipeline.ts` enqueues those jobs.
  *
- * - Default **off** everywhere so pipelines only continue after an explicit
- *   Generate (or you opt in for crash recovery).
- * - Set `PERSONAL_RESUME_DIRECTOR_ON_BOOT=true` on a single-node host when you
- *   want checkpointed director jobs to resume after deploy/restart.
+ * - Default **on** when Railway or Render env is detected (typical single API).
+ * - Set `PERSONAL_RESUME_DIRECTOR_ON_BOOT=false` when running **multiple** API
+ *   replicas against one database so two instances don’t resume the same post.
  */
 export function personalDirectorResumeOnBootEnabled(): boolean {
   const raw = process.env.PERSONAL_RESUME_DIRECTOR_ON_BOOT?.trim().toLowerCase();
   if (raw === 'true' || raw === '1' || raw === 'yes' || raw === 'on') return true;
   if (raw === 'false' || raw === '0' || raw === 'no' || raw === 'off') return false;
-  return false;
+  // Default ON for common single-API PaaS (Railway / Render). Multi-replica deploys
+  // should set PERSONAL_RESUME_DIRECTOR_ON_BOOT=false so two instances don’t race the same row.
+  const onRailwayOrRender =
+    Boolean(String(process.env.RAILWAY_PUBLIC_DOMAIN ?? '').trim()) ||
+    Boolean(String(process.env.RAILWAY_ENVIRONMENT ?? '').trim()) ||
+    Boolean(String(process.env.RENDER ?? '').trim());
+  return onRailwayOrRender;
 }
 
 /**

@@ -48,7 +48,7 @@ Set these in the **API** service (copy from local `.env`, never commit secrets).
 
 | Variable | Purpose |
 |----------|---------|
-| `NODE_ENV` | `production` |
+| `NODE_ENV` | **`production`** for public APIs. If unset on Railway, the API infers `production` when `RAILWAY_PUBLIC_DOMAIN` or `RAILWAY_ENVIRONMENT` is set (before env validation). |
 | `DATABASE_URL` | Neon (or Postgres) connection string |
 | `AUTH_SECRET` | Random string **32+ chars** (not the dev default) |
 | `STRIPE_SECRET_KEY` | **Optional** — omit if you do not use Stripe billing; when set, enables Checkout and the customer portal |
@@ -60,8 +60,10 @@ Set these in the **API** service (copy from local `.env`, never commit secrets).
 | `API_PUBLIC_URL` | **Optional on Railway** — defaults from `RAILWAY_PUBLIC_DOMAIN` if unset. Use your public API URL (`https://….up.railway.app` or custom domain). Needed for `/uploads/…` when R2 is off. |
 | R2 / AI / Resend / etc. | As in `.env.example` |
 | `ALLOW_INCOMPLETE_PRODUCTION` | **Sandboxes only** — set to `true` / `1` / `yes` / `on` so the API **boots** in `NODE_ENV=production` even without `DATABASE_URL` or a real `AUTH_SECRET` (unsafe for real users). Omit for normal production. |
+| `PERSONAL_RESUME_DIRECTOR_ON_BOOT` | **Usually omit** — defaults **on** when Railway or Render env vars are present so director-mode videos **resume after deploy/restart** instead of failing as “interrupted”. Set to **`false`** if you run **multiple API replicas** on one database (avoids two instances resuming the same row). |
+| `PERSONAL_RESET_RENDERING_ON_BOOT` | **Usually omit** — the aggressive “fail all in-flight personal posts on every API boot” sweep runs only when `NODE_ENV` is `development` or `test`, or when this is **`true`** (single-node only). |
 
-**CORS:** the API allowlist is built from `APP_URL`, `PORTAL_URL`, and `DASHBOARD_URL`. They must match what users type in the browser (scheme + host + port).
+**Personal autopilot (phones off):** turn on **Schedule** in the dashboard for a Personal channel (`auto_generate_on_schedule`). The API cron **`runDuePersonalAccounts`** runs every **5 minutes** (server-side) and enqueues generation when `next_run_at` is due — your phone does not need to stay open. the API allowlist is built from `APP_URL`, `PORTAL_URL`, and `DASHBOARD_URL` (scheme + host + port). Set them to your **canonical** site URL (e.g. `https://www.example.com` or `https://example.com`). The API also accepts the paired **apex ⟷ `www`** origin automatically so POST `/api/v1/auth/login` is not blocked when visitors use the other hostname.
 
 **Cron / scheduled routes:** if you use `CRON_SECRET`, set the same value on whatever pings your cron URLs.
 

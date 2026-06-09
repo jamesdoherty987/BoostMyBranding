@@ -348,9 +348,9 @@ export async function planStoryboard(args: DirectArgs): Promise<Storyboard> {
   }
   // Long-form storyboards emit a lot more JSON — 5-8 chapters × 3-5
   // shots with full cinematography fields per shot easily crosses
-  // the default 4k budget. Use a large output budget so the model is not
-  // cut off mid-string (which surfaces as JSON.parse SyntaxError).
-  const maxTokens = args.longform?.enabled ? 32_000 : 4_096;
+  // a 4k budget. Non-longform director themes can still be JSON-heavy
+  // (many acts/shots), so use 8k there; long-form uses a much larger cap.
+  const maxTokens = args.longform?.enabled ? 32_000 : 8_192;
 
   const prompt = buildDirectorPrompt({
     ...args,
@@ -365,7 +365,7 @@ export async function planStoryboard(args: DirectArgs): Promise<Storyboard> {
     {
       label: `director:${args.theme.id}:${args.topic.slice(0, 40)}`,
       attempts: 3,
-      retryOn: (e) => isDefaultRetryable(e) || e instanceof SyntaxError,
+      retryOn: isDefaultRetryable,
     },
   );
 

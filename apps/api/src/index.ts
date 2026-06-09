@@ -246,7 +246,7 @@ server.on('error', (err: NodeJS.ErrnoException) => {
       `   Stop that terminal with Ctrl+C, or set API_PORT in .env to a free port. Your browser can still work if you only need the existing server.`,
     );
     console.error(
-      `   Avoid running two APIs on the same DB: in-flight personal posts can fail on the next clean boot with a "restarted during sourcing" message.\n`,
+      `   Avoid running two APIs on the same DB: in-flight personal posts can conflict. If you use multiple API replicas, set PERSONAL_RESUME_DIRECTOR_ON_BOOT=false.\n`,
     );
   } else {
     console.error('[api] listen error:', err);

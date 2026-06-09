@@ -81,7 +81,13 @@ export async function generateText(prompt: string, opts: ClaudeOptions = {}): Pr
   const textBlocks = resp.content
     .filter((c): c is Anthropic.TextBlock => c.type === 'text')
     .map((c) => c.text);
-  return textBlocks.join('\n').trim();
+  const out = textBlocks.join('\n').trim();
+  if (!out) {
+    throw new SyntaxError(
+      'Claude returned an empty text response (no text blocks; likely refusal, model stop, or upstream issue).',
+    );
+  }
+  return out;
 }
 
 export async function generateJSON<T>(prompt: string, opts: ClaudeOptions = {}): Promise<T> {
@@ -93,8 +99,24 @@ export async function generateJSON<T>(prompt: string, opts: ClaudeOptions = {}):
   // prefixes with a sentence ("Here's the JSON:"), or trails with
   // commentary — all of which break JSON.parse. Pull the first {...}
   // or [...] block out of the text before parsing.
-  const cleaned = extractJsonBlock(raw);
-  return JSON.parse(cleaned) as T;
+  const cleaned = extractJsonBlock(raw).trim();
+  if (!cleaned) {
+    throw new SyntaxError(
+      'Claude returned no JSON object or array (empty after extraction; prose-only or malformed output).',
+    );
+  }
+  try {
+    return JSON.parse(cleaned) as T;
+  } catch (e) {
+    if (e instanceof SyntaxError) {
+      const head = cleaned.length > 200 ? `${cleaned.slice(0, 200)}…` : cleaned;
+      throw new SyntaxError(
+        `${e.message} (jsonLen=${cleaned.length}, head=${JSON.stringify(head)})`,
+        { cause: e },
+      );
+    }
+    throw e;
+  }
 }
 
 /**
@@ -230,6 +252,9 @@ export async function analyzeImage(
     .map((c) => c.text)
     .join('\n')
     .trim();
+  if (!text) {
+    return { error: 'empty_response', raw: '' };
+  }
   const cleaned = text.replace(/^```json\s*|```$/gi, '').trim();
   try {
     return JSON.parse(cleaned);

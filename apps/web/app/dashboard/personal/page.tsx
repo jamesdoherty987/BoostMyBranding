@@ -26,6 +26,7 @@ import {
   RefreshCw,
   Share2,
   Download,
+  ImageDown,
   Info,
 } from 'lucide-react';
 import { Badge, Button, Card, CardContent, Input, Textarea, Spinner, toast, Dialog, confirmDialog } from '@boost/ui';
@@ -1901,40 +1902,323 @@ async function downloadPostVideoFile(post: PersonalPost): Promise<void> {
   }
 }
 
-/**
- * Mobile-first: Web Share with a File so iOS/Android can “Save Video” / add to Photos.
- * Falls back to `share({ url })` when file sharing is not supported.
- */
-async function sharePostVideoForCameraRoll(post: PersonalPost): Promise<void> {
-  const url = api.personalPostVideoDownloadUrl(post.accountId, post.id);
+type PreparedMediaShare = { file: File; title: string; shareUrl: string };
+
+type SharePhotosGesture = { variant: 'video' | 'thumbnail'; prepared: PreparedMediaShare };
+
+/** Same-origin authenticated download URL (used for URL-only share fallback). */
+async function preparePostVideoForShare(post: PersonalPost): Promise<PreparedMediaShare> {
+  const shareUrl = api.personalPostVideoDownloadUrl(post.accountId, post.id);
   const filename = postVideoFilename(post);
   const title = ((post.title ?? '').trim() || (post.topic ?? '').trim() || 'Video').slice(0, 120);
+  const res = await fetch(shareUrl, { mode: 'cors', credentials: 'include', cache: 'no-store' });
+  if (!res.ok) throw new Error(`Could not load video (HTTP ${res.status})`);
+  const blob = await res.blob();
+  const type = blob.type && /^video\//i.test(blob.type) ? blob.type : 'video/mp4';
+  const file = new File([blob], filename, { type });
+  return { file, title, shareUrl };
+}
+
+/**
+ * Safari / all browsers on iOS only treat `navigator.share()` as user-initiated if it runs
+ * in the same turn as the tap. `await fetch()` before `share()` loses the gesture →
+ * NotAllowedError (“The request is not allowed…”). We always use a second tap there.
+ *
+ * Covers iPhone, iPod touch, iPad (including “desktop” Safari UA), and Chromium on iOS.
+ */
+function isIosLike(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent;
+  if (/iPad|iPhone|iPod/i.test(ua)) return true;
+  const uaData = (navigator as Navigator & { userAgentData?: { platform?: string; mobile?: boolean } })
+    .userAgentData;
+  if (uaData?.platform === 'iOS') return true;
+  // iPadOS “Request Desktop Website” often reports Macintosh + touch.
+  if (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1) return true;
+  return navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
+}
+
+/**
+ * Mobile-first: Web Share with a File so iOS/Android can “Save Video” / add to Photos.
+ * On iOS (and if one-tap share is denied), returns `secondTap` so the UI can call `share()`
+ * from a **second** button press after the video is loaded.
+ */
+async function sharePostVideoForCameraRoll(
+  post: PersonalPost,
+): Promise<{ outcome: 'done' } | { outcome: 'secondTap'; prepared: PreparedMediaShare }> {
   const nav = typeof navigator !== 'undefined' ? navigator : undefined;
   if (!nav?.share) {
     throw new Error('Your browser does not support sharing — use Download instead.');
   }
+
+  const prepared = await preparePostVideoForShare(post);
+
+  if (isIosLike()) {
+    return { outcome: 'secondTap', prepared };
+  }
+
+  if (nav.canShare?.({ files: [prepared.file] })) {
+    try {
+      await nav.share({ files: [prepared.file], title: prepared.title });
+      return { outcome: 'done' };
+    } catch (e) {
+      const name = (e as { name?: string })?.name;
+      if (name === 'AbortError') return { outcome: 'done' };
+      if (name === 'NotAllowedError' || name === 'InvalidStateError') {
+        return { outcome: 'secondTap', prepared };
+      }
+      throw e instanceof Error ? e : new Error(String(e));
+    }
+  }
+
+  if (nav.canShare?.({ url: prepared.shareUrl })) {
+    try {
+      await nav.share({
+        title: prepared.title,
+        text: 'Open the link, then use your browser menu to save the video.',
+        url: prepared.shareUrl,
+      });
+      return { outcome: 'done' };
+    } catch (e) {
+      const name = (e as { name?: string })?.name;
+      if (name === 'AbortError') return { outcome: 'done' };
+      if (name === 'NotAllowedError') return { outcome: 'secondTap', prepared };
+      throw e instanceof Error ? e : new Error(String(e));
+    }
+  }
+
+  return { outcome: 'secondTap', prepared };
+}
+
+function postThumbnailFilename(post: PersonalPost): string {
+  const raw = ((post.title ?? '').trim() || (post.topic ?? '').trim() || 'thumbnail')
+    .replace(/[\\/:*?"<>|]+/g, '')
+    .replace(/\s+/g, '_')
+    .slice(0, 72);
+  const base = raw || 'thumbnail';
+  const lower = base.toLowerCase();
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return base;
+  return `${base}.jpg`;
+}
+
+function canSaveOrDownloadPostThumbnail(post: PersonalPost): boolean {
+  return Boolean(post.thumbnailUrl?.trim()) && VIDEO_FILE_READY_STATUSES.has(post.status);
+}
+
+/** Poster JPEG via same-origin API proxy (matches video download — R2 may block CORS). */
+async function downloadPostThumbnailFile(post: PersonalPost): Promise<void> {
+  const url = api.personalPostThumbnailDownloadUrl(post.accountId, post.id);
+  const filename = postThumbnailFilename(post);
+  const res = await fetch(url, { mode: 'cors', credentials: 'include', cache: 'no-store' });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const blob = await res.blob();
+  const objectUrl = URL.createObjectURL(blob);
   try {
-    const res = await fetch(url, { mode: 'cors', credentials: 'include', cache: 'no-store' });
-    if (!res.ok) throw new Error(`Could not load video (HTTP ${res.status})`);
-    const blob = await res.blob();
-    const type = blob.type && /^video\//i.test(blob.type) ? blob.type : 'video/mp4';
-    const file = new File([blob], filename, { type });
-    if (nav.canShare?.({ files: [file] })) {
-      await nav.share({ files: [file], title });
-      return;
-    }
-  } catch (e) {
-    if (nav.canShare?.({ url })) {
-      await nav.share({ title, text: 'Open the link, then use your browser menu to save the video.', url });
-      return;
-    }
-    throw e instanceof Error ? e : new Error(String(e));
+    const a = document.createElement('a');
+    a.href = objectUrl;
+    a.download = filename;
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } finally {
+    URL.revokeObjectURL(objectUrl);
   }
-  if (nav.canShare?.({ url })) {
-    await nav.share({ title, text: 'Open the link, then save the video from your browser.', url });
-    return;
+}
+
+async function preparePostThumbnailForShare(post: PersonalPost): Promise<PreparedMediaShare> {
+  const shareUrl = api.personalPostThumbnailDownloadUrl(post.accountId, post.id);
+  const filename = postThumbnailFilename(post);
+  const title = `${((post.title ?? '').trim() || (post.topic ?? '').trim() || 'Thumbnail').slice(0, 100)} (thumbnail)`;
+  const res = await fetch(shareUrl, { mode: 'cors', credentials: 'include', cache: 'no-store' });
+  if (!res.ok) throw new Error(`Could not load thumbnail (HTTP ${res.status})`);
+  const blob = await res.blob();
+  const type = blob.type && /^image\//i.test(blob.type) ? blob.type : 'image/jpeg';
+  const file = new File([blob], filename, { type });
+  return { file, title, shareUrl };
+}
+
+/** Same iOS second-tap pattern as {@link sharePostVideoForCameraRoll}. */
+async function sharePostThumbnailForCameraRoll(
+  post: PersonalPost,
+): Promise<{ outcome: 'done' } | { outcome: 'secondTap'; prepared: PreparedMediaShare }> {
+  const nav = typeof navigator !== 'undefined' ? navigator : undefined;
+  if (!nav?.share) {
+    throw new Error('Your browser does not support sharing — use Download JPEG instead.');
   }
-  throw new Error('Could not prepare a shareable file — use Download or open the video and share from the player.');
+
+  const prepared = await preparePostThumbnailForShare(post);
+
+  if (isIosLike()) {
+    return { outcome: 'secondTap', prepared };
+  }
+
+  if (nav.canShare?.({ files: [prepared.file] })) {
+    try {
+      await nav.share({ files: [prepared.file], title: prepared.title });
+      return { outcome: 'done' };
+    } catch (e) {
+      const name = (e as { name?: string })?.name;
+      if (name === 'AbortError') return { outcome: 'done' };
+      if (name === 'NotAllowedError' || name === 'InvalidStateError') {
+        return { outcome: 'secondTap', prepared };
+      }
+      throw e instanceof Error ? e : new Error(String(e));
+    }
+  }
+
+  if (nav.canShare?.({ url: prepared.shareUrl })) {
+    try {
+      await nav.share({
+        title: prepared.title,
+        text: 'Open the link, then save the image from your browser (e.g. for a YouTube custom thumbnail).',
+        url: prepared.shareUrl,
+      });
+      return { outcome: 'done' };
+    } catch (e) {
+      const name = (e as { name?: string })?.name;
+      if (name === 'AbortError') return { outcome: 'done' };
+      if (name === 'NotAllowedError') return { outcome: 'secondTap', prepared };
+      throw e instanceof Error ? e : new Error(String(e));
+    }
+  }
+
+  return { outcome: 'secondTap', prepared };
+}
+
+/** Second-step share: must run from a fresh tap (iOS WebKit user-gesture requirement). */
+function ShareToPhotosGestureDialog({
+  gesture,
+  onClose,
+}: {
+  gesture: SharePhotosGesture | null;
+  onClose: () => void;
+}) {
+  const open = gesture != null;
+  const variant = gesture?.variant ?? 'video';
+  const prepared = gesture?.prepared ?? null;
+  const toastLabel = variant === 'thumbnail' ? 'Save thumbnail' : 'Save to Photos';
+  const dialogTitle = variant === 'thumbnail' ? 'Save thumbnail to Photos' : 'Save to Photos';
+  const dialogDescription =
+    variant === 'thumbnail'
+      ? 'Your phone only allows the share sheet right after you tap a button. Tap below, then choose Save Image or Add to Photos. Use this JPEG as a YouTube custom thumbnail or cover image.'
+      : 'Your phone only allows the share sheet right after you tap a button. Tap below, then choose Save Video or Save to Photos.';
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title={dialogTitle}
+      description={dialogDescription}
+      footer={
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button type="button" variant="ghost" size="sm" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            variant="primary"
+            size="sm"
+            disabled={!prepared}
+            onClick={() => {
+              if (!prepared) return;
+              const nav = navigator;
+              if (!nav.share) {
+                toast.error(toastLabel, 'Sharing is not supported in this browser.');
+                return;
+              }
+              const { file, title, shareUrl } = prepared;
+
+              const finishFileShare = () => {
+                onClose();
+                toast.success(
+                  'Done',
+                  variant === 'thumbnail'
+                    ? 'Pick Save Image or Add to Photos if the share sheet opened.'
+                    : 'Pick Save Video or Save to Photos if the share sheet opened.',
+                );
+              };
+
+              const tryShareUrl = (fileShareErr?: unknown) => {
+                const detail =
+                  fileShareErr instanceof Error
+                    ? fileShareErr.message
+                    : fileShareErr != null
+                      ? String(fileShareErr)
+                      : '';
+                if (!nav.canShare?.({ url: shareUrl })) {
+                  toast.error(
+                    toastLabel,
+                    `${variant === 'thumbnail' ? 'Could not share the image.' : 'Could not share the video.'}${detail ? ` ${detail}` : ''} Use ${variant === 'thumbnail' ? 'Download JPEG' : 'Download'}, or open this page in Safari (not an in-app browser).`,
+                  );
+                  return;
+                }
+                void nav
+                  .share({
+                    title,
+                    text:
+                      variant === 'thumbnail'
+                        ? 'Open this link in Safari (stay signed in), then long-press the image → Save to Photos.'
+                        : 'Open this link in Safari (stay signed in), then use Share → Save Video.',
+                    url: shareUrl,
+                  })
+                  .then(() => {
+                    onClose();
+                    toast.success(
+                      'Link shared',
+                      'Open it in Safari while signed in, then save the file from the browser.',
+                    );
+                  })
+                  .catch((e2: unknown) => {
+                    const n2 = (e2 as { name?: string })?.name;
+                    if (n2 === 'AbortError') {
+                      onClose();
+                      return;
+                    }
+                    toast.error(toastLabel, e2 instanceof Error ? e2.message : String(e2));
+                  });
+              };
+
+              // iOS: `canShare({ files })` is often wrong — still try file share first from this tap.
+              void nav
+                .share({ files: [file], title })
+                .then(finishFileShare)
+                .catch((e: unknown) => {
+                  const name = (e as { name?: string })?.name;
+                  if (name === 'AbortError') {
+                    onClose();
+                    return;
+                  }
+                  tryShareUrl(e);
+                });
+            }}
+          >
+            Open share sheet
+          </Button>
+        </div>
+      }
+    >
+      <p className="text-sm leading-snug text-slate-600">
+        {variant === 'thumbnail' ? (
+          <>
+            YouTube Studio accepts a 1280×720 (16:9) custom thumbnail when your video uses that aspect; other
+            sizes still save here for manual cropping if needed. If the share sheet does not offer &quot;Save
+            Image&quot;, use <strong>Download JPEG</strong>.
+          </>
+        ) : (
+          <>
+            Large videos may take a few seconds to load before this step appears. If the share sheet does not list
+            &quot;Save Video&quot;, try <strong>Download</strong> instead, then save the file from your downloads
+            list.
+          </>
+        )}
+        <p className="mt-3 border-t border-slate-100 pt-2 text-[11px] leading-snug text-slate-500">
+          In-app browsers (Instagram, Facebook, etc.) often block saving. Use <strong>Safari</strong> for the most
+          reliable flow: open the ··· or Share menu, then <strong>Open in Safari</strong>, sign in, and try again
+          here.
+        </p>
+      </p>
+    </Dialog>
+  );
 }
 
 /** One combined progress readout for the whole pipeline (not encode-only). */
@@ -2004,8 +2288,13 @@ function PostCard({
   const [infoOpen, setInfoOpen] = useState(false);
   const [downloadBusy, setDownloadBusy] = useState(false);
   const [shareSaveBusy, setShareSaveBusy] = useState(false);
+  const [thumbDownloadBusy, setThumbDownloadBusy] = useState(false);
+  const [thumbShareSaveBusy, setThumbShareSaveBusy] = useState(false);
+  /** iOS WebKit: `share()` must run on a second tap after `fetch` (see share helpers above). */
+  const [shareGesture, setShareGesture] = useState<SharePhotosGesture | null>(null);
   useEffect(() => {
     setPlaying(false);
+    setShareGesture(null);
   }, [post.id]);
 
   const posterUrl = post.videoUrl?.trim()
@@ -2244,7 +2533,7 @@ function PostCard({
                 variant="outline"
                 size="sm"
                 className="h-7 gap-1 px-2 text-[11px]"
-                disabled={downloadBusy || shareSaveBusy}
+                disabled={downloadBusy || shareSaveBusy || thumbDownloadBusy || thumbShareSaveBusy}
                 title="Saves an MP4 to your device (streams through the API so the browser can save it)."
                 onClick={(e) => {
                   e.stopPropagation();
@@ -2269,14 +2558,22 @@ function PostCard({
                 variant="outline"
                 size="sm"
                 className="h-7 gap-1 px-2 text-[11px]"
-                disabled={downloadBusy || shareSaveBusy}
-                title="Phones: opens the system share sheet — choose Save Video / Photos. Needs a browser that supports sharing files."
+                disabled={downloadBusy || shareSaveBusy || thumbDownloadBusy || thumbShareSaveBusy}
+                title="Phones: loads the video, then you tap once more to open the system share sheet (required on iPhone). Choose Save Video / Photos."
                 onClick={(e) => {
                   e.stopPropagation();
                   void (async () => {
                     setShareSaveBusy(true);
                     try {
-                      await sharePostVideoForCameraRoll(post);
+                      const result = await sharePostVideoForCameraRoll(post);
+                      if (result.outcome === 'secondTap') {
+                        setShareGesture({ variant: 'video', prepared: result.prepared });
+                        toast.info(
+                          'Almost there',
+                          'Tap Open share sheet in the dialog, then choose Save Video or Save to Photos.',
+                        );
+                        return;
+                      }
                       toast.success('Done', 'If the share sheet opened, pick Save Video or Save to Photos.');
                     } catch (err) {
                       toast.error('Save to Photos', (err as Error).message);
@@ -2291,13 +2588,75 @@ function PostCard({
               </Button>
             </>
           ) : null}
+          {canSaveOrDownloadPostThumbnail(post) ? (
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 gap-1 px-2 text-[11px]"
+                disabled={downloadBusy || shareSaveBusy || thumbDownloadBusy || thumbShareSaveBusy}
+                title="Saves the poster / YouTube-style thumbnail as a JPEG (same-origin API proxy)."
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void (async () => {
+                    setThumbDownloadBusy(true);
+                    try {
+                      await downloadPostThumbnailFile(post);
+                      toast.success('Download started', 'Check your downloads for the JPEG (use as YouTube custom thumbnail).');
+                    } catch (err) {
+                      toast.info('Download JPEG', (err as Error).message);
+                    } finally {
+                      setThumbDownloadBusy(false);
+                    }
+                  })();
+                }}
+              >
+                {thumbDownloadBusy ? <Spinner className="h-3 w-3" /> : <ImageDown className="h-3 w-3" />}
+                JPEG
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 gap-1 px-2 text-[11px]"
+                disabled={downloadBusy || shareSaveBusy || thumbDownloadBusy || thumbShareSaveBusy}
+                title="Save the thumbnail image to Photos (same two-step flow as video on iPhone)."
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void (async () => {
+                    setThumbShareSaveBusy(true);
+                    try {
+                      const result = await sharePostThumbnailForCameraRoll(post);
+                      if (result.outcome === 'secondTap') {
+                        setShareGesture({ variant: 'thumbnail', prepared: result.prepared });
+                        toast.info(
+                          'Almost there',
+                          'Tap Open share sheet in the dialog, then choose Save Image or Add to Photos.',
+                        );
+                        return;
+                      }
+                      toast.success('Done', 'If the share sheet opened, pick Save Image or Add to Photos.');
+                    } catch (err) {
+                      toast.error('Save thumbnail', (err as Error).message);
+                    } finally {
+                      setThumbShareSaveBusy(false);
+                    }
+                  })();
+                }}
+              >
+                {thumbShareSaveBusy ? <Spinner className="h-3 w-3" /> : <Share2 className="h-3 w-3" />}
+                Thumb → Photos
+              </Button>
+            </>
+          ) : null}
           {canRegenerateThumb ? (
             <Button
               type="button"
               variant="outline"
               size="sm"
               className="h-7 gap-1 px-2 text-[11px]"
-              disabled={thumbBusy}
+              disabled={thumbBusy || thumbDownloadBusy || thumbShareSaveBusy}
               onClick={() => void regenerateThumbnail()}
             >
               {thumbBusy ? <Spinner className="h-3 w-3" /> : <RefreshCw className="h-3 w-3" />}
@@ -2371,6 +2730,7 @@ function PostCard({
         info={post.generationSummary ?? null}
         postTemplateId={post.templateId}
       />
+      <ShareToPhotosGestureDialog gesture={shareGesture} onClose={() => setShareGesture(null)} />
     </motion.div>
   );
 }

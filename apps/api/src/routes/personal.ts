@@ -15,6 +15,7 @@
  *   POST   /api/v1/personal/accounts/:id/posts/:postId/cancel
  *   POST   /api/v1/personal/accounts/:id/posts/:postId/regenerate-thumbnail
  *   GET    /api/v1/personal/accounts/:id/posts/:postId/download
+ *   GET    /api/v1/personal/accounts/:id/posts/:postId/download-thumbnail
  *   GET    /api/v1/personal/accounts/:id/posts
  *   DELETE /api/v1/personal/accounts/:id/posts/failed
  *   DELETE /api/v1/personal/accounts/:id/posts/:postId
@@ -52,6 +53,7 @@ import {
   markPersonalPostQueuedFailedIfStillQueued,
   regeneratePersonalPostThumbnail,
   resolvePersonalPostVideoDownload,
+  resolvePersonalPostThumbnailDownload,
 } from '../services/personalAccounts.js';
 import type { PersonalAccountStyleBible } from '@boost/database';
 import { generateForAccount } from '../services/personalPipeline.js';
@@ -697,9 +699,10 @@ personalRouter.post('/accounts/:id/generate', requireAuth, async (req, res, next
     }
     // Still running — swallow the rejection so we don't crash the
     // process; the row's status will reflect failure and the UI polls.
-    promise.catch((e) =>
-      console.warn('[personal.generate] background failure:', (e as Error).message),
-    );
+    promise.catch((e) => {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn('[personal.generate] background failure:', msg, e);
+    });
     res.json({ data: { kicked: true, pending: true, postId: reservedPostId } });
   } catch (e) {
     next(e);
@@ -812,6 +815,59 @@ personalRouter.get('/accounts/:id/posts/:postId/download', requireAuth, async (r
         }
       }
       console.warn('[personal.download] pipe:', (pipeErr as Error).message);
+    }
+  } catch (e) {
+    next(e);
+  }
+});
+
+personalRouter.get('/accounts/:id/posts/:postId/download-thumbnail', requireAuth, async (req, res, next) => {
+  try {
+    const user = (req as any).user as { id: string };
+    const accountId = String(req.params.id);
+    const postId = String(req.params.postId);
+    const resolved = await resolvePersonalPostThumbnailDownload(user.id, accountId, postId);
+    if (!resolved.ok) {
+      if (resolved.error === 'not_found') {
+        return res.status(404).json({ error: { message: 'Not found', code: 'NOT_FOUND' } });
+      }
+      return res.status(400).json({
+        error: {
+          message: 'This post has no thumbnail image yet.',
+          code: 'NO_THUMBNAIL',
+        },
+      });
+    }
+    const upstream = await fetch(resolved.imageUrl, { redirect: 'follow' });
+    if (!upstream.ok || !upstream.body) {
+      console.warn('[personal.download-thumbnail] upstream', upstream.status, resolved.imageUrl.slice(0, 140));
+      return res.status(502).json({
+        error: { message: 'Could not fetch thumbnail from storage.', code: 'UPSTREAM_FAILED' },
+      });
+    }
+    const ct = upstream.headers.get('content-type') || 'image/jpeg';
+    const safe =
+      resolved.filename.replace(/[\r\n"]/g, '').replace(/[^\x20-\x7E]+/g, '_').slice(0, 180) ||
+      'thumbnail.jpg';
+    const utf8Name = encodeURIComponent(resolved.filename.replace(/[\r\n"]/g, '')).slice(0, 240);
+    res.setHeader('Content-Type', ct);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${safe}"; filename*=UTF-8''${utf8Name}`,
+    );
+    res.setHeader('Cache-Control', 'private, no-store');
+    const nodeReadable = Readable.fromWeb(upstream.body as import('stream/web').ReadableStream);
+    try {
+      await pipeline(nodeReadable, res);
+    } catch (pipeErr) {
+      if (!res.writableEnded) {
+        try {
+          res.destroy();
+        } catch {
+          /* ignore */
+        }
+      }
+      console.warn('[personal.download-thumbnail] pipe:', (pipeErr as Error).message);
     }
   } catch (e) {
     next(e);

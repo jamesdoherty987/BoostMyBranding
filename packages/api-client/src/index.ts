@@ -1980,6 +1980,15 @@ export class BoostApi {
     return `${base}/api/v1/personal/accounts/${encodeURIComponent(accountId)}/posts/${encodeURIComponent(postId)}/download`;
   }
 
+  /**
+   * Authenticated URL that streams the poster JPEG with `Content-Disposition: attachment`.
+   * Same pattern as {@link personalPostVideoDownloadUrl} for mobile save / YouTube custom thumbnail.
+   */
+  personalPostThumbnailDownloadUrl(accountId: string, postId: string): string {
+    const base = this.config.baseUrl.replace(/\/$/, '');
+    return `${base}/api/v1/personal/accounts/${encodeURIComponent(accountId)}/posts/${encodeURIComponent(postId)}/download-thumbnail`;
+  }
+
   /* ─── Personal account media library ─────────────────────── */
 
   listPersonalMedia(

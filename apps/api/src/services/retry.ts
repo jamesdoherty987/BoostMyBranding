@@ -69,9 +69,11 @@ export async function withRetry<T>(fn: () => Promise<T>, opts: RetryOptions = {}
   throw lastErr;
 }
 
-/** Default: retry on network errors, 5xx, 429, and timeouts. */
+/** Default: retry on network errors, 5xx, 429, timeouts, and JSON parse errors. */
 export function isDefaultRetryable(err: unknown): boolean {
   if (err instanceof TimeoutError) return true;
+  /** Empty or truncated model output often surfaces as SyntaxError from JSON.parse. */
+  if (err instanceof SyntaxError) return true;
   const anyErr = err as any;
   const status: number | undefined = anyErr?.status ?? anyErr?.statusCode ?? anyErr?.response?.status;
   const code: string | undefined = anyErr?.code ?? anyErr?.name;

@@ -69,7 +69,7 @@ export function startScheduler() {
         await resumeInterruptedDirectorPersonalPostsOnBoot();
       } else {
         console.log(
-          '[personalDirectorResume] skipped on boot. Stuck director jobs stay paused until you press Generate or set PERSONAL_RESUME_DIRECTOR_ON_BOOT=true.',
+          '[personalDirectorResume] skipped on boot (PERSONAL_RESUME_DIRECTOR_ON_BOOT=false or not on Railway/Render). Stuck director jobs stay paused until you press Generate.',
         );
       }
     } catch (e) {

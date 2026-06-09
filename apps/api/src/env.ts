@@ -43,6 +43,16 @@ if (
   process.env.API_PUBLIC_URL = `https://${String(process.env.RAILWAY_PUBLIC_DOMAIN).trim()}`;
 }
 
+// Railway/Nixpacks often omit NODE_ENV; treat as production so security-sensitive defaults
+// (cookies, boot-time pipeline behaviour) match a public API host.
+if (
+  !String(process.env.NODE_ENV ?? '').trim() &&
+  (String(process.env.RAILWAY_PUBLIC_DOMAIN ?? '').trim() ||
+    String(process.env.RAILWAY_ENVIRONMENT ?? '').trim())
+) {
+  process.env.NODE_ENV = 'production';
+}
+
 const schema = z.object({
   NODE_ENV: preprocessBlank(z.enum(['development', 'production', 'test']).default('development')),
   API_PORT: preprocessBlank(z.coerce.number().int().min(1).max(65535).default(4000)),

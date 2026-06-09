@@ -313,7 +313,7 @@ export async function generatePersonalizedVideo(
 
   const script = await withRetry(
     () => generateJSON<ScriptResponse>(scriptPrompt, { model: 'sonnet', maxTokens: 2048 }),
-    { label: `video_script:${args.clientId}`, attempts: 2 },
+    { label: `video_script:${args.clientId}`, attempts: 3 },
   );
 
   // Refuse if Claude said the inputs can't support an honest video.

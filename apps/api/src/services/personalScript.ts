@@ -131,7 +131,7 @@ export async function generateScript(
         model: args.scriptModel ?? 'sonnet',
         maxTokens: args.longform === true ? 4096 : 2048,
       }),
-    { label: `personal_script:${args.theme.id}:${args.topic.slice(0, 40)}`, attempts: 2 },
+    { label: `personal_script:${args.theme.id}:${args.topic.slice(0, 40)}`, attempts: 3 },
   );
 
   if (exampleTitles.length > 0) {

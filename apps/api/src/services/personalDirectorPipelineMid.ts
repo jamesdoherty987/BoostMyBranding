@@ -598,11 +598,14 @@ export async function directorPipelineFromResolvedStoryboard(
     const refNoCopy =
       (fs.shot.kind === 'ai_image' || fs.shot.kind === 'ai_video') &&
       (refs.length > 0 || Boolean(character?.promptFragment?.trim()))
-        ? ' REFERENCE CONTRACT: use reference images / character sheet only for identity, wardrobe, palette, and lens character — invent a **new** composition, pose, and framing; never recreate or near-duplicate a reference frame (no copy-paste layouts).'
+        ? ' REFERENCE CONTRACT: use reference images / character sheet only for identity, wardrobe, palette, and lens character — invent a **new** composition, pose, and framing that **advances this shot\'s narration** (new prop, angle, location detail, or story beat); never recreate or near-duplicate a reference frame (no copy-paste layouts).'
         : '';
     const prompt = `${basePrompt}${refNoCopy}`;
 
     const negativePrompt = [
+      'blurry, out of focus, jpeg artifacts, watermark, Getty/Shutterstock frame marks',
+      'mangled hands, extra fingers, duplicated faces in crowds, melted anatomy',
+      'illegible micro-text unless script-locked above',
       ...(styleBible.donts ?? []),
       ...(character?.negativePrompt ? [character.negativePrompt] : []),
       ...(timelineIndex > 0 && (fs.shot.kind === 'ai_image' || fs.shot.kind === 'ai_video')

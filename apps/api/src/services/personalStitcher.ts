@@ -26,6 +26,7 @@
  * speed vs quality. Per-shot **normalize** uses a lighter default x264 preset than title/xfade
  * (`PERSONAL_STITCH_NORMALIZE_PRESET` / see `stitchH264PresetNormalize`) so small workers survive
  * Ken Burns + libx264. `PERSONAL_STITCH_NORMALIZE_THREADS` caps FFmpeg threads (default 1).
+ * `PERSONAL_STITCH_NORMALIZE_BLUR_FILL=0` disables blurred edge-fill behind letterboxed shots (falls back to black pad; same “no crop” fit).
  *
  * Frozen last-frame + VO continues: usually **audio longer than real video**
  * after concat (bad container `Duration`). `mixAudio` caps `apad` to the
@@ -241,6 +242,17 @@ function normalizeFfmpegThreadArgs(): string[] {
   }
   const filterThreads = Math.min(n, 8);
   return ['-threads', String(n), '-filter_threads', String(filterThreads)];
+}
+
+/**
+ * Blurred background + sharp foreground composited to WxH — fills frame without **cropping**
+ * the sharp layer and avoids **black** letterboxing/pillarboxing (pad=black still fits whole source).
+ * Disable with `PERSONAL_STITCH_NORMALIZE_BLUR_FILL=0` (falls back to pad=black).
+ */
+function stitchNormalizeBlurFillEnabled(): boolean {
+  const v = process.env.PERSONAL_STITCH_NORMALIZE_BLUR_FILL?.trim().toLowerCase();
+  if (v === '0' || v === 'false' || v === 'no' || v === 'off') return false;
+  return true;
 }
 
 /** Deep tracing: memory + argv + streaming stderr lines + ring buffer on failure. */
@@ -1607,34 +1619,53 @@ function ffmpegCliFilesystemPath(p: string): string {
 }
 
 /**
+ * Fit entire source inside WxH (preserve aspect), pad to WxH with black — **no center-crop**.
+ * Use for normalize when {@link stitchNormalizeBlurFillEnabled} is false; otherwise normalize uses
+ * a blurred full-bleed background + sharp `decrease` overlay (same uncropped sharp layer, no black bars).
+ */
+function vfFitWholeSourcePadBlack(w: number, h: number, flags: 'bilinear' | 'lanczos'): string {
+  return `scale=${w}:${h}:force_original_aspect_ratio=decrease:flags=${flags},pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:color=black`;
+}
+
+/**
  * Windows static stills use `-filter_complex`. Comma-chaining **two or more** `drawtext`
  * filters in one `[0:v]…[out]` graph can trip some Windows FFmpeg / libavfilter builds
  * (filter init / label issues). When there are 2+ drawtext entries, use explicit `[dtN]`
  * labels between them. (Unrelated to `textfile` + `text_align` / `tw` option-parse bugs.)
  */
-function windowsStaticFilterComplexExpr(filters: string[]): string {
-  const firstDt = filters.findIndex((f) => f.startsWith('drawtext='));
+/**
+ * Append a comma-separated tail (format, grade, drawtext, …) onto a labeled stream in `-filter_complex`.
+ * Same multi-`drawtext` branching as Windows static stills, but `inPad` can be any intermediate label
+ * (e.g. `normgeo` after blur-fill geometry).
+ */
+function chainFilterComplexTailFromPad(inPad: string, tailFilters: string[], outPad: string): string {
+  const ins = `[${inPad}]`;
+  const firstDt = tailFilters.findIndex((f) => f.startsWith('drawtext='));
   if (firstDt < 0) {
-    return `[0:v]${filters.join(',')}[normv]`;
+    return `${ins}${tailFilters.join(',')}[${outPad}]`;
   }
-  const tail = filters.slice(firstDt);
+  const tail = tailFilters.slice(firstDt);
   const draws = tail.filter((f) => f.startsWith('drawtext='));
   if (tail.some((f) => !f.startsWith('drawtext='))) {
-    return `[0:v]${filters.join(',')}[normv]`;
+    return `${ins}${tailFilters.join(',')}[${outPad}]`;
   }
-  const head = filters.slice(0, firstDt).join(',');
+  const head = tailFilters.slice(0, firstDt).join(',');
   if (draws.length <= 1) {
     const mid = [head, draws[0]].filter(Boolean).join(',');
-    return `[0:v]${mid}[normv]`;
+    return `${ins}${mid}[${outPad}]`;
   }
   const d0 = draws[0]!;
   const headPrefix = head ? `${head},` : '';
-  let expr = `[0:v]${headPrefix}${d0}[dt0]`;
+  let expr = `${ins}${headPrefix}${d0}[dt0]`;
   for (let i = 1; i < draws.length; i++) {
-    const outLabel = i === draws.length - 1 ? 'normv' : `dt${i}`;
+    const outLabel = i === draws.length - 1 ? outPad : `dt${i}`;
     expr += `;[dt${i - 1}]${draws[i]}[${outLabel}]`;
   }
   return expr;
+}
+
+function windowsStaticFilterComplexExpr(filters: string[]): string {
+  return chainFilterComplexTailFromPad('0:v', filters, 'normv');
 }
 
 /** Min edge inset for keyword drawtext (FFmpeg expr; commas escaped for `-vf`). */
@@ -1708,7 +1739,8 @@ interface NormalizeArgs {
 }
 
 async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
-  const filters: string[] = [];
+  const geometryFilters: string[] = [];
+  const tailFilters: string[] = [];
   let imageOutFrames = 0;
   const useKenBurnsOnImage = a.kind === 'image' && a.kenBurnsOnStills !== false;
   const workDirAbs = path.resolve(a.workDir);
@@ -1738,14 +1770,10 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
       const xExpr = `'iw*${safeFocalX}-(iw/zoom/2)'`;
       const yExpr = `'ih*${safeFocalY}-(ih/zoom/2)'`;
       const te = Math.max(0.05, a.durationSeconds).toFixed(3);
-      // Fill the output frame (scale up + centre crop) — no letterboxing. AI stills are
-      // pre-normalized to exact WxH in `personalAiModels`; user/scrape assets may still
-      // differ slightly; a sliver crop beats black bars under Ken Burns zoom.
-      filters.push(
+      // Fit whole still inside canvas (pad=black) or blur-fill compositor — no center-crop of the sharp layer.
+      geometryFilters.push(
         'select=eq(n\\,0),setpts=PTS-STARTPTS',
-        // bilinear: less CPU/RAM than lanczos on zoompan long runs; static still path uses the same.
-        `scale=${a.width}:${a.height}:force_original_aspect_ratio=increase:flags=bilinear,` +
-          `crop=${a.width}:${a.height},` +
+        `${vfFitWholeSourcePadBlack(a.width, a.height, 'bilinear')},` +
           `zoompan=z='min(zoom+${zoomStep},1.10)':x=${xExpr}:y=${yExpr}:` +
           `d=${imageOutFrames}:s=${a.width}x${a.height}:fps=${a.fps},` +
           `tpad=stop_mode=clone:stop_duration=6,trim=end=${te},setpts=PTS-STARTPTS`,
@@ -1754,18 +1782,11 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
       // Static slide (Ken Burns off): `-loop 1`, `-framerate` before `-i`, and `-frames:v` below.
       // Do not use `select=eq(n\,0)` here — one decoded frame + fps produced ~1/fps s clips.
       // Do not use `fps=` in -vf with looped PNG on some Windows FFmpeg builds (filter init EINVAL).
-      // Use bilinear instead of lanczos here — lanczos + yuv format + duration quirks has also tripped bad builds.
-      // Fill frame (centre crop) — matches video stills; avoids black bars on 9:16 export.
-      filters.push(
-        `scale=${a.width}:${a.height}:force_original_aspect_ratio=increase:flags=bilinear,` +
-          `crop=${a.width}:${a.height}`,
-      );
+      // Fit whole image inside WxH + pad (no center-crop).
+      geometryFilters.push(vfFitWholeSourcePadBlack(a.width, a.height, 'bilinear'));
     }
   } else {
-    // Scale + crop videos into the target dimensions while preserving fps.
-    // force_original_aspect_ratio=increase makes sure at least one
-    // dimension overflows; `crop=w:h` defaults to centre-crop, so the
-    // framing matches what a photographer would call "fill crop".
+    // Scale + pad videos into WxH (no center-crop) while preserving fps.
     //
     // Why the tpad + trim dance: AI video models frequently return
     // clips SHORTER than asked (kling returns 5s when asked for 10s,
@@ -1773,9 +1794,8 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
     // stitched output ends in a black frame when it reaches the end
     // of the source. We freeze-frame-extend by 30s (far longer than
     // we'd ever need) and then hard-trim to the desired length.
-    filters.push(
-      `scale=${a.width}:${a.height}:force_original_aspect_ratio=increase:flags=lanczos`,
-      `crop=${a.width}:${a.height}`,
+    geometryFilters.push(
+      vfFitWholeSourcePadBlack(a.width, a.height, 'lanczos'),
       `fps=${a.fps}`,
       `tpad=stop_mode=clone:stop_duration=30`,
       `trim=end=${Math.max(0.05, a.durationSeconds).toFixed(3)}`,
@@ -1783,29 +1803,29 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
     );
     // Many AI clips decode as yuvj420p / other legacy pix fmts. Converting here stops swscaler from
     // re-warning on every scale/colour step and avoids subtle TV-vs-PC range bugs before libx264.
-    filters.push('format=yuv420p');
+    tailFilters.push('format=yuv420p');
   }
 
   const grade = gradeFilter(a.colourGrade);
   // Still images decode as RGB; convert before colour filters (e.g. colortemperature) and libx264.
   // Some Windows FFmpeg builds fail "Error initializing filters" when RGB is fed straight into x264.
   if (a.kind === 'image') {
-    filters.push('format=yuv420p');
+    tailFilters.push('format=yuv420p');
   }
 
   // Speed ramp (video only). On stills, `setpts` after zoompan breaks the
   // fixed frame budget (`-frames:v`) vs storyboard duration — skip here.
   if (a.kind === 'video') {
-    if (a.speedRamp === 'slow_mo') filters.push('setpts=1.4*PTS');
-    if (a.speedRamp === 'speed_up') filters.push('setpts=0.65*PTS');
+    if (a.speedRamp === 'slow_mo') tailFilters.push('setpts=1.4*PTS');
+    if (a.speedRamp === 'speed_up') tailFilters.push('setpts=0.65*PTS');
   }
 
-  if (grade) filters.push(grade);
+  if (grade) tailFilters.push(grade);
 
-  if (a.useGrain) filters.push('noise=alls=8:allf=t+u');
+  if (a.useGrain) tailFilters.push('noise=alls=8:allf=t+u');
   if (a.letterbox) {
     const barHeight = Math.round(a.height * 0.08);
-    filters.push(
+    tailFilters.push(
       `pad=${a.width}:${a.height}:0:0:color=black,drawbox=x=0:y=0:w=${a.width}:h=${barHeight}:color=black@1:t=fill,drawbox=x=0:y=${a.height - barHeight}:w=${a.width}:h=${barHeight}:color=black@1:t=fill`,
     );
   }
@@ -1865,11 +1885,11 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
           const fsS = Math.max(15, Math.round(a.height * (bold ? 0.034 : 0.03) * fontSc));
           if (wantBox) {
             const boxW = bold ? 10 : 8;
-            filters.push(
+            tailFilters.push(
               `drawtext=fontfile=${fontEsc}:text='${textIn}':fontsize=${fsS}:fontcolor=#1a1a1a:borderw=1:bordercolor=#e5e7eb@0.92:box=1:boxcolor=white@${bold ? '0.93' : '0.88'}:boxborderw=${boxW}:x=${pos.x}:y=${pos.y}:enable='between(t\\,${t0}\\,${t1})'`,
             );
           } else {
-            filters.push(
+            tailFilters.push(
               `drawtext=fontfile=${fontEsc}:text='${textIn}':fontsize=${fsS}:fontcolor=white@0.95:borderw=2:bordercolor=black@0.78:shadowcolor=black@0.28:shadowx=1:shadowy=1:x=${pos.x}:y=${pos.y}:enable='between(t\\,${t0}\\,${t1})'`,
             );
           }
@@ -1882,11 +1902,11 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
             const shadow = bold
               ? ':shadowcolor=black@0.82:shadowx=2:shadowy=2'
               : ':shadowcolor=black@0.55:shadowx=1:shadowy=1';
-            filters.push(
+            tailFilters.push(
               `drawtext=fontfile=${fontEsc}:text='${textIn}':fontsize=${fs}:fontcolor=white:borderw=${bw}:bordercolor=black@0.88${shadow}:box=1:boxcolor=black@${boxAlpha}:boxborderw=${boxBorder}:x=${pos.x}:y=${pos.y}:enable='between(t\\,${t0}\\,${t1})'`,
             );
           } else {
-            filters.push(
+            tailFilters.push(
               `drawtext=fontfile=${fontEsc}:text='${textIn}':fontsize=${fs}:fontcolor=white@0.96:borderw=${bw}:bordercolor=black@0.72:shadowcolor=black@0.32:shadowx=1:shadowy=1:x=${pos.x}:y=${pos.y}:enable='between(t\\,${t0}\\,${t1})'`,
             );
           }
@@ -1914,11 +1934,11 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
         const fs2 = Math.max(14, Math.round(a.height * (bold ? 0.03 : 0.027) * fontSc));
         const te = Math.max(0.05, a.durationSeconds - 0.04).toFixed(3);
         if (wantBox) {
-          filters.push(
+          tailFilters.push(
             `drawtext=fontfile=${fontEsc}:text='${capIn}':fontsize=${fs2}:fontcolor=white@0.94:borderw=2:bordercolor=black@0.88:shadowcolor=black@0.5:shadowx=2:shadowy=2:box=1:boxcolor=black@0.34:boxborderw=8:x=${capPos.x}:y=${capPos.y}:enable='between(t\\,0\\,${te})'`,
           );
         } else {
-          filters.push(
+          tailFilters.push(
             `drawtext=fontfile=${fontEsc}:text='${capIn}':fontsize=${fs2}:fontcolor=white@0.95:borderw=2:bordercolor=black@0.7:shadowcolor=black@0.3:shadowx=1:shadowy=1:x=${capPos.x}:y=${capPos.y}:enable='between(t\\,0\\,${te})'`,
           );
         }
@@ -1936,11 +1956,56 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
   const inputArg = useWinWorkdirSpawn ? path.basename(a.input) : inputPath;
   const outputArg = useWinWorkdirSpawn ? path.basename(a.output) : outputPath;
 
-  const vfJoined = filters.join(',');
+  const blurFill = stitchNormalizeBlurFillEnabled();
   /** Windows static stills: `-filter_complex` + explicit map avoids some libavfilter + libx264 link bugs with `-vf`. */
   const winStaticFilterComplex =
     process.platform === 'win32' && a.kind === 'image' && !useKenBurnsOnImage;
-  const winFilterComplexGraph = winStaticFilterComplex ? windowsStaticFilterComplexExpr(filters) : null;
+  const filtersFlat = [...geometryFilters, ...tailFilters];
+  const vfJoined = filtersFlat.join(',');
+
+  let fullFilterComplexGraph: string | null = null;
+  if (blurFill) {
+    const w = a.width;
+    const h = a.height;
+    const teShot = Math.max(0.05, a.durationSeconds).toFixed(3);
+    if (a.kind === 'image' && useKenBurnsOnImage) {
+      const zoomStep = 0.0008;
+      const safeFocalX = Math.max(0.15, Math.min(0.85, a.focalX));
+      const safeFocalY = Math.max(0.15, Math.min(0.85, a.focalY));
+      const xExpr = `'iw*${safeFocalX}-(iw/zoom/2)'`;
+      const yExpr = `'ih*${safeFocalY}-(ih/zoom/2)'`;
+      const zoompan = `zoompan=z='min(zoom+${zoomStep},1.10)':x=${xExpr}:y=${yExpr}:d=${imageOutFrames}:s=${w}x${h}:fps=${a.fps}`;
+      const blurGeo = [
+        `[0:v]select=eq(n\\,0),setpts=PTS-STARTPTS,split=2[nbb_o][nbb_t]`,
+        `[nbb_t]scale=${w}:${h}:force_original_aspect_ratio=increase:flags=bilinear,crop=${w}:${h},boxblur=luma_radius=20:chroma_radius=10[nbb_bg]`,
+        `[nbb_o]scale=${w}:${h}:force_original_aspect_ratio=decrease:flags=bilinear[nbb_fg]`,
+        `[nbb_bg][nbb_fg]overlay=(W-w)/2:(H-h)/2[nbb_fit]`,
+        `[nbb_fit]${zoompan},tpad=stop_mode=clone:stop_duration=6,trim=end=${teShot},setpts=PTS-STARTPTS[normgeo]`,
+      ].join(';');
+      fullFilterComplexGraph = `${blurGeo};${chainFilterComplexTailFromPad('normgeo', tailFilters, 'normv')}`;
+    } else if (a.kind === 'image') {
+      const blurGeo = [
+        `[0:v]split=2[sbb_o][sbb_t]`,
+        `[sbb_t]scale=${w}:${h}:force_original_aspect_ratio=increase:flags=bilinear,crop=${w}:${h},boxblur=luma_radius=20:chroma_radius=10[sbb_bg]`,
+        `[sbb_o]scale=${w}:${h}:force_original_aspect_ratio=decrease:flags=bilinear[sbb_fg]`,
+        `[sbb_bg][sbb_fg]overlay=(W-w)/2:(H-h)/2[normgeo]`,
+      ].join(';');
+      fullFilterComplexGraph = `${blurGeo};${chainFilterComplexTailFromPad('normgeo', tailFilters, 'normv')}`;
+    } else {
+      const blurGeo = [
+        `[0:v]split=2[vbb_o][vbb_t]`,
+        `[vbb_t]scale=${w}:${h}:force_original_aspect_ratio=increase:flags=lanczos,crop=${w}:${h},boxblur=luma_radius=20:chroma_radius=10[vbb_bg]`,
+        `[vbb_o]scale=${w}:${h}:force_original_aspect_ratio=decrease:flags=lanczos[vbb_fg]`,
+        `[vbb_bg][vbb_fg]overlay=(W-w)/2:(H-h)/2[vbb_fit]`,
+        `[vbb_fit]fps=${a.fps},tpad=stop_mode=clone:stop_duration=30,trim=end=${teShot},setpts=PTS-STARTPTS[normgeo]`,
+      ].join(';');
+      fullFilterComplexGraph = `${blurGeo};${chainFilterComplexTailFromPad('normgeo', tailFilters, 'normv')}`;
+    }
+  } else if (winStaticFilterComplex) {
+    fullFilterComplexGraph = windowsStaticFilterComplexExpr(filtersFlat);
+  }
+
+  const useFilterComplexGraph = Boolean(fullFilterComplexGraph);
 
   const normalizeDiagDeep = stitchNormalizeDeepDiagnostics();
   const normalizeDiagShots = stitchNormalizeShotDiagnostics();
@@ -1961,8 +2026,8 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
   }
   args.push('-i', inputArg);
   if (a.kind === 'video') args.push('-t', String(a.durationSeconds));
-  if (winStaticFilterComplex) {
-    args.push('-filter_complex', winFilterComplexGraph!);
+  if (useFilterComplexGraph) {
+    args.push('-filter_complex', fullFilterComplexGraph!);
     args.push('-map', '[normv]');
   } else {
     args.push('-vf', vfJoined);
@@ -2013,8 +2078,9 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
   } catch {
     fontProbe = null;
   }
-  const drawtextCount = filters.filter((f) => f.startsWith('drawtext=')).length;
-  const filterComplexFull = winFilterComplexGraph ?? undefined;
+  const drawtextCount = filtersFlat.filter((f) => f.startsWith('drawtext=')).length;
+  const filterComplexFull = fullFilterComplexGraph ?? undefined;
+  const filterGraphForLogs = fullFilterComplexGraph ?? vfJoined;
   const normalizePrePayload = {
     tag: 'normalize-pre-invoke',
     segmentIndex: a.segmentIndex,
@@ -2032,7 +2098,7 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
       inputResolved: a.input.length,
       outputResolved: a.output.length,
       workDirAbs: workDirAbs.length,
-      vfJoined: vfJoined.length,
+      filterGraphForLogs: filterGraphForLogs.length,
       ffmpegBin: a.ffmpegBin.length,
     },
     targetWxH: { w: a.width, h: a.height },
@@ -2057,14 +2123,16 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
     persistentCaptionLen: a.persistentCaption?.trim().length ?? 0,
     fontPathForDrawtext: fontProbe ? path.basename(fontProbe) : null,
     gradeFilterString: grade ?? '(none)',
-    filterPass: winStaticFilterComplex ? 'filter_complex' : 'vf',
+    filterPass: useFilterComplexGraph ? 'filter_complex' : 'vf',
     filterComplexFull,
+    blurFillNormalize: blurFill,
     drawtextCount,
     winFilterComplexLabeledChain: winStaticFilterComplex && drawtextCount > 1,
-    filtersChain: filters,
-    vfFilterCount: filters.length,
-    vfJoinedLength: vfJoined.length,
-    vfJoinedFull: vfJoined,
+    filterComplexLabeledDrawtext: useFilterComplexGraph && drawtextCount > 1,
+    filtersChain: filtersFlat,
+    vfFilterCount: filtersFlat.length,
+    vfJoinedLength: filterGraphForLogs.length,
+    vfJoinedFull: filterGraphForLogs,
     argv: [a.ffmpegBin, ...args],
     h264EncodeArgs: vEnc,
     winStaticFilterComplex,
@@ -2101,8 +2169,8 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
         normalizeThreadArgs,
         inputBasename: path.basename(a.input),
         inputBytes,
-        vfChars: vfJoined.length,
-        filterPass: winStaticFilterComplex ? 'filter_complex' : 'vf',
+        vfChars: filterGraphForLogs.length,
+        filterPass: useFilterComplexGraph ? 'filter_complex' : 'vf',
         winWorkdirSpawn: useWinWorkdirSpawn,
         platform: process.platform,
         node: process.version,
@@ -2121,7 +2189,9 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
         argvTokens: ffmpegArgvTokensForLog([a.ffmpegBin, ...args]),
         argvTokenCount: args.length + 1,
         vfJoinedPreview:
-          vfJoined.length > 2800 ? `${vfJoined.slice(0, 2800)}…(+${vfJoined.length - 2800} chars)` : vfJoined,
+          filterGraphForLogs.length > 2800
+            ? `${filterGraphForLogs.slice(0, 2800)}…(+${filterGraphForLogs.length - 2800} chars)`
+            : filterGraphForLogs,
         filterComplexPreview:
           typeof fcf === 'string' && fcf.length > 2400 ? `${fcf.slice(0, 2400)}…(+${fcf.length - 2400} chars)` : fcf,
       }),
@@ -2153,7 +2223,7 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
     (process.env.NODE_ENV !== 'production' || normalizeDumpAll) && !shouldDumpNormalizePre;
   if (wantCompactNormalizeLine && a.segmentIndex > 0) {
     console.info(
-      `[stitcher:normalize-start] seg=${a.segmentIndex} kind=${a.kind} dur=${a.durationSeconds}s pass=${normalizePrePayload.filterPass} winWd=${useWinWorkdirSpawn ? 1 : 0} winFc=${winStaticFilterComplex ? 1 : 0} vfLen=${vfJoined.length} frames=${staticStillFrames || imageOutFrames || 'n/a'} in=${path.basename(a.input)}`,
+      `[stitcher:normalize-start] seg=${a.segmentIndex} kind=${a.kind} dur=${a.durationSeconds}s pass=${normalizePrePayload.filterPass} winWd=${useWinWorkdirSpawn ? 1 : 0} winFc=${winStaticFilterComplex ? 1 : 0} blur=${blurFill ? 1 : 0} vfLen=${filterGraphForLogs.length} frames=${staticStillFrames || imageOutFrames || 'n/a'} in=${path.basename(a.input)}`,
     );
   }
 
@@ -2169,7 +2239,7 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
     winWorkdirSpawn: useWinWorkdirSpawn ? true : undefined,
     winStaticFilterComplex: winStaticFilterComplex ? true : undefined,
     drawtextCount: drawtextCount > 0 ? drawtextCount : undefined,
-    winFilterComplexLabeled: winStaticFilterComplex && drawtextCount > 1 ? true : undefined,
+    winFilterComplexLabeled: useFilterComplexGraph && drawtextCount > 1 ? true : undefined,
     videoDecodeCapSeconds: a.kind === 'video' ? a.durationSeconds : undefined,
     videoTrimEnd: a.kind === 'video' ? Math.max(0.05, a.durationSeconds).toFixed(3) : undefined,
   });
@@ -2180,7 +2250,7 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
     normalizeDumpAll ||
     shouldDumpNormalizePre;
   if (drawtextCount > 0) {
-    const snippets = filters
+    const snippets = filtersFlat
       .filter((f) => f.startsWith('drawtext='))
       .map((f) => (f.length > 420 ? `${f.slice(0, 420)}…(+${f.length - 420})` : f));
     if (process.env.NODE_ENV !== 'production' || drawtextVerbose) {
@@ -2190,9 +2260,9 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
           kind: a.kind,
           durationSeconds: a.durationSeconds,
           useWinWorkdirSpawn,
-          filterPass: winStaticFilterComplex ? 'filter_complex' : 'vf',
+          filterPass: useFilterComplexGraph ? 'filter_complex' : 'vf',
+          blurFillNormalize: blurFill,
           drawtextCount,
-          fontBasename: fontProbe ? path.basename(fontProbe) : null,
           snippets,
         })}`,
       );
@@ -2235,7 +2305,7 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
       vEncSuffix: vEnc.slice(-8),
       inputBasename: path.basename(a.input),
       inputBytes: normalizeInvokeInputBytes,
-      vfChars: vfJoined.length,
+      vfChars: filterGraphForLogs.length,
       drawtextCount,
       NODE_ENV: process.env.NODE_ENV ?? null,
       process: stitchProcessDiagnosticsSnapshot(),
@@ -2252,10 +2322,10 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
             phase: 'normalize',
             segmentIndex: a.segmentIndex,
             kind: a.kind,
-            vfJoinedFull: vfJoined,
+            vfJoinedFull: filterGraphForLogs,
             filterComplexFull,
             drawtextCount,
-            winFilterComplexLabeledChain: drawtextCount > 1 && winStaticFilterComplex,
+            winFilterComplexLabeledChain: drawtextCount > 1 && useFilterComplexGraph,
             filterPass: normalizePrePayload.filterPass,
             h264EncodeArgs: vEnc,
           }
@@ -2292,7 +2362,10 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
     } catch {
       console.warn('[stitcher:normalize-failed-summary] (serialize failed)', a.segmentIndex);
     }
-    const tail = vfJoined.length > 12_000 ? `${vfJoined.slice(0, 12_000)}…[truncated ${vfJoined.length - 12_000} chars]` : vfJoined;
+    const tail =
+      filterGraphForLogs.length > 12_000
+        ? `${filterGraphForLogs.slice(0, 12_000)}…[truncated ${filterGraphForLogs.length - 12_000} chars]`
+        : filterGraphForLogs;
     let workdirFiles: { ok: boolean; count?: number; sample?: string[]; err?: string } = { ok: false };
     try {
       const names = readdirSync(workDirAbs);
@@ -2319,7 +2392,7 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
         segmentIndex: a.segmentIndex,
         workDir: workDirAbs,
       });
-      const drawSnips = filters
+      const drawSnips = filtersFlat
         .filter((f) => f.startsWith('drawtext='))
         .map((f) => (f.length > 520 ? `${f.slice(0, 520)}…(+${f.length - 520})` : f));
       console.warn(
@@ -2327,7 +2400,8 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
           segmentIndex: a.segmentIndex,
           drawSnips,
           useWinWorkdirSpawn,
-          filterPass: winStaticFilterComplex ? 'filter_complex' : 'vf',
+          filterPass: useFilterComplexGraph ? 'filter_complex' : 'vf',
+          blurFillNormalize: blurFill,
         })}`,
       );
       const hintBoth =
@@ -2363,13 +2437,15 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
             outputArg,
             inputResolved: a.input,
             outputResolved: a.output,
-            filterPass: winStaticFilterComplex ? 'filter_complex' : 'vf',
+            filterPass: useFilterComplexGraph ? 'filter_complex' : 'vf',
             filterComplexFull,
+            blurFillNormalize: blurFill,
             drawtextCount,
             winFilterComplexLabeledChain: winStaticFilterComplex && drawtextCount > 1,
-            vfJoinedLength: vfJoined.length,
+            filterComplexLabeledDrawtext: useFilterComplexGraph && drawtextCount > 1,
+            vfJoinedLength: filterGraphForLogs.length,
             vfJoined: tail,
-            filtersChain: filters,
+            filtersChain: filtersFlat,
             argv: [a.ffmpegBin, ...args],
             stderrChars: stderrFull.length,
             stderrFull: stderrForJson,

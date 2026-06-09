@@ -947,6 +947,12 @@ const COMPOSITION_VARIETY_HINTS: readonly string[] = [
   'Low horizon or layered verticals — avoid flat eyeline webcam energy.',
   'One chromatic accent on a restrained palette — avoid flat mushy grading.',
   'Slight oblique camera energy — readable, not chaotic; no mirrored hero poses.',
+  'Single-object hero read — one prop or figure carries the story beat.',
+  'Environmental storytelling: signage, tools, weather, or era cues in frame edges.',
+  'High angle looking down into a table or map — organised spatial read.',
+  'Wide silhouette against a bright background — graphic, legible shape.',
+  'Macro or tight detail on texture (fabric, metal, paper) with shallow depth.',
+  'Diagonal leading lines (road, river, shelf) pulling the eye through the frame.',
 ];
 
 function cheapStringHash(s: string): number {
@@ -1562,6 +1568,7 @@ function buildDirectorPrompt(args: DirectArgs): string {
 
   const visualPurposeRule =
     '- **Every shot earns the cut:** each \`description\` (and scraper \`imageQuery\` when used) must advance a **new** idea aligned with that shot\'s \`voiceover\` — no run of near-duplicate frames for the same beat. If the story does not need another angle, merge beats instead of padding with redundant \`ai_image\` / \`ai_video\`.\n' +
+    '- **No filler stills:** every \`ai_image\` must change **at least one** of: primary subject, setting/location, time-of-day or mood, or **information** shown (prop, document, map era) vs the prior still — not a near-identical re-render with a tiny crop tweak.\n' +
     '- **Script-locked visuals:** a viewer should infer what this line of \`voiceover\` is about from \`description\` alone — no generic stock mood that could apply to any line. If the VO names a place, object, era, or action, the frame must show that (or a clear metaphor the beat explains), not unrelated beauty shots.\n' +
     '- **Single episode subject:** the entire storyboard is for **one** topic: "' +
     args.topic.replace(/\s+/g, ' ').replace(/"/g, '\\"').slice(0, 200) +
@@ -1608,7 +1615,8 @@ PREFERRED PLATFORMS: ${args.theme.preferredPlatforms.join(', ')}${styleBibleBloc
 
 DIRECTING RULES (non-negotiable):
 ${shotCountRule}
-${narrationQualityRule}${avgClipOperatorRule}${visualPurposeRule}${namesNumbersDirectingRule}${sparseDirectingRule}- Give every shot a CONCRETE subject action (verb + object), a camera move, a framing, a lighting description, and a palette. Abstract = slop.
+${narrationQualityRule}${avgClipOperatorRule}${visualPurposeRule}${namesNumbersDirectingRule}${sparseDirectingRule}- **\`role\` on every shot:** one short label (e.g. "Hook proof", "Counter-evidence", "Payoff reveal") — not generic "shot 3"; image prompts use it so each still has a **clear editorial purpose**.
+- Give every shot a CONCRETE subject action (verb + object), a camera move, a framing, a lighting description, and a palette. Abstract = slop.
 - Use intentional CUTS. Default transition is 'hard_cut'. Save 'whip_pan' / 'match_cut' / 'flash_cut' for moments that earn them.
 - Reuse the SAME character / setting descriptors across shots so AI models keep consistency. Don't say "a woman" once and "she" the next shot — re-describe every time.
 - When reference stills/clips or character sheets are passed into models, treat them as **continuity anchors only** — never plan shots that simply remake a reference frame (same pose, crop, and layout). Each shot must be a new editorial frame in the same visual world.
@@ -1661,7 +1669,7 @@ ${titleJsonLine}
             {
               "id": "shot_0_0_0",
               "role": "<narrative role>",
-              "description": "<what the camera sees, 1-2 sentences>",
+              "description": "<1–2 sentences: one decisive visual moment that **only** illustrates THIS shot's voiceover — specific place/prop/era/people; not generic mood wallpaper>",
               "onScreen": "<3-8 words OR empty>",
               "voiceover": "<one spoken line: one clear idea; specific nouns/verbs; no filler — OR empty>",
               "eyebrow": "<optional chapter label>",
@@ -1826,8 +1834,22 @@ export function shotToPrompt(args: {
       ? `Subject action: ${shot.subjectAction}.`
       : '';
 
-  // 2. IMAGE — what we see.
-  const image = `Shot: ${shot.description}. Framing: ${framingToEnglish(shot.framing)}. Lighting: ${shot.lighting}. Palette: ${shot.palette}.${shot.lensHint ? ` Lens: ${shot.lensHint}.` : ''}`;
+  const narrativeRoleClause =
+    shot.role?.trim() &&
+    !thumbnailCoverMode &&
+    (shot.kind === 'ai_image' || shot.kind === 'ai_video' || shot.kind === 'scraped_image' || shot.kind === 'scraped_video')
+      ? `NARRATIVE ROLE: "${shot.role.replace(/"/g, "'").trim().slice(0, 120)}" — this cut must **earn** its place (not filler that could swap with another line).`
+      : '';
+
+  const image =
+    shot.kind === 'ai_image'
+      ? `Still frame: ${shot.description} Framing: ${framingToEnglish(shot.framing)}. Lighting: ${shot.lighting}. Palette: ${shot.palette}.${shot.lensHint ? ` Lens: ${shot.lensHint}.` : ''} One decisive readable moment tied to the script — avoid generic catalogue / stock-poster compositions unless the line is literally about that.`
+      : `Shot: ${shot.description}. Framing: ${framingToEnglish(shot.framing)}. Lighting: ${shot.lighting}. Palette: ${shot.palette}.${shot.lensHint ? ` Lens: ${shot.lensHint}.` : ''}`;
+
+  const imageQualityClause =
+    !thumbnailCoverMode && shot.kind === 'ai_image'
+      ? 'STILL QUALITY BAR: crisp focus on the hero subject, coherent single light direction, physically plausible anatomy for people, clean edges — **no** watermarks, stock-site UI, random logos, duplicated faces in crowds, mangled hands or extra limbs, or meaningless clutter unrelated to the narration.'
+      : '';
 
   // 3. MOTION — camera + subject motion.
   const motion = `Camera: ${cameraToEnglish(shot.camera)}. ${shot.subjectAction ? `Subject action: ${shot.subjectAction}.` : ''}${shot.speedRamp && shot.speedRamp !== 'none' ? ` Speed ramp: ${shot.speedRamp.replace('_', ' ')}.` : ''}`;
@@ -1973,7 +1995,9 @@ export function shotToPrompt(args: {
     timingClause,
     structureClause,
     identity,
+    narrativeRoleClause,
     image,
+    imageQualityClause,
     motion,
     styleStr,
   ]
@@ -1990,7 +2014,7 @@ export function shotToPrompt(args: {
     timelineShotTotal != null &&
     timelineShotTotal > 1
   ) {
-    out += ` Edit timeline: frame ${timelineShotIndex} of ${timelineShotTotal} — must depict a distinct story beat for this line (not wallpaper or a near-copy of a prior frame); composition follows this shot's description and voiceover${shot.imageCaption?.trim() ? ' (on-image text wording is script-locked above, not the scene brief)' : ''}.`;
+    out += ` Edit timeline: frame ${timelineShotIndex} of ${timelineShotTotal} — **must** add new visual information versus earlier frames (not wallpaper or a near-copy). Depict a distinct story beat for this line; composition follows this shot's description and voiceover${shot.imageCaption?.trim() ? ' (on-image text wording is script-locked above, not the scene brief)' : ''}.`;
   }
 
   return out;

@@ -2311,9 +2311,13 @@ function PostCard({
   /** iOS WebKit: `share()` must run on a second tap after `fetch` (see share helpers above). */
   const [shareGesture, setShareGesture] = useState<SharePhotosGesture | null>(null);
   const narrow = useIsNarrowScreen();
-  const [clientShare] = useState(
-    () => typeof navigator !== 'undefined' && typeof navigator.share === 'function',
-  );
+  /** Avoid SSR/client mismatch: capability is read only after mount (brief flash of extra buttons is OK). */
+  const [uiReady, setUiReady] = useState(false);
+  useEffect(() => {
+    setUiReady(true);
+  }, []);
+  const clientShare =
+    uiReady && typeof navigator !== 'undefined' && typeof navigator.share === 'function';
   /** On phones with Web Share, hide top-level file downloads to keep one obvious path to Photos. */
   const simplifyMobileSave = narrow && clientShare;
   const shareSheetOpen = shareGesture != null;

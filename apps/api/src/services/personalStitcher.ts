@@ -1617,6 +1617,9 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
       `trim=end=${Math.max(0.05, a.durationSeconds).toFixed(3)}`,
       `setpts=PTS-STARTPTS`,
     );
+    // Many AI clips decode as yuvj420p / other legacy pix fmts. Converting here stops swscaler from
+    // re-warning on every scale/colour step and avoids subtle TV-vs-PC range bugs before libx264.
+    filters.push('format=yuv420p');
   }
 
   const grade = gradeFilter(a.colourGrade);
@@ -2612,10 +2615,35 @@ function summarizeFfmpegStderr(stderr: string, maxLen = 1200): string {
     .split('\n')
     .map((l) => l.trim())
     .filter(Boolean);
-  const hits = lines.filter((l) =>
-    /\berror\b|\bfailed\b|\binvalid\b|\bunknown\b|\bnot supported\b|\bdeprecated\b/i.test(l),
+
+  const swScalerDeprec = (l: string) => /^\[swscaler @/i.test(l) && /deprecated pixel format/i.test(l);
+
+  const strong = lines.filter(
+    (l) =>
+      !swScalerDeprec(l) &&
+      /\berror\b|\bfailed\b|\binvalid\b|\bconversion failed\b|\bimpossible\b|\bnot supported\b|\blibx264\b|\bdrawtext\b|Unknown encoder|unknown option|Protocol not found|No such file|Cannot allocate/i.test(
+        l,
+      ),
   );
-  const body = hits.length ? hits.slice(-12).join('\n') : lines.slice(-25).join('\n');
+
+  const hits = lines.filter(
+    (l) =>
+      !swScalerDeprec(l) &&
+      /\berror\b|\bfailed\b|\binvalid\b|\bunknown\b|\bnot supported\b|\bdeprecated\b/i.test(l),
+  );
+
+  if (lines.length > 0 && lines.every(swScalerDeprec)) {
+    return (
+      '(FFmpeg exited non-zero; stderr contained only swscaler pixel-format warnings — ' +
+      'set PERSONAL_DEBUG_STITCH_FFMPEG=1 on the API for full stderr.)'
+    );
+  }
+
+  const body = strong.length
+    ? strong.slice(-14).join('\n')
+    : hits.length
+      ? hits.slice(-14).join('\n')
+      : lines.slice(-28).join('\n');
   return body.length > maxLen ? `…${body.slice(-maxLen)}` : body;
 }
 

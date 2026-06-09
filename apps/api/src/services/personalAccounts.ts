@@ -554,6 +554,49 @@ export async function deletePersonalPost(
   return removed.length > 0;
 }
 
+function personalPostMp4Filename(script: unknown, topic: string): string {
+  const title =
+    script && typeof script === 'object' && typeof (script as Record<string, unknown>).title === 'string'
+      ? String((script as Record<string, unknown>).title).trim()
+      : '';
+  const raw = (title || String(topic ?? '').trim() || 'video')
+    .replace(/[\\/:*?"<>|]+/g, '')
+    .replace(/\s+/g, '_')
+    .slice(0, 72);
+  const base = raw || 'video';
+  return base.toLowerCase().endsWith('.mp4') ? base : `${base}.mp4`;
+}
+
+/**
+ * Resolves the storage URL for a finished personal post video when the caller
+ * owns the account. Used by the download proxy route (avoids browser CORS on R2).
+ */
+export async function resolvePersonalPostVideoDownload(
+  userId: string,
+  accountId: string,
+  postId: string,
+): Promise<
+  { ok: true; videoUrl: string; filename: string } | { ok: false; error: 'not_found' | 'no_video' }
+> {
+  const account = await getAccount(userId, accountId);
+  if (!account) return { ok: false, error: 'not_found' };
+  if (!isDbConfigured()) return { ok: false, error: 'not_found' };
+  const db = getDb();
+  const [row] = await db
+    .select({
+      videoUrl: personalPosts.videoUrl,
+      topic: personalPosts.topic,
+      script: personalPosts.script,
+    })
+    .from(personalPosts)
+    .where(and(eq(personalPosts.id, postId), eq(personalPosts.accountId, accountId)))
+    .limit(1);
+  if (!row) return { ok: false, error: 'not_found' };
+  const url = (row.videoUrl ?? '').trim();
+  if (!url) return { ok: false, error: 'no_video' };
+  return { ok: true, videoUrl: url, filename: personalPostMp4Filename(row.script, row.topic) };
+}
+
 /**
  * Inserts a `queued` personal post row immediately so the dashboard shows the
  * job while {@link enqueuePersonalGenerateForAccount} waits behind another run.

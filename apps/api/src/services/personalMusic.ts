@@ -259,6 +259,8 @@ export interface PickMusicArgs {
    * from `seed`). Runs before built-in CDN tracks.
    */
   accountId?: string;
+  /** Skip these URLs so chained beds can pick a different track each time. */
+  excludeUrls?: string[];
 }
 
 export interface PickedMusic {
@@ -279,18 +281,25 @@ export interface PickedMusic {
 export async function pickMusic(args: PickMusicArgs): Promise<PickedMusic | null> {
   // Themes sometimes set `musicMood` to "". Still run R2 + built-in paths with a generic query.
   const mood = args.mood?.trim() ? args.mood.trim() : 'ambient instrumental';
+  const excluded = new Set(
+    (args.excludeUrls ?? [])
+      .map((u) => u.trim())
+      .filter((u) => u.length > 0),
+  );
+  const keepUrl = (url: string | undefined): boolean => Boolean(url && !excluded.has(url.trim()));
 
   // 1. Pixabay ----------------------------------------------------------
   if (process.env.PIXABAY_API_KEY) {
     try {
-      const tracks = await searchPixabayMusic(mood, 10);
+      const wantExclude = excluded.size > 0;
+      const tracks = await searchPixabayMusic(mood, wantExclude ? 30 : 10);
       const long = tracks.filter(
         (t) =>
-          t.url &&
+          keepUrl(t.url) &&
           (!args.minDurationSeconds ||
             (t.durationSeconds ?? 0) >= args.minDurationSeconds),
       );
-      const pool = long.length > 0 ? long : tracks.filter((t) => t.url);
+      const pool = long.length > 0 ? long : tracks.filter((t) => keepUrl(t.url));
       if (pool.length > 0) {
         const idx = hashIndex(args.seed ?? mood, pool.length);
         const pick = pool[idx]!;
@@ -317,9 +326,10 @@ export async function pickMusic(args: PickMusicArgs): Promise<PickedMusic | null
         : `public/personal-music/${args.accountId}/`;
       try {
         const allKeys = await listAllLibraryMusicKeysForPrefix(prefix);
-        if (allKeys.length > 0) {
-          const idx = hashIndex(args.seed ?? mood, allKeys.length);
-          const key = allKeys[idx]!;
+        const keysFiltered = allKeys.filter((k) => keepUrl(`${base}/${k.replace(/^\/+/, '')}`));
+        if (keysFiltered.length > 0) {
+          const idx = hashIndex(args.seed ?? mood, keysFiltered.length);
+          const key = keysFiltered[idx]!;
           return {
             url: `${base}/${key.replace(/^\/+/, '')}`,
             attribution: 'From your R2 music library',
@@ -353,7 +363,8 @@ export async function pickMusic(args: PickMusicArgs): Promise<PickedMusic | null
     }
   }
 
-  const pool = candidateMetas.map(materializeBuiltin).filter((x): x is PersonalScrapedItem => x !== null);
+  let pool = candidateMetas.map(materializeBuiltin).filter((x): x is PersonalScrapedItem => x !== null);
+  pool = pool.filter((p) => keepUrl(p.url));
   if (pool.length === 0 && poolRaw.length > 0 && !features.r2 && !process.env.PERSONAL_MUSIC_CDN_URL?.trim()) {
     console.warn(
       '[music] built-in library skipped (no R2 and no PERSONAL_MUSIC_CDN_URL). Set R2_* + R2_PUBLIC_URL, set PERSONAL_MUSIC_CDN_URL to a reachable https base, add PIXABAY_API_KEY, or use custom account audio.',

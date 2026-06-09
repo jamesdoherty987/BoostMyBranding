@@ -24,7 +24,7 @@ import {
   PERSONAL_SCRIPT_CK_PRE,
   PERSONAL_SCRIPT_CK_SRC,
   filterKeywordCardsByVoiceover,
-  overlayFactLabelGroundedInVoiceover,
+  aiOnImageFactLabelsOnly,
   type Storyboard,
 } from './personalDirector.js';
 import { searchAssets, pickGameplayLoop } from './personalScraper.js';
@@ -39,7 +39,7 @@ import {
   minShotsForVoiceAndAvgClip,
   type VoiceCharacterAlignment,
 } from './personalVoice.js';
-import { pickMusic } from './personalMusic.js';
+import { resolveChainedMusicBed } from './personalMusicChain.js';
 import { schedulePost } from './contentStudio.js';
 import { broadcast } from './realtime.js';
 import { env, features } from '../env.js';
@@ -499,6 +499,7 @@ export async function directorPipelineFromResolvedStoryboard(
 
   const generateShotAsset = async (
     fs: (typeof flat)[number],
+    timelineIndex: number,
   ): Promise<{
     fs: (typeof flat)[number];
     asset: { url: string; kind: 'image' | 'video' } | null;
@@ -527,6 +528,19 @@ export async function directorPipelineFromResolvedStoryboard(
       ? [...characterAnchors.slice(0, 3), ...resolvedStyleRefImageUrls.slice(0, 3)].slice(0, 6)
       : [...characterAnchors.slice(0, 2), ...resolvedStyleRefImageUrls.slice(0, 4)];
 
+    const factLabelImagePromptExtra =
+      genConfig.allowSparseImageText === true
+        ? [
+            'The on-image words are narration-locked in the prompt — never replace them with scene-description titles or "what the photo shows".',
+            styleBible.typography?.trim() &&
+              `Account style-bible typography for any on-image label: ${styleBible.typography.trim()}.`,
+            resolvedStyleRefImageUrls.length > 0 &&
+              'If the inspiration reference stills include on-image words or numbers, match that lettering personality (weight, colour, case, placement); otherwise follow the style-bible typography line above.',
+          ]
+            .filter((s): s is string => typeof s === 'string' && s.length > 0)
+            .join(' ')
+        : undefined;
+
     const basePrompt = shotToPrompt({
       shot: fs.shot,
       themeVisualStyle: theme.visualStyle,
@@ -536,6 +550,9 @@ export async function directorPipelineFromResolvedStoryboard(
       inspirationStyleHint: inspirationStyleHintForShots || undefined,
       animationStyleHint,
       shotBrandHints,
+      factLabelImagePromptExtra,
+      timelineShotIndex: timelineIndex + 1,
+      timelineShotTotal: flat.length,
     });
     const refNoCopy =
       (fs.shot.kind === 'ai_image' || fs.shot.kind === 'ai_video') &&
@@ -547,6 +564,13 @@ export async function directorPipelineFromResolvedStoryboard(
     const negativePrompt = [
       ...(styleBible.donts ?? []),
       ...(character?.negativePrompt ? [character.negativePrompt] : []),
+      ...(genConfig.allowSparseImageText === true && fs.shot.imageCaption?.trim()
+        ? [
+            'wrong or paraphrased text versus the requested label',
+            'scene-description captions or picture titles instead of the given narration snippet',
+            'extra words on signs or screens beyond the specified label',
+          ]
+        : []),
     ]
       .filter(Boolean)
       .join(', ');
@@ -732,7 +756,7 @@ export async function directorPipelineFromResolvedStoryboard(
       }
       const idx = nextIdx++;
       if (idx >= flat.length) return;
-      const result = await generateShotAsset(flat[idx]!);
+      const result = await generateShotAsset(flat[idx]!, idx);
       shotResultsOrdered[idx] = result;
       if (result.error === 'stopped' || (await personalPostIsFailed(postId))) {
         sourcingState.stopped = true;
@@ -915,13 +939,25 @@ export async function directorPipelineFromResolvedStoryboard(
   } else {
     const onScreenText = [
       storyboard.hook,
-      ...resolved.map((r) => r.fs.shot.onScreen).filter(Boolean),
+      ...(genConfig.directorShotOnScreenCopy === false
+        ? []
+        : resolved.map((r) => r.fs.shot.onScreen).filter(Boolean)),
       storyboard.outro,
     ].join(' ');
     if (onScreenText.length > 0) {
       estimatedDuration = Math.max(estimatedDuration, estimateDurationSeconds(onScreenText));
     }
   }
+
+  /** Cold-open pad on shot 0 (music must cover full mux, including this). */
+  const longformIntroSeconds =
+    longformEnabled &&
+    genConfig.longformIntroEnabled === true &&
+    useVoiceover &&
+    Boolean(voiceoverUrl) &&
+    resolved.length > 0
+      ? Math.min(5, Math.max(1.5, genConfig.longformIntroSeconds ?? 2.5))
+      : 0;
 
   let musicUrl: string | null = null;
   let musicAttribution: string | null = null;
@@ -931,16 +967,22 @@ export async function directorPipelineFromResolvedStoryboard(
     musicUrl = account.customAudioUrl;
     musicAttribution = account.customAudioAttribution ?? null;
   } else if (wantMusicBed) {
+    const musicTargetSeconds = Math.ceil(
+      Math.max(estimatedDuration, longformEnabled ? longformTargetSeconds ?? 0 : 0) +
+        (longformIntroSeconds > 0 ? longformIntroSeconds : 0),
+    );
     const minMusicSeconds = longformEnabled
-      ? Math.min(480, Math.max(60, Math.ceil(estimatedDuration)))
-      : Math.ceil(estimatedDuration);
+      ? Math.min(480, Math.max(60, musicTargetSeconds))
+      : Math.max(1, musicTargetSeconds);
     const music = await withAbortWhenPersonalPostFailed(
       postId,
-      pickMusic({
+      resolveChainedMusicBed({
         mood: theme.musicMood,
         seed: postId,
-        minDurationSeconds: minMusicSeconds,
         accountId: account.id,
+        postId,
+        targetSeconds: musicTargetSeconds,
+        firstPickMinDurationSeconds: minMusicSeconds,
       }),
     ).catch(() => null);
     if (music) {
@@ -963,8 +1005,11 @@ export async function directorPipelineFromResolvedStoryboard(
 
   broadcast({ type: 'personal:progress', payload: { accountId: account.id, postId, phase: 'stitching' } });
 
-  const keywordOverlayStyle: 'off' | 'subtle' | 'bold' | 'slate' | 'slate_bold' =
-    genConfig.namesNumbersTitleCard === true
+  const keywordOverlayStyle: 'off' | 'subtle' | 'bold' | 'slate' | 'slate_bold' = aiOnImageFactLabelsOnly(
+    genConfig,
+  )
+    ? 'off'
+    : genConfig.namesNumbersTitleCard === true
       ? genConfig.keywordPopStyle === 'bold'
         ? 'slate_bold'
         : 'slate'
@@ -1131,15 +1176,6 @@ export async function directorPipelineFromResolvedStoryboard(
     }
   }
 
-  const longformIntroSeconds =
-    longformEnabled &&
-    genConfig.longformIntroEnabled === true &&
-    useVoiceover &&
-    Boolean(voiceoverUrl) &&
-    resolved.length > 0
-      ? Math.min(5, Math.max(1.5, genConfig.longformIntroSeconds ?? 2.5))
-      : 0;
-
   let visualDurations: number[] | null = null;
   if (
     useVoiceover &&
@@ -1284,7 +1320,7 @@ export async function directorPipelineFromResolvedStoryboard(
       focalX: r.fs.shot.focalX,
       focalY: r.fs.shot.focalY,
       keywordCards: (() => {
-        if (keywordOverlayStyle === 'off') return undefined;
+        if (keywordOverlayStyle === 'off' || aiOnImageFactLabelsOnly(genConfig)) return undefined;
         const filtered = filterKeywordCardsByVoiceover(r.fs.shot.keywordCards, r.fs.shot.voiceover ?? '');
         const normOpts = {
           snappySlate: genConfig.namesNumbersTitleCard === true,
@@ -1321,14 +1357,8 @@ export async function directorPipelineFromResolvedStoryboard(
         }
         return normalizeKeywordCardsForShot(filtered, dur, normOpts);
       })(),
-      /** Mutually exclusive with keyword / slate FFmpeg overlays — avoids duplicate labels on the same shot. */
-      persistentCaption: (() => {
-        if (keywordOverlayStyle !== 'off' || genConfig.allowSparseImageText !== true) return undefined;
-        const cap = r.fs.shot.imageCaption ? String(r.fs.shot.imageCaption).trim().slice(0, 80) : '';
-        if (!cap) return undefined;
-        if (!overlayFactLabelGroundedInVoiceover(cap, r.fs.shot.voiceover ?? '')) return undefined;
-        return cap;
-      })(),
+      /** On-image labels are painted by the image model only — do not duplicate via FFmpeg drawtext. */
+      persistentCaption: undefined,
     };
   });
   stitchInputs = dedupeKeywordCardsAcrossShots(stitchInputs, { minShotsBetweenRepeats: 5 });
@@ -1621,9 +1651,7 @@ export async function directorPipelineFromResolvedStoryboard(
     .where(eq(personalAccounts.id, account.id));
 
   void maybeEmailPersonalVideoReady({
-    accountName: account.accountName,
-    emailVideoOnReady: account.emailVideoOnReady,
-    videoDeliveryEmail: account.videoDeliveryEmail,
+    accountId: account.id,
     postId,
     videoUrl: stitched.videoUrl,
     topic: topic.trim() || 'Video',
@@ -1716,6 +1744,7 @@ export async function finishDirectorFromPreStitchCheckpoint(
   broadcast({ type: 'personal:progress', payload: { accountId: account.id, postId, phase: 'stitching' } });
 
   const genCfg = (account.generatorConfig as PersonalGeneratorConfig) ?? {};
+  const aiResumeOnImage = aiOnImageFactLabelsOnly(genCfg);
   const longformResume =
     genCfg.longformEnabled === true || theme.template === 'animated-explainer';
   const perShotSecondsMax = perShotSecondsMaxFromAverageClip(genCfg.averageClipSeconds, {
@@ -1753,7 +1782,9 @@ export async function finishDirectorFromPreStitchCheckpoint(
   const stitched = await stitchShots({
     accountId: account.id,
     postId,
-    shots: pre.stitchInputs,
+    shots: aiResumeOnImage
+      ? pre.stitchInputs.map((s) => ({ ...s, keywordCards: undefined }))
+      : pre.stitchInputs,
     audio: {
       voiceoverUrl: pre.voiceoverUrl ?? undefined,
       musicUrl: pre.musicUrl ?? undefined,
@@ -1769,7 +1800,7 @@ export async function finishDirectorFromPreStitchCheckpoint(
     encodePreset: pre.stitchEncodePreset ?? genCfg.stitchEncodePreset ?? 'balanced',
     targetDurationSeconds: stitchTargetResume,
     perShotSecondsMax: voicePartitionedResume ? undefined : perShotSecondsMax,
-    keywordOverlayStyle: pre.keywordOverlayStyle ?? 'off',
+    keywordOverlayStyle: aiResumeOnImage ? 'off' : (pre.keywordOverlayStyle ?? 'off'),
     keywordOverlayFontPreset: resumeKeywordKo.fontPreset,
     keywordOverlayFontScale: resumeKeywordKo.fontScale,
     keywordOverlayTextBackground: resumeKeywordKo.textBackground,
@@ -1910,9 +1941,7 @@ export async function finishDirectorFromPreStitchCheckpoint(
     .where(eq(personalAccounts.id, account.id));
 
   void maybeEmailPersonalVideoReady({
-    accountName: account.accountName,
-    emailVideoOnReady: account.emailVideoOnReady,
-    videoDeliveryEmail: account.videoDeliveryEmail,
+    accountId: account.id,
     postId,
     videoUrl: stitched.videoUrl,
     topic: (post.topic ?? '').trim() || 'Video',

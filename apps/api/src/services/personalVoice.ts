@@ -620,6 +620,44 @@ export function keywordStitchCardsFromVoiceAlignment(args: {
   return out.length ? out : undefined;
 }
 
+/** Lowercase + trim punctuation on token edges for duplicate hook / first-VO detection. */
+function normalizeDupWord(w: string): string {
+  return w.replace(/^[^a-z0-9'’]+|[^a-z0-9'’]+$/gi, '').toLowerCase();
+}
+
+/** Index in `s` after leading whitespace and the first `wordCount` whitespace-delimited tokens. */
+function charIndexAfterLeadingWords(s: string, wordCount: number): number {
+  if (wordCount <= 0) return 0;
+  const t = s.trimStart();
+  let base = s.length - t.length;
+  let i = 0;
+  let words = 0;
+  while (words < wordCount && i < t.length) {
+    while (i < t.length && /\s/.test(t[i]!)) i++;
+    if (i >= t.length) break;
+    while (i < t.length && /\S/.test(t[i]!)) i++;
+    words++;
+  }
+  while (i < t.length && /\s/.test(t[i]!)) i++;
+  return base + i;
+}
+
+/**
+ * Count leading words of `firstVo` that match `hook` from the first word (case / punctuation tolerant).
+ */
+function leadingHookDuplicateWordCount(hook: string, firstVo: string): number {
+  const hw = hook.trim().split(/\s+/).filter(Boolean);
+  const vw = firstVo.trim().split(/\s+/).filter(Boolean);
+  if (hw.length < 1 || vw.length < 1) return 0;
+  let k = 0;
+  const max = Math.min(hw.length, vw.length);
+  while (k < max) {
+    if (normalizeDupWord(hw[k]!) !== normalizeDupWord(vw[k]!)) break;
+    k++;
+  }
+  return k;
+}
+
 /**
  * When the first beat's `voiceover` repeats the hook verbatim or opens with the same line,
  * {@link joinNarrationParts} cannot dedupe (e.g. hook ends with "…" and VO continues).
@@ -633,10 +671,24 @@ export function stripLeadingHookFromFirstVoiceover(hook: string, firstVoiceover:
   if (v.toLowerCase() === h.toLowerCase()) return '';
   const hl = h.toLowerCase();
   const vl = v.toLowerCase();
-  if (!vl.startsWith(hl) || v.length < h.length) return v;
-  let rest = v.slice(h.length).trim();
-  rest = rest.replace(/^[,;:\-–—\.\s]+/, '').trim();
-  return rest.length ? rest : '';
+  if (vl.startsWith(hl) && v.length >= h.length) {
+    let rest = v.slice(h.length).trim();
+    rest = rest.replace(/^[,;:\-–—\.\s]+/, '').trim();
+    return rest.length ? rest : '';
+  }
+
+  const hw = h.split(/\s+/).filter(Boolean);
+  const dupWords = leadingHookDuplicateWordCount(h, v);
+  /** ≥3 words, or entire hook matched word-for-word at VO start — avoids stripping generic two-word stems. */
+  const allowWordStrip = dupWords >= 3 || (hw.length > 0 && dupWords === hw.length);
+  if (allowWordStrip && dupWords > 0) {
+    const cut = charIndexAfterLeadingWords(v, dupWords);
+    let rest = v.slice(cut).trim();
+    rest = rest.replace(/^[,;:\-–—\.\s]+/, '').trim();
+    if (rest.length > 0) return rest;
+    return '';
+  }
+  return v;
 }
 
 /**

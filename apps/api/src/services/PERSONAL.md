@@ -41,7 +41,7 @@ the sidebar so it stays out of the agency-facing UI.
 | Script         | `personalScript.ts`      | Claude writes hook + beats + caption |
 | Media sourcing | `personalScraper.ts`     | Pexels / Unsplash / Pixabay / Wikipedia / Google News / gameplay loops |
 | Voiceover      | `personalVoice.ts`       | ElevenLabs → OpenAI → mock fallback |
-| Music          | `personalMusic.ts`       | Pixabay music → built-in R2 library |
+| Music          | `personalMusic.ts` + `personalMusicChain.ts` | Pixabay / R2 / built-in; long videos chain distinct tracks into one bed |
 | Render         | `personalRender.ts`      | Wraps Remotion ViralShort template |
 | Schedule       | `contentStudio.ts`       | Posts to platform via ContentStudio |
 

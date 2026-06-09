@@ -1971,6 +1971,15 @@ export class BoostApi {
     );
   }
 
+  /**
+   * Authenticated URL that streams the MP4 with `Content-Disposition: attachment`.
+   * Use with `fetch(url, { credentials: 'include' })` then blob — avoids R2 CORS issues.
+   */
+  personalPostVideoDownloadUrl(accountId: string, postId: string): string {
+    const base = this.config.baseUrl.replace(/\/$/, '');
+    return `${base}/api/v1/personal/accounts/${encodeURIComponent(accountId)}/posts/${encodeURIComponent(postId)}/download`;
+  }
+
   /* ─── Personal account media library ─────────────────────── */
 
   listPersonalMedia(
@@ -2593,6 +2602,11 @@ export interface PersonalGeneratorConfig {
     }>
   >;
   allowSparseImageText?: boolean;
+  /**
+   * When false, director leaves `onScreen` empty; fact text from keyword pops / `imageCaption` only.
+   * @default true
+   */
+  directorShotOnScreenCopy?: boolean;
   ttsSpeed?: number;
   musicDuckUnderVoice?: number;
   musicSoloVolume?: number;

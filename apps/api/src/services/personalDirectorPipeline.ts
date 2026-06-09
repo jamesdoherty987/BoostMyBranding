@@ -622,6 +622,7 @@ export async function generateForAccountDirector(
       keywordPopStyle: genConfig.keywordPopStyle ?? 'off',
       allowSparseImageText: genConfig.allowSparseImageText === true,
       namesNumbersTitleCard: genConfig.namesNumbersTitleCard === true,
+      directorShotOnScreenCopy: genConfig.directorShotOnScreenCopy !== false,
       averageShotSeconds: genConfig.averageClipSeconds,
       promptAppendix:
         [

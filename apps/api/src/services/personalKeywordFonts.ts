@@ -3,7 +3,7 @@
  * Files live under `apps/api/assets/keyword-fonts/` (OFL, from Google Fonts source).
  */
 
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { KeywordOverlayFontId } from '@boost/api-client';
@@ -18,9 +18,41 @@ const FONT_FILES: Record<KeywordOverlayFontId, string> = {
   dm_sans: 'DMSans-VF.ttf',
 };
 
-/** `src/services` or `dist/services` → `apps/api` package root. */
+let cachedApiPackageRoot: string | null = null;
+
+/**
+ * Directory that contains `assets/keyword-fonts/` (the `apps/api` package root).
+ *
+ * `../..` from this file is wrong for production: compiled output lives under
+ * `dist/services/`, so two levels up is `apps/api/dist`, not `apps/api`.
+ * Walking upward until we find this package’s `package.json` (`name: api`)
+ * plus `assets/keyword-fonts` avoids both the bad `dist/` parent and any
+ * unrelated `assets/` directory higher in the tree.
+ */
 function apiPackageRoot(): string {
-  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+  if (cachedApiPackageRoot) return cachedApiPackageRoot;
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  let dir = here;
+  for (let i = 0; i < 14; i++) {
+    const fontsDir = path.join(dir, 'assets', 'keyword-fonts');
+    const pkgPath = path.join(dir, 'package.json');
+    if (existsSync(fontsDir) && existsSync(path.join(fontsDir, FONT_FILES.inter)) && existsSync(pkgPath)) {
+      try {
+        const j = JSON.parse(readFileSync(pkgPath, 'utf8')) as { name?: string };
+        if (j.name === 'api') {
+          cachedApiPackageRoot = dir;
+          return dir;
+        }
+      } catch {
+        /* keep walking */
+      }
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  cachedApiPackageRoot = path.resolve(here, '../..');
+  return cachedApiPackageRoot;
 }
 
 /**

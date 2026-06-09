@@ -46,7 +46,7 @@ import {
   joinNarrationParts,
   stripLeadingHookFromFirstVoiceover,
 } from './personalVoice.js';
-import { pickMusic } from './personalMusic.js';
+import { resolveChainedMusicBed } from './personalMusicChain.js';
 import { renderPersonalVideo } from './personalRender.js';
 import { buildLegacyGenerationInfo } from './personalGenerationMeta.js';
 import {
@@ -535,11 +535,20 @@ async function generateForAccountScript(
       musicUrl = account.customAudioUrl;
       musicAttribution = account.customAudioAttribution ?? null;
     } else if (wantMusicBed) {
-      const music = await pickMusic({
+      const lfTarget = longformScript
+        ? clampLongformTargetSeconds(genConfig.longformTargetSeconds ?? theme.targetDurationSeconds)
+        : 0;
+      const musicTargetSeconds = Math.ceil(Math.max(estimatedDuration, longformScript ? lfTarget : 0));
+      const firstPickMin = longformScript
+        ? Math.min(480, Math.max(60, musicTargetSeconds))
+        : Math.max(1, musicTargetSeconds);
+      const music = await resolveChainedMusicBed({
         mood: script.musicMoodOverride ?? theme.musicMood,
         seed: postId,
-        minDurationSeconds: Math.ceil(estimatedDuration),
         accountId: account.id,
+        postId,
+        targetSeconds: musicTargetSeconds,
+        firstPickMinDurationSeconds: firstPickMin,
       }).catch(() => null);
       if (music) {
         musicUrl = music.url;
@@ -670,9 +679,7 @@ async function generateForAccountScript(
       .where(eq(personalAccounts.id, account.id));
 
     void maybeEmailPersonalVideoReady({
-      accountName: account.accountName,
-      emailVideoOnReady: account.emailVideoOnReady,
-      videoDeliveryEmail: account.videoDeliveryEmail,
+      accountId: account.id,
       postId,
       videoUrl: rendered.videoUrl,
       topic,

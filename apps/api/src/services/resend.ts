@@ -34,7 +34,14 @@ export async function sendEmail(args: SendArgs) {
     html: args.html,
     text: args.text,
   });
-  return { id: res.data?.id ?? '', ok: !res.error };
+  if (res.error) {
+    const msg =
+      typeof res.error === 'object' && res.error && 'message' in res.error
+        ? String((res.error as { message?: string }).message)
+        : String(res.error);
+    throw new Error(msg || 'Resend emails.send failed');
+  }
+  return { id: res.data?.id ?? '', ok: true };
 }
 
 export function magicLinkEmail(link: string, name?: string) {

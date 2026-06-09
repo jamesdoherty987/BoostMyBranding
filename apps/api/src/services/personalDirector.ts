@@ -278,6 +278,12 @@ export interface DirectArgs {
   /** When false, `imageCaption` is stripped at normalise time. */
   allowSparseImageText?: boolean;
   /**
+   * When **false**, storyboard JSON must use empty `onScreen` on every shot — no planner-written
+   * short on-screen lines; use `keywordCards` / `imageCaption` / title-card settings only.
+   * Default **true** (director may still emit `onScreen`).
+   */
+  directorShotOnScreenCopy?: boolean;
+  /**
    * When true: opening white title slate **plus** timed `keywordCards` for spoken
    * names / numbers throughout (stitch uses white-card / dark-type overlays).
    */
@@ -371,12 +377,14 @@ export async function planStoryboard(args: DirectArgs): Promise<Storyboard> {
     keywordPopStyle?: DirectArgs['keywordPopStyle'];
     allowSparseImageText?: boolean;
     namesNumbersTitleCard?: boolean;
+    directorShotOnScreenCopy?: boolean;
   } = {
     averageShotSeconds: args.averageShotSeconds,
     cutPace: args.cutPace,
     keywordPopStyle: args.keywordPopStyle,
     allowSparseImageText: args.allowSparseImageText,
     namesNumbersTitleCard: args.namesNumbersTitleCard === true,
+    directorShotOnScreenCopy: args.directorShotOnScreenCopy !== false,
   };
   if (args.longform?.enabled) normOpts.longform = true;
 
@@ -531,6 +539,11 @@ export async function planStoryboard(args: DirectArgs): Promise<Storyboard> {
     }
   }
 
+  if (args.allowSparseImageText === true && (args.keywordPopStyle ?? 'off') === 'off') {
+    stripKeywordCardsForAiImageStoryboard(allShots);
+    thinSparseImageCaptionsOnShots(allShots, 0.28);
+  }
+
   return out;
 }
 
@@ -672,6 +685,51 @@ export function overlayFactLabelGroundedInVoiceover(label: string, voiceover: st
   return keywordCardGroundedInVoiceover(label.trim(), voiceover.trim());
 }
 
+/**
+ * Fact text is painted into **AI still pixels** only — no FFmpeg keyword / slate lower-thirds.
+ * True when `allowSparseImageText` is on and `keywordPopStyle` is `off` (dashboard “AI in image” mode).
+ */
+export function aiOnImageFactLabelsOnly(gen: {
+  allowSparseImageText?: boolean;
+  keywordPopStyle?: 'off' | 'subtle' | 'bold';
+}): boolean {
+  return gen.allowSparseImageText === true && (gen.keywordPopStyle ?? 'off') === 'off';
+}
+
+function stripKeywordCardsForAiImageStoryboard(shots: DirectorShot[]): void {
+  for (const s of shots) {
+    s.keywordCards = undefined;
+  }
+}
+
+/** Cap how many `ai_image` shots keep `imageCaption` (model over-labels by default). */
+function thinSparseImageCaptionsOnShots(shots: DirectorShot[], maxFraction: number): void {
+  const ai = shots.filter((s) => s.kind === 'ai_image');
+  const nAi = ai.length;
+  if (nAi < 2) return;
+  const maxCap = Math.max(1, Math.floor(nAi * maxFraction));
+  const withCap = shots.filter((s) => s.kind === 'ai_image' && s.imageCaption?.trim());
+  if (withCap.length <= maxCap) return;
+
+  function score(s: DirectorShot): number {
+    const vo = (s.voiceover ?? '').trim();
+    let n = 0;
+    if (/\d{3,}/.test(vo)) n += 6;
+    if (/[%$€£]/.test(vo)) n += 5;
+    if (/\d/.test(vo)) n += 2;
+    if (/[A-Z][a-z]+ [A-Z]/.test(vo)) n += 3;
+    const cap = (s.imageCaption ?? '').trim();
+    if (cap.length >= 2 && vo.includes(cap)) n += 4;
+    return n;
+  }
+
+  const sorted = [...withCap].sort((a, b) => score(b) - score(a));
+  const keep = new Set(sorted.slice(0, maxCap));
+  for (const s of withCap) {
+    if (!keep.has(s)) s.imageCaption = undefined;
+  }
+}
+
 function normaliseActs(
   acts: DirectorAct[] | undefined,
   theme: PersonalTheme,
@@ -681,6 +739,8 @@ function normaliseActs(
     cutPace?: DirectArgs['cutPace'];
     keywordPopStyle?: DirectArgs['keywordPopStyle'];
     allowSparseImageText?: boolean;
+    namesNumbersTitleCard?: boolean;
+    directorShotOnScreenCopy?: boolean;
   },
 ): DirectorAct[] {
   if (!acts || acts.length === 0) return [];
@@ -711,6 +771,7 @@ function normaliseShot(
     keywordPopStyle?: DirectArgs['keywordPopStyle'];
     allowSparseImageText?: boolean;
     namesNumbersTitleCard?: boolean;
+    directorShotOnScreenCopy?: boolean;
   },
 ): DirectorShot {
   const pace = opts?.cutPace ?? 'normal';
@@ -791,7 +852,8 @@ function normaliseShot(
     id: s.id ?? `shot_${id}`,
     role: s.role ?? '',
     description: (s.description ?? '').trim(),
-    onScreen: (s.onScreen ?? '').trim(),
+    onScreen:
+      opts?.directorShotOnScreenCopy === false ? '' : (s.onScreen ?? '').trim(),
     voiceover: (s.voiceover ?? '').trim(),
     eyebrow: s.eyebrow?.trim() || undefined,
     durationSeconds: duration,
@@ -874,7 +936,11 @@ function buildDirectorPrompt(args: DirectArgs): string {
     : '';
 
   const hookFormulaBlock = args.hookFormulaDirective
-    ? `\n\n${args.hookFormulaDirective}\nThe first shot's voiceover + onScreen must follow this hook formula.`
+    ? `\n\n${args.hookFormulaDirective}\n${
+        args.directorShotOnScreenCopy === false
+          ? "The first shot's **voiceover** must follow this hook formula (keep JSON `onScreen` as \"\" on every shot — satisfy any on-screen wording in voiceover only)."
+          : "The first shot's voiceover + onScreen must follow this hook formula."
+      }`
     : '';
 
   const newsBlock = args.newsContext
@@ -957,8 +1023,11 @@ function buildDirectorPrompt(args: DirectArgs): string {
         ].join('\n');
       })();
 
+  const aiImageFactsOnly =
+    args.allowSparseImageText === true && (args.keywordPopStyle ?? 'off') === 'off';
+
   const namesNumbersSlateBlock =
-    args.namesNumbersTitleCard === true
+    !aiImageFactsOnly && args.namesNumbersTitleCard === true
       ? `\n\nNAMES & NUMBERS SLATE POPUPS (**enabled** — small **lower-third** cards only: light panel + dark type in post via FFmpeg, **not** burned into AI pixels; never full-screen, never paragraphs):\n` +
         `- Add \`keywordCards\` only when a **high-signal** proper noun, date, year, place, headline figure, currency, %, or age appears in this shot's \`voiceover\` and seeing it briefly helps comprehension.\n` +
         `- **Hard rule:** each \`keywordCards[].text\` MUST be **spoken in this shot's \`voiceover\`** — copy the exact words or digit string from that line (same spelling). The render pipeline **discards** cards that do not match the VO; never add names, stats, or dates the narrator does not say on this beat.\n` +
@@ -972,8 +1041,9 @@ function buildDirectorPrompt(args: DirectArgs): string {
         `- **Density:** ${args.keywordPopStyle === 'bold' ? 'Bold — fewer pops, only the sharpest anchors.' : 'Subtle — default to one card or none unless the VO is dense with facts.'}`
       : '';
 
-  const keywordBlock =
-    args.namesNumbersTitleCard === true
+  const keywordBlock = aiImageFactsOnly
+    ? ''
+    : args.namesNumbersTitleCard === true
       ? namesNumbersSlateBlock
       : args.keywordPopStyle && args.keywordPopStyle !== 'off'
         ? `\n\nKEYWORD POP-UPS (premium lower-thirds — NOT full captions):\n- On roughly **25–40%** of shots, add optional \`keywordCards\`: max **2** entries; each \`text\` is 1–3 words OR a compact stat (e.g. "Kyoto" or "$4.2T"). Never sentences.\n` +
@@ -982,23 +1052,41 @@ function buildDirectorPrompt(args: DirectArgs): string {
         `- \`tStart\` / \`tEnd\`: seconds **from this shot's start only** (never cumulative time from the start of the whole video). Prefer the **middle half** of the shot when the fact is spoken; avoid the first/last ~12% of the shot unless the fact truly lands there. Each flash **~0.35–0.85s**, non-overlapping. If unsure, omit timings — the stitcher auto-places.\n- **Global dedupe:** never repeat the **same** \`text\` on a later shot unless **≥ ~5 shots** later and the label is clearly a new context — duplicate labels feel broken.\n- Do not repeat words already in \`onScreen\` or duplicate tokens already in the same shot's \`voiceover\` line.\n- Visual tier: ${args.keywordPopStyle === 'bold' ? 'BOLD — high contrast, occasional single-word punch.' : 'SUBTLE — refined documentary / broadcast look.'}`
         : '';
 
-  const sparseTextBlock = args.allowSparseImageText
-    ? `\n\nON-IMAGE INFORMATION LABELS (\`imageCaption\` — **enabled** for this account):\n- Only when **this shot's** voiceover states a memorable **proper noun or number** viewers must retain — **dates, years, people's names, places, money, %, ages** — set \`imageCaption\` on that **\`ai_image\`** shot (max **4 words**). Examples of valid labels: "June 6, 1944", "Marie Curie", "Lagos", "$4.2T", "76%".\n` +
-        `- **Hard rule:** \`imageCaption\` MUST repeat **words or digits actually spoken in that shot's \`voiceover\`** (same line). The server **strips** labels that are not in the VO.\n` +
-        `- **Never** put the video JSON \`title\`, hook line, channel name, or **any** style-bible example headline/script line into \`imageCaption\` — those are not spoken facts and become random on-screen junk.\n` +
-        `- Omit \`imageCaption\` on most shots; use sparingly when VO is fact-dense. Omit when the frame already shows the same text, or the shot is not \`ai_image\`.`
-    : '';
+  const sparseTextBlock =
+    args.allowSparseImageText && aiImageFactsOnly
+      ? `\n\nON-IMAGE FACT LABELS ONLY (\`imageCaption\` — **this account**; the **image model** paints text into pixels — **no FFmpeg keyword pops**, no slate cards — **omit \`keywordCards\` entirely** for every shot):\n` +
+          `- **Narration only — never picture labels:** \`imageCaption\` must be a **verbatim substring** of that shot's \`voiceover\` (the spoken script line). It is **not** a title for the frame, not a mood line, not "what we see" (\`Forest trail\`, \`Busy kitchen\`, \`Sunset city\`, \`Scientist at work\`) unless those **exact** words are spoken in \`voiceover\`. If you cannot copy 1–4 words straight from \`voiceover\`, **omit** \`imageCaption\`.\n` +
+          `- **Script source only:** Do **not** invent labels from \`description\`, props, or "what would look good on screen". \`description\` only decides **where** type sits (sign, ticket, phone); **wording** is always from \`voiceover\`.\n` +
+          `- **Sparse:** use \`imageCaption\` on **at most ~25–30%** of \`ai_image\` shots — **most** \`ai_image\` shots must have **no** \`imageCaption\` field (or empty). Never label every still.\n` +
+          `- **Max 4 words** when set. Never title, hook, channel name, or style-bible examples.\n` +
+          `- **Inspiration:** match on-image typography from reference stills when the account provides them.\n` +
+          `- Omit when the same words are already visible in the scene or the shot is not \`ai_image\`.`
+      : args.allowSparseImageText
+        ? `\n\nON-IMAGE INFORMATION LABELS (\`imageCaption\` — **enabled** for this account; the **image model** paints text into the pixels — **no** FFmpeg lower-thirds or keyword pops for these facts):\n- **Narration only:** \`imageCaption\` must be words **spoken in that shot's \`voiceover\`** — not a visual caption of the photo (\`Mountain vista\`, \`Coffee close-up\`) unless the narrator literally says those words on this line.\n` +
+            `- Only when **this shot's** voiceover states a memorable **proper noun or number** viewers must retain — **dates, years, people's names, places, money, %, ages** — set \`imageCaption\` on that **\`ai_image\`** shot (max **4 words**). Examples of valid labels: "June 6, 1944", "Marie Curie", "Lagos", "$4.2T", "76%".\n` +
+            `- **Hard rule:** \`imageCaption\` MUST repeat **words or digits actually spoken in that shot's \`voiceover\`** (same line). The server **strips** labels that are not in the VO.\n` +
+            `- **Never** put the video JSON \`title\`, hook line, channel name, or **any** style-bible example headline/script line into \`imageCaption\` — those are not spoken facts and become random on-screen junk.\n` +
+            `- **Composition:** Prefer a shot \`description\` where the label has a believable in-world anchor (signage, device screen, ticket, map tag, magazine line, museum placard) — avoid "text floating on empty sky".\n` +
+            `- **Inspiration:** When the account's media library includes reference stills that show on-image typography, plan labels so generated stills can **echo that lettering style** (weight, colour, case) while staying on-topic.\n` +
+            `- Prefer \`ai_image\` for shots that need a fact label when the story allows (labels are not applied to scraped stock or user clips).\n` +
+            `- Omit \`imageCaption\` on most shots; use sparingly when VO is fact-dense. Omit when the frame already shows the same text, or the shot is not \`ai_image\`.`
+        : '';
 
   const sparseDirectingRule = args.allowSparseImageText
-    ? `- **imageCaption:** only for proper-noun / number facts spoken in **that shot's** VO — never titles, hooks, or example lines; omit unless necessary.\n`
+    ? aiImageFactsOnly
+      ? '- **imageCaption / keywordCards:** AI-in-image labels only — **no \`keywordCards\`**; \`imageCaption\` = **verbatim snippet of that shot\'s \`voiceover\` only** (~≤30% of ai_image), never a visual description of the frame.\n'
+      : `- **imageCaption:** narration words only — never a "scene title" or picture caption unless those words are spoken in **that shot's** VO; omit unless necessary.\n`
     : '';
 
   const imageCaptionJsonLine = args.allowSparseImageText
-    ? '              "imageCaption": "<ai_image only: ≤4 words, ONLY a date/year/name/place/stat explicitly spoken in THIS shot\'s voiceover — never title/hook/example lines; usually omit>"'
+    ? aiImageFactsOnly
+      ? '              "imageCaption": "<ai_image only, usually omit: ≤4 words copied from THIS shot voiceover only — never from description; omit keywordCards>"'
+      : '              "imageCaption": "<ai_image only: ≤4 words, ONLY a date/year/name/place/stat explicitly spoken in THIS shot\'s voiceover — never title/hook/example lines; usually omit>"'
     : '              "imageCaption": "<optional ≤4 words on rare ai_image shots>"';
 
-  const namesNumbersDirectingRule =
-    args.namesNumbersTitleCard === true
+  const namesNumbersDirectingRule = aiImageFactsOnly
+    ? '- **Fact text on screen:** this account uses **AI in-image labels only** — **omit \`keywordCards\`** on every shot; do not plan FFmpeg lower-thirds.\n'
+    : args.namesNumbersTitleCard === true
       ? '- **Names & numbers slate popups:** obey NAMES & NUMBERS SLATE POPUPS — short lower-third flashes only; never open with a title slate.\n'
       : '';
 
@@ -1010,7 +1098,9 @@ function buildDirectorPrompt(args: DirectArgs): string {
       : '';
 
   const visualPurposeRule =
-    '- **Every shot earns the cut:** each \`description\` (and scraper \`imageQuery\` when used) must advance a **new** idea aligned with that shot\'s \`voiceover\` — no run of near-duplicate frames for the same beat. If the story does not need another angle, merge beats instead of padding with redundant \`ai_image\` / \`ai_video\`.\n';
+    '- **Every shot earns the cut:** each \`description\` (and scraper \`imageQuery\` when used) must advance a **new** idea aligned with that shot\'s \`voiceover\` — no run of near-duplicate frames for the same beat. If the story does not need another angle, merge beats instead of padding with redundant \`ai_image\` / \`ai_video\`.\n' +
+    '- **Script-locked visuals:** a viewer should infer what this line of \`voiceover\` is about from \`description\` alone — no generic stock mood that could apply to any line. If the VO names a place, object, era, or action, the frame must show that (or a clear metaphor the beat explains), not unrelated beauty shots.\n' +
+    '- **Consecutive shots must differ:** back-to-back shots may not share the same "hero object + same framing + same room corner" — change at least **two** of: primary subject in frame, scale (e.g. wide → detail), camera move, setting zone, or time/mood beat. Avoid "same scene, tiny tweak" slideshows.\n';
 
   const locked = args.lockedVideoTitle?.trim();
   const exampleTitleCount = (args.styleBible?.exampleVideoTitles ?? []).filter(Boolean).length;
@@ -1032,12 +1122,17 @@ function buildDirectorPrompt(args: DirectArgs): string {
         }",`;
   const targetForPrompt = longform ? longformTarget : args.targetDurationSeconds;
 
+  const onScreenPolicyBlock =
+    args.directorShotOnScreenCopy === false
+      ? '\n\n**SHOT `onScreen` — DISABLED BY ACCOUNT:** use an empty string ("") on **every** shot. Do not put facts, hooks, titles, or branding text in `onScreen`. Visible wording for names / places / numbers must come only from `keywordCards` (lower-thirds, when enabled) and/or `imageCaption` (on-image labels, when enabled) — never duplicate those into `onScreen`.'
+      : '';
+
   return `You are a ${longform ? 'long-form video' : 'short-form video'} DIRECTOR, not a script writer. Plan a storyboard for a ${targetForPrompt}s ${args.theme.name} video on topic: "${args.topic}".
 ${titleFirst}${lockedTitleBlock}
 THEME: ${args.theme.name} — ${args.theme.tagline}
 DEFAULT VISUAL STYLE: ${args.theme.visualStyle}
 DEFAULT VOICE: ${args.theme.voiceGuide}
-PREFERRED PLATFORMS: ${args.theme.preferredPlatforms.join(', ')}${styleBibleBlock}${charBlock}${refBlock}${inspirationBlock}${viralFormatPromptBlock}${hookFormulaBlock}${newsBlock}${blacklist}${animStyleBlock}${longformRules}${args.customDirection ? `\n\nACCOUNT-LEVEL DIRECTION: ${args.customDirection}` : ''}${args.promptAppendix ? `\n\n${args.promptAppendix}` : ''}${keywordBlock}${sparseTextBlock}
+PREFERRED PLATFORMS: ${args.theme.preferredPlatforms.join(', ')}${styleBibleBlock}${charBlock}${refBlock}${inspirationBlock}${viralFormatPromptBlock}${hookFormulaBlock}${newsBlock}${blacklist}${animStyleBlock}${longformRules}${args.customDirection ? `\n\nACCOUNT-LEVEL DIRECTION: ${args.customDirection}` : ''}${args.promptAppendix ? `\n\n${args.promptAppendix}` : ''}${keywordBlock}${sparseTextBlock}${onScreenPolicyBlock}
 
 DIRECTING RULES (non-negotiable):
 ${shotCountRule}
@@ -1050,6 +1145,7 @@ ${avgClipOperatorRule}${visualPurposeRule}${namesNumbersDirectingRule}${sparseDi
 - If user references (character refs) are relevant to a shot, add their index to \`referenceIndices\`. The video model will use them to anchor identity.
 - No LLM slop phrases: "let's dive in", "in the realm of", "unleash", "game-changer", "cutting-edge", "paradigm shift", "mind-blowing". If you use any, the video is rejected.
 - Every beat teaches ONE unambiguous thing. No filler.
+- **Hook vs first shot VO:** The top-level \`hook\` is spoken once as the cold open. The first shot's \`voiceover\` must **continue** the story — never repeat the hook, echo its opening sentence, or paraphrase the same opening line; write only what comes next (the pipeline strips exact duplicates, but near-duplicates still sound broken in audio).
 
 SHOTS GRAMMAR (camera):
 static, slow_push_in, slow_pull_out, dolly_in, dolly_out, pan_left, pan_right, tilt_up, tilt_down, orbit, handheld, whip_pan, crash_zoom, crane_up, crane_down, fpv_sweep, tracking, bullet_time.
@@ -1192,6 +1288,18 @@ export function shotToPrompt(args: {
   thumbnailCoverMode?: boolean;
   /** Random id fragment so each regenerate gets a distinct composition brief. */
   thumbnailVariationKey?: string;
+  /**
+   * When {@link DirectorShot.imageCaption} is set (on-image fact labels mode),
+   * appended to the image prompt so typography matches style bible / inspiration.
+   */
+  factLabelImagePromptExtra?: string;
+  /**
+   * 1-based index in storyboard order — image/video prompts use this to discourage
+   * near-duplicate consecutive frames.
+   */
+  timelineShotIndex?: number;
+  /** Total AI / timeline shots in this storyboard (omit or 0 to skip timeline cue). */
+  timelineShotTotal?: number;
 }): string {
   const {
     shot,
@@ -1204,6 +1312,9 @@ export function shotToPrompt(args: {
     shotBrandHints,
     thumbnailCoverMode,
     thumbnailVariationKey,
+    factLabelImagePromptExtra,
+    timelineShotIndex,
+    timelineShotTotal,
   } = args;
 
   // 1. IDENTITY — character / subject description (identity anchor).
@@ -1239,8 +1350,26 @@ export function shotToPrompt(args: {
         ' THUMBNAIL / COVER ROLE: single poster frame for the same video — visual language must match the other AI stills in this project. No words, numbers, watermarks, or logos on the image.';
     }
   } else if (shot.kind === 'ai_image' && shot.imageCaption?.trim()) {
-    styleStr += ` Include a small tasteful typographic label reading "${shot.imageCaption.trim()}" — clean high-end sans-serif, subtle shadow, must stay secondary to the photograph.`;
+    const extra = factLabelImagePromptExtra?.trim();
+    styleStr += ` One in-scene typographic label only (signage, print, device UI, ticket, or subtle editorial burn-in). **Exact characters are SCRIPT-LOCKED in the opening block** — do not substitute scene-descriptive or "title of the photo" wording. ${extra ? `${extra} ` : ''}Legible at HD; visually secondary to the subject.`;
   }
+
+  const imageCaptionScriptLock =
+    !thumbnailCoverMode && shot.kind === 'ai_image' && shot.imageCaption?.trim()
+      ? (() => {
+          const vo = (shot.voiceover ?? '').trim().replace(/"/g, "'").slice(0, 420);
+          const cap = shot.imageCaption.trim().replace(/"/g, "'").slice(0, 80);
+          if (!vo) {
+            return `SCRIPT-LOCKED ON-IMAGE TEXT: Paint this exact string as intrinsic pixels: "${cap}". Do not replace with words that describe the picture.`;
+          }
+          return (
+            `SCRIPT-LOCKED ON-IMAGE TEXT — Paint this exact string as intrinsic pixels (sign, screen, print, etc.): "${cap}". ` +
+            `It MUST be a contiguous substring of the narration below; do **not** swap in visual captions (e.g. skyline, ruins, lab, coffee) unless those exact words appear in the narration. ` +
+            `NARRATION: "${vo}". ` +
+            `FORBIDDEN: any different wording, paraphrase, or "what you see" label not spoken above.`
+          );
+        })()
+      : '';
 
   const styleLock = [
     animationStyleHint
@@ -1255,7 +1384,7 @@ export function shotToPrompt(args: {
 
   // 5. NEGATIVE — implied by missing banned terms; handled per-model.
 
-  let out = [styleLock, identity, image, motion, styleStr]
+  let out = [styleLock, imageCaptionScriptLock, identity, image, motion, styleStr]
     .filter((s) => s && s.trim().length > 0)
     .join(' ');
 
@@ -1263,6 +1392,13 @@ export function shotToPrompt(args: {
     const v =
       (thumbnailVariationKey ?? '').replace(/[^a-z0-9-]/gi, '').slice(0, 12) || 'cover';
     out += ` Cover-frame variation ${v}: same size and aspect as other shots — slightly more graphic and legible at small preview size than a mid-roll frame, still on-brand with reference stills.`;
+  } else if (
+    (shot.kind === 'ai_image' || shot.kind === 'ai_video') &&
+    timelineShotIndex != null &&
+    timelineShotTotal != null &&
+    timelineShotTotal > 1
+  ) {
+    out += ` Edit timeline: frame ${timelineShotIndex} of ${timelineShotTotal} — must depict a distinct story beat for this line (not wallpaper or a near-copy of a prior frame); composition follows this shot's description and voiceover${shot.imageCaption?.trim() ? ' (on-image text wording is script-locked above, not the scene brief)' : ''}.`;
   }
 
   return out;

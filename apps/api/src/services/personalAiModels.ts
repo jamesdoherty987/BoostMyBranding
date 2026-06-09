@@ -32,10 +32,65 @@
  */
 
 import { fal, ApiError, ValidationError } from '@fal-ai/client';
+import sharp from 'sharp';
 import { env, features } from '../env.js';
 import { uploadFile } from './r2.js';
 import { withFalConcurrency } from './falConcurrency.js';
 import { withTimeout } from './retry.js';
+import {
+  exportDimsFor,
+  type PersonalExportAspectRatio,
+} from './personalExportDims.js';
+
+/**
+ * When the provider's aspect is within this relative delta of the export frame,
+ * we map pixels with `fit: 'fill'` so tiny API drift (e.g. DALL·E 1024×1792 vs
+ * 1080×1920) does not produce visible letterboxing in FFmpeg.
+ */
+const EXPORT_ASPECT_FILL_MAX_REL_DELTA = 0.035;
+
+/**
+ * Resize AI stills to the exact export pixel size so the stitcher does not add
+ * a second layer of letterboxing for common provider resolutions.
+ *
+ * - Near-matching aspect: slight stretch only (no crop, no bars).
+ * - Large mismatch: letterbox inside the JPEG (`fit: contain`) so nothing is cropped.
+ */
+async function fitGeneratedRasterToExportFrame(
+  buffer: Buffer,
+  aspectRatio: PersonalExportAspectRatio,
+): Promise<Buffer> {
+  const { width: W, height: H } = exportDimsFor(aspectRatio);
+  const meta = await sharp(buffer, { failOn: 'none' }).metadata();
+  const mw = meta.width;
+  const mh = meta.height;
+  if (mw === W && mh === H) return buffer;
+  if (mw == null || mh == null || mw < 1 || mh < 1) {
+    return sharp(buffer, { failOn: 'none' })
+      .resize(W, H, {
+        fit: 'contain',
+        position: 'centre',
+        background: { r: 0, g: 0, b: 0, alpha: 1 },
+      })
+      .jpeg({ quality: 92, mozjpeg: true })
+      .toBuffer();
+  }
+  const srcR = mw / mh;
+  const tgtR = W / H;
+  const rel = Math.abs(srcR - tgtR) / tgtR;
+  const fit: 'fill' | 'contain' =
+    rel <= EXPORT_ASPECT_FILL_MAX_REL_DELTA ? 'fill' : 'contain';
+  return sharp(buffer, { failOn: 'none' })
+    .resize(W, H, {
+      fit,
+      position: 'centre',
+      ...(fit === 'contain'
+        ? { background: { r: 0, g: 0, b: 0, alpha: 1 } }
+        : {}),
+    })
+    .jpeg({ quality: 92, mozjpeg: true })
+    .toBuffer();
+}
 
 /** Fal's subscribe() throws ApiError / ValidationError with a JSON body — surface it in logs. */
 function formatFalClientError(err: unknown): string {
@@ -565,9 +620,10 @@ async function generateFalImage(
   if (!url) throw new Error(`${model.displayName} returned no image`);
 
   // Persist to R2 for long-term stability (fal URLs expire).
-  const buffer = Buffer.from(
+  const raw = Buffer.from(
     await (await fetchWithTimeout(url, {}, 90_000)).arrayBuffer(),
   );
+  const buffer = await fitGeneratedRasterToExportFrame(raw, requested);
   const up = await uploadFile(
     args.scopePath,
     buffer,
@@ -623,6 +679,8 @@ async function generateNanoBananaImage(
     }
   }
 
+  const requestedAr: PersonalExportAspectRatio = args.aspectRatio ?? '9:16';
+
   const res = await fetchWithTimeout(
     `https://generativelanguage.googleapis.com/v1beta/models/${geminiImageModelId()}:generateContent`,
     {
@@ -633,7 +691,10 @@ async function generateNanoBananaImage(
       },
       body: JSON.stringify({
         contents: [{ parts }],
-        generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
+        generationConfig: {
+          responseModalities: ['TEXT', 'IMAGE'],
+          imageConfig: { aspectRatio: requestedAr },
+        },
       }),
     },
     GEMINI_IMAGE_HTTP_TIMEOUT_MS,
@@ -648,15 +709,18 @@ async function generateNanoBananaImage(
   )?.inlineData;
   if (!imgData?.data) throw new Error('Gemini returned no image');
 
-  const buffer = Buffer.from(imgData.data, 'base64');
+  const buffer = await fitGeneratedRasterToExportFrame(
+    Buffer.from(imgData.data, 'base64'),
+    requestedAr,
+  );
   const up = await withTimeout(
     r2UploadTimeoutMs(),
     'personal_r2_upload_nano_banana',
     uploadFile(
       args.scopePath,
       buffer,
-      `nano-banana-${Date.now()}.png`,
-      imgData.mimeType ?? 'image/png',
+      `nano-banana-${Date.now()}.jpg`,
+      'image/jpeg',
     ),
   );
   return {
@@ -703,12 +767,16 @@ async function generateOpenAIImage(
   const body = (await res.json()) as any;
   const b64 = body?.data?.[0]?.b64_json;
   if (!b64) throw new Error('OpenAI returned no image');
-  const buffer = Buffer.from(b64, 'base64');
+  const exportAr: PersonalExportAspectRatio = args.aspectRatio ?? '9:16';
+  const buffer = await fitGeneratedRasterToExportFrame(
+    Buffer.from(b64, 'base64'),
+    exportAr,
+  );
   const up = await uploadFile(
     args.scopePath,
     buffer,
-    `dalle3-${Date.now()}.png`,
-    'image/png',
+    `dalle3-${Date.now()}.jpg`,
+    'image/jpeg',
   );
   return {
     url: up.url,

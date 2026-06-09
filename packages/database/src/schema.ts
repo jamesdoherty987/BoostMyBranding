@@ -1281,6 +1281,12 @@ export interface PersonalGeneratorConfig {
   /** When true, the director must add `imageCaption` on many ai_image shots for spoken dates, names, places, and key stats (≤4 words each). */
   allowSparseImageText?: boolean;
   /**
+   * When **false**, the director must leave every shot's JSON `onScreen` empty — no planner-written
+   * short on-screen copy; visible fact text comes only from `keywordCards`, `imageCaption` (image model),
+   * and names/numbers slate settings. Default **true** (legacy: director may fill `onScreen`).
+   */
+  directorShotOnScreenCopy?: boolean;
+  /**
    * When true, director mode: **timed lower-third slate cards** (short white panel, dark type)
    * for important **names / dates / figures** spoken in narration — snappy, not full-screen, no opening title reel.
    * Use Keyword pop-ups (subtle/bold) to tune card size. Legacy checkpoints may still list an opening slate; new renders do not prepend it.

@@ -1875,31 +1875,24 @@ function canSaveOrDownloadPostVideo(post: PersonalPost): boolean {
   return Boolean(post.videoUrl?.trim()) && VIDEO_FILE_READY_STATUSES.has(post.status);
 }
 
-/** Saves via object URL; falls back to opening the URL in a new tab if fetch fails (e.g. CORS). */
+/** Saves MP4 via same-origin API proxy (storage URLs often block CORS). */
 async function downloadPostVideoFile(post: PersonalPost): Promise<void> {
-  const url = post.videoUrl!.trim();
+  const url = api.personalPostVideoDownloadUrl(post.accountId, post.id);
   const filename = postVideoFilename(post);
+  const res = await fetch(url, { mode: 'cors', credentials: 'include', cache: 'no-store' });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const blob = await res.blob();
+  const objectUrl = URL.createObjectURL(blob);
   try {
-    const res = await fetch(url, { mode: 'cors', credentials: 'omit' });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const blob = await res.blob();
-    const objectUrl = URL.createObjectURL(blob);
-    try {
-      const a = document.createElement('a');
-      a.href = objectUrl;
-      a.download = filename;
-      a.rel = 'noopener';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-    } finally {
-      URL.revokeObjectURL(objectUrl);
-    }
-  } catch {
-    window.open(url, '_blank', 'noopener,noreferrer');
-    throw new Error(
-      'Opened the video in a new tab — if nothing downloaded, use that tab’s menu (⋯ or Share) to save the file.',
-    );
+    const a = document.createElement('a');
+    a.href = objectUrl;
+    a.download = filename;
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } finally {
+    URL.revokeObjectURL(objectUrl);
   }
 }
 
@@ -1908,7 +1901,7 @@ async function downloadPostVideoFile(post: PersonalPost): Promise<void> {
  * Falls back to `share({ url })` when file sharing is not supported.
  */
 async function sharePostVideoForCameraRoll(post: PersonalPost): Promise<void> {
-  const url = post.videoUrl!.trim();
+  const url = api.personalPostVideoDownloadUrl(post.accountId, post.id);
   const filename = postVideoFilename(post);
   const title = ((post.title ?? '').trim() || (post.topic ?? '').trim() || 'Video').slice(0, 120);
   const nav = typeof navigator !== 'undefined' ? navigator : undefined;
@@ -1916,7 +1909,7 @@ async function sharePostVideoForCameraRoll(post: PersonalPost): Promise<void> {
     throw new Error('Your browser does not support sharing — use Download instead.');
   }
   try {
-    const res = await fetch(url, { mode: 'cors', credentials: 'omit' });
+    const res = await fetch(url, { mode: 'cors', credentials: 'include', cache: 'no-store' });
     if (!res.ok) throw new Error(`Could not load video (HTTP ${res.status})`);
     const blob = await res.blob();
     const type = blob.type && /^video\//i.test(blob.type) ? blob.type : 'video/mp4';
@@ -2247,7 +2240,7 @@ function PostCard({
                 size="sm"
                 className="h-7 gap-1 px-2 text-[11px]"
                 disabled={downloadBusy || shareSaveBusy}
-                title="Saves an MP4 to your device (uses a direct fetch when your storage allows it)."
+                title="Saves an MP4 to your device (streams through the API so the browser can save it)."
                 onClick={(e) => {
                   e.stopPropagation();
                   void (async () => {

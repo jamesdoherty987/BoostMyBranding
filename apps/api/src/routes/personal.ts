@@ -14,6 +14,7 @@
  *   POST   /api/v1/personal/accounts/:id/generate
  *   POST   /api/v1/personal/accounts/:id/posts/:postId/cancel
  *   POST   /api/v1/personal/accounts/:id/posts/:postId/regenerate-thumbnail
+ *   GET    /api/v1/personal/accounts/:id/posts/:postId/download
  *   GET    /api/v1/personal/accounts/:id/posts
  *   DELETE /api/v1/personal/accounts/:id/posts/failed
  *   DELETE /api/v1/personal/accounts/:id/posts/:postId
@@ -23,6 +24,8 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { z } from 'zod';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { requireAuth } from '../services/auth.js';
 import { listThemes, themeSummary, getTheme } from '../services/personalThemes.js';
 import {
@@ -48,6 +51,7 @@ import {
   createReservedQueuedPersonalPost,
   markPersonalPostQueuedFailedIfStillQueued,
   regeneratePersonalPostThumbnail,
+  resolvePersonalPostVideoDownload,
 } from '../services/personalAccounts.js';
 import type { PersonalAccountStyleBible } from '@boost/database';
 import { generateForAccount } from '../services/personalPipeline.js';
@@ -401,6 +405,7 @@ const createAccountBodySchema = z.object({
       cutPace: z.enum(['relaxed', 'normal', 'rapid']).optional(),
       keywordPopStyle: z.enum(['off', 'subtle', 'bold']).optional(),
       allowSparseImageText: z.boolean().optional(),
+      directorShotOnScreenCopy: z.boolean().optional(),
       ttsSpeed: z.number().min(0.7).max(1.2).optional(),
       musicDuckUnderVoice: z.number().min(0.05).max(0.55).optional(),
       musicSoloVolume: z.number().min(0.1).max(0.85).optional(),
@@ -759,6 +764,59 @@ personalRouter.post(
     }
   },
 );
+
+personalRouter.get('/accounts/:id/posts/:postId/download', requireAuth, async (req, res, next) => {
+  try {
+    const user = (req as any).user as { id: string };
+    const accountId = String(req.params.id);
+    const postId = String(req.params.postId);
+    const resolved = await resolvePersonalPostVideoDownload(user.id, accountId, postId);
+    if (!resolved.ok) {
+      if (resolved.error === 'not_found') {
+        return res.status(404).json({ error: { message: 'Not found', code: 'NOT_FOUND' } });
+      }
+      return res.status(400).json({
+        error: {
+          message: 'This post has no finished video file yet.',
+          code: 'NO_VIDEO',
+        },
+      });
+    }
+    const upstream = await fetch(resolved.videoUrl, { redirect: 'follow' });
+    if (!upstream.ok || !upstream.body) {
+      console.warn('[personal.download] upstream', upstream.status, resolved.videoUrl.slice(0, 140));
+      return res.status(502).json({
+        error: { message: 'Could not fetch video from storage.', code: 'UPSTREAM_FAILED' },
+      });
+    }
+    const ct = upstream.headers.get('content-type') || 'video/mp4';
+    const safe =
+      resolved.filename.replace(/[\r\n"]/g, '').replace(/[^\x20-\x7E]+/g, '_').slice(0, 180) ||
+      'video.mp4';
+    const utf8Name = encodeURIComponent(resolved.filename.replace(/[\r\n"]/g, '')).slice(0, 240);
+    res.setHeader('Content-Type', ct);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${safe}"; filename*=UTF-8''${utf8Name}`,
+    );
+    res.setHeader('Cache-Control', 'private, no-store');
+    const nodeReadable = Readable.fromWeb(upstream.body as import('stream/web').ReadableStream);
+    try {
+      await pipeline(nodeReadable, res);
+    } catch (pipeErr) {
+      if (!res.writableEnded) {
+        try {
+          res.destroy();
+        } catch {
+          /* ignore */
+        }
+      }
+      console.warn('[personal.download] pipe:', (pipeErr as Error).message);
+    }
+  } catch (e) {
+    next(e);
+  }
+});
 
 /* ─── Posts ─────────────────────────────────────────────────────── */
 

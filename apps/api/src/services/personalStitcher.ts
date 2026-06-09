@@ -59,6 +59,7 @@ import {
   isKeywordOverlayTextAnchor,
 } from '@boost/api-client';
 import { resolveKeywordOverlayBundledFontPath } from './personalKeywordFonts.js';
+import { exportDimsFor } from './personalExportDims.js';
 
 /* ═══════════════════════════════════════════════════════════════════ */
 /* H.264 speed vs quality (override via .env)                           */
@@ -666,7 +667,7 @@ export async function stitchShots(args: StitchArgs): Promise<StitchResult> {
         console.warn('[stitcher] keyword font resolve failed:', (e as Error).message);
       }
     }
-    const { width, height } = dimsFor(args.aspectRatio ?? '9:16');
+    const { width, height } = exportDimsFor(args.aspectRatio ?? '9:16');
     const encodeTier = args.encodePreset;
 
     // 1. Download every shot asset to local disk for FFmpeg.
@@ -1081,20 +1082,6 @@ export async function stitchShots(args: StitchArgs): Promise<StitchResult> {
 /* ═══════════════════════════════════════════════════════════════════ */
 /* FFmpeg helpers                                                       */
 /* ═══════════════════════════════════════════════════════════════════ */
-
-function dimsFor(ar: '9:16' | '1:1' | '16:9' | '4:5'): { width: number; height: number } {
-  switch (ar) {
-    case '1:1':
-      return { width: 1080, height: 1080 };
-    case '16:9':
-      return { width: 1920, height: 1080 };
-    case '4:5':
-      return { width: 1080, height: 1350 };
-    case '9:16':
-    default:
-      return { width: 1080, height: 1920 };
-  }
-}
 
 /**
  * When a shot's `durationSeconds` changes (e.g. `scaleShotsToTarget`), rescale keyword
@@ -1587,16 +1574,15 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
       const safeFocalY = Math.max(0.15, Math.min(0.85, a.focalY));
       const xExpr = `'iw*${safeFocalX}-(iw/zoom/2)'`;
       const yExpr = `'ih*${safeFocalY}-(ih/zoom/2)'`;
-      const w2 = a.width * 2;
-      const h2 = a.height * 2;
-      // Centre-crop to the working canvas (same fill behaviour as video clips) so
-      // portrait stills fill 9:16 instead of letterboxing with black bars.
       const te = Math.max(0.05, a.durationSeconds).toFixed(3);
+      // Fit entire still inside the canvas (letterbox / pillarbox with black) instead of
+      // centre-fill crop — fill-crop cuts edges and clips AI-painted or graphic text when
+      // source aspect differs slightly from output. Ken Burns zoom runs on this full frame.
       filters.push(
         'select=eq(n\\,0),setpts=PTS-STARTPTS',
-        `scale=${w2}:${h2}:force_original_aspect_ratio=increase:flags=lanczos,` +
-          `crop=${w2}:${h2},` +
-          `zoompan=z='min(zoom+${zoomStep},1.12)':x=${xExpr}:y=${yExpr}:` +
+        `scale=${a.width}:${a.height}:force_original_aspect_ratio=decrease:flags=lanczos,` +
+          `pad=${a.width}:${a.height}:(ow-iw)/2:(oh-ih)/2:color=black,` +
+          `zoompan=z='min(zoom+${zoomStep},1.10)':x=${xExpr}:y=${yExpr}:` +
           `d=${imageOutFrames}:s=${a.width}x${a.height}:fps=${a.fps},` +
           `tpad=stop_mode=clone:stop_duration=6,trim=end=${te},setpts=PTS-STARTPTS`,
       );
@@ -1605,9 +1591,10 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
       // Do not use `select=eq(n\,0)` here — one decoded frame + fps produced ~1/fps s clips.
       // Do not use `fps=` in -vf with looped PNG on some Windows FFmpeg builds (filter init EINVAL).
       // Use bilinear instead of lanczos here — lanczos + yuv format + duration quirks has also tripped bad builds.
+      // Contain + pad keeps the full image (no edge crop) so on-image text is not clipped.
       filters.push(
-        `scale=${a.width}:${a.height}:force_original_aspect_ratio=increase:flags=bilinear`,
-        `crop=${a.width}:${a.height}`,
+        `scale=${a.width}:${a.height}:force_original_aspect_ratio=decrease:flags=bilinear,` +
+          `pad=${a.width}:${a.height}:(ow-iw)/2:(oh-ih)/2:color=black`,
       );
     }
   } else {
@@ -2817,7 +2804,9 @@ function runFfmpeg(
 export const _internals = {
   detectFfmpeg: resolveFfmpegBin,
   gradeFilter,
-  dimsFor,
+  exportDimsFor,
+  /** @deprecated use `exportDimsFor` from `./personalExportDims.js` */
+  dimsFor: exportDimsFor,
   xfadeMode,
   stitchFfmpegDebugTrace,
 };

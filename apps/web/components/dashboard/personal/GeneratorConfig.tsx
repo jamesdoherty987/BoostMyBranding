@@ -811,21 +811,95 @@ export function GeneratorConfigPanel({
                 </select>
               </Field>
               <Field
-                label="On-screen fact text"
-                hint="Pick one source for burned-in labels so narration is not doubled. AI keyword pops are timed lower-thirds; on-image labels are a single short line on stills. Names & numbers title cards (below) still use the same font settings when enabled."
+                label="Fact text on video"
+                hint="Choose one: FFmpeg pop-ups (planner keyword cards) or AI-painted labels on stills — not both. Names & numbers title cards are turned off automatically when you pick AI on image."
               >
-                <select
-                  value={factTextMode}
-                  onChange={(e) =>
-                    setGen(applyFactTextMode(gen, e.target.value as FactTextMode))
-                  }
-                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
-                >
-                  <option value="off">Off — no AI fact overlays</option>
-                  <option value="keywords_subtle">AI keyword pops — subtle</option>
-                  <option value="keywords_bold">AI keyword pops — bold</option>
-                  <option value="image_labels">On-image fact labels only (no keyword pops)</option>
-                </select>
+                <div className="space-y-2">
+                  <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+                    <input
+                      type="radio"
+                      name="fact-text-delivery"
+                      className="text-violet-600 focus:ring-violet-500"
+                      checked={factTextMode === 'off'}
+                      onChange={() => setGen(applyFactTextMode(gen, 'off'))}
+                    />
+                    <span>Off — no fact text overlays</span>
+                  </label>
+                  <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+                    <input
+                      type="radio"
+                      name="fact-text-delivery"
+                      className="text-violet-600 focus:ring-violet-500"
+                      checked={factTextMode === 'keywords_subtle' || factTextMode === 'keywords_bold'}
+                      onChange={() =>
+                        setGen(
+                          applyFactTextMode(
+                            gen,
+                            (gen.keywordPopStyle ?? 'subtle') === 'bold' ? 'keywords_bold' : 'keywords_subtle',
+                          ),
+                        )
+                      }
+                    />
+                    <span>FFmpeg keyword pop-ups (lower-thirds)</span>
+                  </label>
+                  {(factTextMode === 'keywords_subtle' || factTextMode === 'keywords_bold') && (
+                    <div className="ml-6 flex flex-wrap gap-3 text-xs text-slate-700">
+                      <label className="flex cursor-pointer items-center gap-1.5">
+                        <input
+                          type="radio"
+                          name="kw-intensity"
+                          className="text-violet-600"
+                          checked={factTextMode === 'keywords_subtle'}
+                          onChange={() => setGen(applyFactTextMode(gen, 'keywords_subtle'))}
+                        />
+                        Subtle
+                      </label>
+                      <label className="flex cursor-pointer items-center gap-1.5">
+                        <input
+                          type="radio"
+                          name="kw-intensity"
+                          className="text-violet-600"
+                          checked={factTextMode === 'keywords_bold'}
+                          onChange={() => setGen(applyFactTextMode(gen, 'keywords_bold'))}
+                        />
+                        Bold
+                      </label>
+                    </div>
+                  )}
+                  <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+                    <input
+                      type="radio"
+                      name="fact-text-delivery"
+                      className="text-violet-600 focus:ring-violet-500"
+                      checked={factTextMode === 'image_labels'}
+                      onChange={() => setGen(applyFactTextMode(gen, 'image_labels'))}
+                    />
+                    <span>AI text baked into images (no FFmpeg keyword pops)</span>
+                  </label>
+                </div>
+              </Field>
+              <Field
+                label="Manual text on shots (planner)"
+                hint="Turn this off to disable the director model from filling per-shot onScreen lines in JSON — visible facts then come only from “On-screen fact text” above (keyword pops and/or AI-painted on-image labels). Names & numbers title cards (below) are separate."
+              >
+                <label className="flex cursor-pointer items-center gap-2.5 rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800">
+                  <input
+                    id="gen-director-on-screen-copy"
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
+                    checked={gen.directorShotOnScreenCopy !== false}
+                    onChange={(e) =>
+                      setGen({
+                        ...gen,
+                        directorShotOnScreenCopy: e.target.checked ? true : false,
+                      })
+                    }
+                  />
+                  <span>
+                    Allow planner-written <code className="rounded bg-slate-100 px-1 font-mono text-xs">onScreen</code>{' '}
+                    copy
+                  </span>
+                </label>
               </Field>
               {(factTextMode === 'keywords_subtle' ||
                 factTextMode === 'keywords_bold' ||
@@ -1374,7 +1448,7 @@ function applyFactTextMode(gen: PersonalGeneratorConfig, mode: FactTextMode): Pe
     case 'keywords_bold':
       return { ...gen, keywordPopStyle: 'bold', allowSparseImageText: false };
     case 'image_labels':
-      return { ...gen, keywordPopStyle: 'off', allowSparseImageText: true };
+      return { ...gen, keywordPopStyle: 'off', allowSparseImageText: true, namesNumbersTitleCard: false };
     default:
       return gen;
   }

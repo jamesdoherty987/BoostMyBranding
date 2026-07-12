@@ -1628,6 +1628,15 @@ function vfFitWholeSourcePadBlack(w: number, h: number, flags: 'bilinear' | 'lan
 }
 
 /**
+ * Fill WxH with centre-crop — no letterboxing. Required before Ken Burns `zoompan`
+ * when blur-fill is off; zooming into a pad=black canvas exposes black bars that
+ * eat into the image.
+ */
+function vfFitWholeSourceCoverCrop(w: number, h: number, flags: 'bilinear' | 'lanczos'): string {
+  return `scale=${w}:${h}:force_original_aspect_ratio=increase:flags=${flags},crop=${w}:${h}`;
+}
+
+/**
  * Windows static stills use `-filter_complex`. Comma-chaining **two or more** `drawtext`
  * filters in one `[0:v]…[out]` graph can trip some Windows FFmpeg / libavfilter builds
  * (filter init / label issues). When there are 2+ drawtext entries, use explicit `[dtN]`
@@ -1770,10 +1779,10 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
       const xExpr = `'iw*${safeFocalX}-(iw/zoom/2)'`;
       const yExpr = `'ih*${safeFocalY}-(ih/zoom/2)'`;
       const te = Math.max(0.05, a.durationSeconds).toFixed(3);
-      // Fit whole still inside canvas (pad=black) or blur-fill compositor — no center-crop of the sharp layer.
+      // Blur-fill compositor (default) or centre-crop fill — never pad=black before zoompan.
       geometryFilters.push(
         'select=eq(n\\,0),setpts=PTS-STARTPTS',
-        `${vfFitWholeSourcePadBlack(a.width, a.height, 'bilinear')},` +
+        `${vfFitWholeSourceCoverCrop(a.width, a.height, 'bilinear')},` +
           `zoompan=z='min(zoom+${zoomStep},1.10)':x=${xExpr}:y=${yExpr}:` +
           `d=${imageOutFrames}:s=${a.width}x${a.height}:fps=${a.fps},` +
           `tpad=stop_mode=clone:stop_duration=6,trim=end=${te},setpts=PTS-STARTPTS`,
@@ -1825,8 +1834,10 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
   if (a.useGrain) tailFilters.push('noise=alls=8:allf=t+u');
   if (a.letterbox) {
     const barHeight = Math.round(a.height * 0.08);
+    const innerH = a.height - 2 * barHeight;
+    // Shrink content into the inner frame — do not draw opaque bars on top of the image.
     tailFilters.push(
-      `pad=${a.width}:${a.height}:0:0:color=black,drawbox=x=0:y=0:w=${a.width}:h=${barHeight}:color=black@1:t=fill,drawbox=x=0:y=${a.height - barHeight}:w=${a.width}:h=${barHeight}:color=black@1:t=fill`,
+      `scale=${a.width}:${innerH}:force_original_aspect_ratio=decrease:flags=bilinear,pad=${a.width}:${a.height}:(ow-iw)/2:${barHeight}:color=black`,
     );
   }
 
@@ -1956,7 +1967,8 @@ async function normalizeToSegment(a: NormalizeArgs): Promise<void> {
   const inputArg = useWinWorkdirSpawn ? path.basename(a.input) : inputPath;
   const outputArg = useWinWorkdirSpawn ? path.basename(a.output) : outputPath;
 
-  const blurFill = stitchNormalizeBlurFillEnabled();
+  // Ken Burns zoompan on pad=black reveals letterboxing; always blur-fill stills with motion.
+  const blurFill = stitchNormalizeBlurFillEnabled() || useKenBurnsOnImage;
   /** Windows static stills: `-filter_complex` + explicit map avoids some libavfilter + libx264 link bugs with `-vf`. */
   const winStaticFilterComplex =
     process.platform === 'win32' && a.kind === 'image' && !useKenBurnsOnImage;

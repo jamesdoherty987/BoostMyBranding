@@ -50,11 +50,14 @@ import {
 const EXPORT_ASPECT_FILL_MAX_REL_DELTA = 0.035;
 
 /**
- * Resize AI stills to the exact export pixel size so the stitcher does not add
- * a second layer of letterboxing for common provider resolutions.
+ * Resize AI stills toward the export frame when aspect is close enough.
  *
- * - Near-matching aspect: slight stretch only (no crop, no bars).
- * - Large mismatch: letterbox inside the JPEG (`fit: contain`) so nothing is cropped.
+ * - Exact size: pass through (JPEG) or re-encode only.
+ * - Near-matching aspect: slight stretch (`fit: fill`) so tiny API drift does not
+ *   produce letterboxing in FFmpeg.
+ * - Large mismatch: keep native pixels — the stitcher's blur-fill compositor fits
+ *   the shot without baking black bars into the asset (Ken Burns would zoom into
+ *   those bars and cut off the image).
  */
 async function fitGeneratedRasterToExportFrame(
   buffer: Buffer,
@@ -72,12 +75,9 @@ async function fitGeneratedRasterToExportFrame(
       .toBuffer();
   }
   if (mw == null || mh == null || mw < 1 || mh < 1) {
+    // Unknown dimensions — centre-crop to export (never pad black into the JPEG).
     return sharp(buffer, { failOn: 'none' })
-      .resize(W, H, {
-        fit: 'contain',
-        position: 'centre',
-        background: { r: 0, g: 0, b: 0, alpha: 1 },
-      })
+      .resize(W, H, { fit: 'cover', position: 'centre' })
       .flatten({ background: { r: 0, g: 0, b: 0 } })
       .jpeg({ quality: 92, mozjpeg: true })
       .toBuffer();
@@ -85,16 +85,16 @@ async function fitGeneratedRasterToExportFrame(
   const srcR = mw / mh;
   const tgtR = W / H;
   const rel = Math.abs(srcR - tgtR) / tgtR;
-  const fit: 'fill' | 'contain' =
-    rel <= EXPORT_ASPECT_FILL_MAX_REL_DELTA ? 'fill' : 'contain';
+  if (rel > EXPORT_ASPECT_FILL_MAX_REL_DELTA) {
+    // Leave native resolution; stitcher blur-fill handles aspect at render.
+    if (meta.format === 'jpeg' || meta.format === 'jpg') return buffer;
+    return sharp(buffer, { failOn: 'none' })
+      .flatten({ background: { r: 0, g: 0, b: 0 } })
+      .jpeg({ quality: 92, mozjpeg: true })
+      .toBuffer();
+  }
   return sharp(buffer, { failOn: 'none' })
-    .resize(W, H, {
-      fit,
-      position: 'centre',
-      ...(fit === 'contain'
-        ? { background: { r: 0, g: 0, b: 0, alpha: 1 } }
-        : {}),
-    })
+    .resize(W, H, { fit: 'fill', position: 'centre' })
     .flatten({ background: { r: 0, g: 0, b: 0 } })
     .jpeg({ quality: 92, mozjpeg: true })
     .toBuffer();

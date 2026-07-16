@@ -29,6 +29,7 @@ import {
   Series,
   Img,
   Audio,
+  Sequence,
   Easing,
   spring,
 } from 'remotion';
@@ -88,7 +89,11 @@ export const Slideshow: React.FC<VideoProps> = (props) => {
   return (
     <AbsoluteFill style={{ background: palette.dark }}>
       {extras.musicUrl ? <Audio src={extras.musicUrl} volume={musicVol} /> : null}
-      {extras.voiceoverUrl ? <Audio src={extras.voiceoverUrl} volume={1.0} /> : null}
+      {extras.voiceoverUrl ? (
+        <Sequence from={hookFrames}>
+          <Audio src={extras.voiceoverUrl} volume={1.0} />
+        </Sequence>
+      ) : null}
 
       <Series>
         {extras.hook ? (

@@ -924,7 +924,7 @@ async function sourceMediaForBeats(
           if (features.fal) {
             const url = await generateImage(
               buildAiPrompt(beat.imageQuery, stylePrefix, charPromptFragment),
-              '9:16',
+              genConfig.aspectRatio ?? '9:16',
             );
             asset = {
               url,

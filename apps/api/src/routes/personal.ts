@@ -27,7 +27,7 @@ import multer from 'multer';
 import { z } from 'zod';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { requireAuth } from '../services/auth.js';
+import { requirePersonalAuth } from '../services/auth.js';
 import { listThemes, themeSummary, getTheme } from '../services/personalThemes.js';
 import {
   listAllThemesForUser,
@@ -100,7 +100,7 @@ const PLATFORMS = [
 
 /* ─── Themes ─────────────────────────────────────────────────────── */
 
-personalRouter.get('/themes', requireAuth, async (req, res, next) => {
+personalRouter.get('/themes', requirePersonalAuth, async (req, res, next) => {
   try {
     const user = (req as any).user as { id: string };
     const merged = await listAllThemesForUser(user.id);
@@ -178,7 +178,7 @@ const customThemeSchema = z.object({
   overridesBuiltin: z.boolean().optional(),
 });
 
-personalRouter.get('/custom-themes', requireAuth, async (req, res, next) => {
+personalRouter.get('/custom-themes', requirePersonalAuth, async (req, res, next) => {
   try {
     const user = (req as any).user as { id: string };
     res.json({ data: await listCustomThemes(user.id) });
@@ -187,7 +187,7 @@ personalRouter.get('/custom-themes', requireAuth, async (req, res, next) => {
   }
 });
 
-personalRouter.post('/custom-themes', requireAuth, async (req, res, next) => {
+personalRouter.post('/custom-themes', requirePersonalAuth, async (req, res, next) => {
   try {
     const user = (req as any).user as { id: string };
     const body = customThemeSchema.parse(req.body);
@@ -200,7 +200,7 @@ personalRouter.post('/custom-themes', requireAuth, async (req, res, next) => {
 
 const customThemePatchSchema = customThemeSchema.partial().omit({ slug: true });
 
-personalRouter.patch('/custom-themes/:id', requireAuth, async (req, res, next) => {
+personalRouter.patch('/custom-themes/:id', requirePersonalAuth, async (req, res, next) => {
   try {
     const user = (req as any).user as { id: string };
     const body = customThemePatchSchema.parse(req.body);
@@ -213,7 +213,7 @@ personalRouter.patch('/custom-themes/:id', requireAuth, async (req, res, next) =
   }
 });
 
-personalRouter.delete('/custom-themes/:id', requireAuth, async (req, res, next) => {
+personalRouter.delete('/custom-themes/:id', requirePersonalAuth, async (req, res, next) => {
   try {
     const user = (req as any).user as { id: string };
     const ok = await deleteCustomTheme(user.id, String(req.params.id));
@@ -230,7 +230,7 @@ const cloneSchema = z.object({
   mode: z.enum(['override', 'duplicate']).default('duplicate'),
 });
 
-personalRouter.post('/custom-themes/clone', requireAuth, async (req, res, next) => {
+personalRouter.post('/custom-themes/clone', requirePersonalAuth, async (req, res, next) => {
   try {
     const user = (req as any).user as { id: string };
     const body = cloneSchema.parse(req.body);
@@ -243,7 +243,7 @@ personalRouter.post('/custom-themes/clone', requireAuth, async (req, res, next) 
 
 /* ─── Features snapshot ─────────────────────────────────────────── */
 
-personalRouter.get('/features', requireAuth, (_req, res) => {
+personalRouter.get('/features', requirePersonalAuth, (_req, res) => {
   res.json({
     data: {
       db: features.db,
@@ -264,6 +264,7 @@ personalRouter.get('/features', requireAuth, (_req, res) => {
         openai: voiceFeatures.openai,
       },
       resend: features.resend,
+      personalPublicAccess: features.personalPublicAccess,
     },
   });
 });
@@ -522,7 +523,7 @@ function normalizeGeneratorConfigPatch(gen: Record<string, unknown> | undefined)
   }
 }
 
-personalRouter.post('/accounts', requireAuth, async (req, res, next) => {
+personalRouter.post('/accounts', requirePersonalAuth, async (req, res, next) => {
   try {
     const user = (req as any).user as { id: string };
     if (req.body && typeof req.body === 'object' && (req.body as Record<string, unknown>).videoDeliveryEmail === '') {
@@ -544,7 +545,7 @@ personalRouter.post('/accounts', requireAuth, async (req, res, next) => {
   }
 });
 
-personalRouter.get('/accounts', requireAuth, async (req, res, next) => {
+personalRouter.get('/accounts', requirePersonalAuth, async (req, res, next) => {
   try {
     const user = (req as any).user as { id: string };
     res.json({ data: await listAccounts(user.id) });
@@ -553,7 +554,7 @@ personalRouter.get('/accounts', requireAuth, async (req, res, next) => {
   }
 });
 
-personalRouter.get('/accounts/:id', requireAuth, async (req, res, next) => {
+personalRouter.get('/accounts/:id', requirePersonalAuth, async (req, res, next) => {
   try {
     const user = (req as any).user as { id: string };
     const row = await getAccount(user.id, String(req.params.id));
@@ -568,7 +569,7 @@ personalRouter.get('/accounts/:id', requireAuth, async (req, res, next) => {
   }
 });
 
-personalRouter.patch('/accounts/:id', requireAuth, async (req, res, next) => {
+personalRouter.patch('/accounts/:id', requirePersonalAuth, async (req, res, next) => {
   try {
     const user = (req as any).user as { id: string };
     const raw = req.body as Record<string, unknown>;
@@ -589,7 +590,7 @@ personalRouter.patch('/accounts/:id', requireAuth, async (req, res, next) => {
   }
 });
 
-personalRouter.delete('/accounts/:id', requireAuth, async (req, res, next) => {
+personalRouter.delete('/accounts/:id', requirePersonalAuth, async (req, res, next) => {
   try {
     const user = (req as any).user as { id: string };
     const ok = await deleteAccount(user.id, String(req.params.id));
@@ -615,7 +616,7 @@ const generateSchema = z.object({
   dryRun: z.boolean().optional(),
 });
 
-personalRouter.post('/accounts/:id/generate', requireAuth, async (req, res, next) => {
+personalRouter.post('/accounts/:id/generate', requirePersonalAuth, async (req, res, next) => {
   try {
     const user = (req as any).user as { id: string };
     const account = await getAccount(user.id, String(req.params.id));
@@ -709,7 +710,7 @@ personalRouter.post('/accounts/:id/generate', requireAuth, async (req, res, next
   }
 });
 
-personalRouter.post('/accounts/:id/posts/:postId/cancel', requireAuth, async (req, res, next) => {
+personalRouter.post('/accounts/:id/posts/:postId/cancel', requirePersonalAuth, async (req, res, next) => {
   try {
     const user = (req as any).user as { id: string };
     const accountId = String(req.params.id);
@@ -734,7 +735,7 @@ personalRouter.post('/accounts/:id/posts/:postId/cancel', requireAuth, async (re
 
 personalRouter.post(
   '/accounts/:id/posts/:postId/regenerate-thumbnail',
-  requireAuth,
+  requirePersonalAuth,
   async (req, res, next) => {
     try {
       const user = (req as any).user as { id: string };
@@ -768,7 +769,7 @@ personalRouter.post(
   },
 );
 
-personalRouter.get('/accounts/:id/posts/:postId/download', requireAuth, async (req, res, next) => {
+personalRouter.get('/accounts/:id/posts/:postId/download', requirePersonalAuth, async (req, res, next) => {
   try {
     const user = (req as any).user as { id: string };
     const accountId = String(req.params.id);
@@ -821,7 +822,7 @@ personalRouter.get('/accounts/:id/posts/:postId/download', requireAuth, async (r
   }
 });
 
-personalRouter.get('/accounts/:id/posts/:postId/download-thumbnail', requireAuth, async (req, res, next) => {
+personalRouter.get('/accounts/:id/posts/:postId/download-thumbnail', requirePersonalAuth, async (req, res, next) => {
   try {
     const user = (req as any).user as { id: string };
     const accountId = String(req.params.id);
@@ -876,7 +877,7 @@ personalRouter.get('/accounts/:id/posts/:postId/download-thumbnail', requireAuth
 
 /* ─── Posts ─────────────────────────────────────────────────────── */
 
-personalRouter.get('/accounts/:id/posts', requireAuth, async (req, res, next) => {
+personalRouter.get('/accounts/:id/posts', requirePersonalAuth, async (req, res, next) => {
   try {
     const user = (req as any).user as { id: string };
     const account = await getAccount(user.id, String(req.params.id));
@@ -901,7 +902,7 @@ personalRouter.get('/accounts/:id/posts', requireAuth, async (req, res, next) =>
   }
 });
 
-personalRouter.delete('/accounts/:id/posts/failed', requireAuth, async (req, res, next) => {
+personalRouter.delete('/accounts/:id/posts/failed', requirePersonalAuth, async (req, res, next) => {
   try {
     const user = (req as any).user as { id: string };
     const accountId = String(req.params.id);
@@ -917,7 +918,7 @@ personalRouter.delete('/accounts/:id/posts/failed', requireAuth, async (req, res
   }
 });
 
-personalRouter.delete('/accounts/:id/posts/:postId', requireAuth, async (req, res, next) => {
+personalRouter.delete('/accounts/:id/posts/:postId', requirePersonalAuth, async (req, res, next) => {
   try {
     const user = (req as any).user as { id: string };
     const accountId = String(req.params.id);
@@ -980,7 +981,7 @@ const ROLES = [
 
 personalRouter.post(
   '/accounts/:id/media',
-  requireAuth,
+  requirePersonalAuth,
   uploadLimiter,
   mediaUpload.array('files', 10),
   async (req, res, next) => {
@@ -1065,7 +1066,7 @@ personalRouter.post(
   },
 );
 
-personalRouter.get('/accounts/:id/media', requireAuth, async (req, res, next) => {
+personalRouter.get('/accounts/:id/media', requirePersonalAuth, async (req, res, next) => {
   try {
     const user = (req as any).user as { id: string };
     const role = req.query.role ? String(req.query.role) : undefined;
@@ -1089,7 +1090,7 @@ const mediaPatchSchema = z.object({
   isArchived: z.boolean().optional(),
 });
 
-personalRouter.patch('/media/:mediaId', requireAuth, async (req, res, next) => {
+personalRouter.patch('/media/:mediaId', requirePersonalAuth, async (req, res, next) => {
   try {
     const user = (req as any).user as { id: string };
     const body = mediaPatchSchema.parse(req.body);
@@ -1105,7 +1106,7 @@ personalRouter.patch('/media/:mediaId', requireAuth, async (req, res, next) => {
   }
 });
 
-personalRouter.delete('/media/:mediaId', requireAuth, async (req, res, next) => {
+personalRouter.delete('/media/:mediaId', requirePersonalAuth, async (req, res, next) => {
   try {
     const user = (req as any).user as { id: string };
     const ok = await deleteAccountMedia(user.id, String(req.params.mediaId));
@@ -1132,7 +1133,7 @@ const characterCreateSchema = z.object({
   locale: z.string().max(10).optional(),
 });
 
-personalRouter.post('/characters', requireAuth, async (req, res, next) => {
+personalRouter.post('/characters', requirePersonalAuth, async (req, res, next) => {
   try {
     const user = (req as any).user as { id: string };
     const body = characterCreateSchema.parse(req.body);
@@ -1143,7 +1144,7 @@ personalRouter.post('/characters', requireAuth, async (req, res, next) => {
   }
 });
 
-personalRouter.get('/characters', requireAuth, async (req, res, next) => {
+personalRouter.get('/characters', requirePersonalAuth, async (req, res, next) => {
   try {
     const user = (req as any).user as { id: string };
     res.json({ data: await listCharacters(user.id) });
@@ -1152,7 +1153,7 @@ personalRouter.get('/characters', requireAuth, async (req, res, next) => {
   }
 });
 
-personalRouter.get('/characters/:id', requireAuth, async (req, res, next) => {
+personalRouter.get('/characters/:id', requirePersonalAuth, async (req, res, next) => {
   try {
     const user = (req as any).user as { id: string };
     const row = await getCharacter(user.id, String(req.params.id));
@@ -1174,7 +1175,7 @@ const characterPatchSchema = z.object({
   locale: z.string().max(10).nullable().optional(),
 });
 
-personalRouter.patch('/characters/:id', requireAuth, async (req, res, next) => {
+personalRouter.patch('/characters/:id', requirePersonalAuth, async (req, res, next) => {
   try {
     const user = (req as any).user as { id: string };
     const body = characterPatchSchema.parse(req.body);
@@ -1187,7 +1188,7 @@ personalRouter.patch('/characters/:id', requireAuth, async (req, res, next) => {
   }
 });
 
-personalRouter.delete('/characters/:id', requireAuth, async (req, res, next) => {
+personalRouter.delete('/characters/:id', requirePersonalAuth, async (req, res, next) => {
   try {
     const user = (req as any).user as { id: string };
     const ok = await deleteCharacter(user.id, String(req.params.id));
@@ -1198,7 +1199,7 @@ personalRouter.delete('/characters/:id', requireAuth, async (req, res, next) => 
   }
 });
 
-personalRouter.post('/characters/:id/analyze', requireAuth, async (req, res, next) => {
+personalRouter.post('/characters/:id/analyze', requirePersonalAuth, async (req, res, next) => {
   try {
     const user = (req as any).user as { id: string };
     const existing = await getCharacter(user.id, String(req.params.id));
@@ -1215,11 +1216,11 @@ personalRouter.post('/characters/:id/analyze', requireAuth, async (req, res, nex
 /* AI models catalog                                                    */
 /* ═══════════════════════════════════════════════════════════════════ */
 
-personalRouter.get('/models', requireAuth, (_req, res) => {
+personalRouter.get('/models', requirePersonalAuth, (_req, res) => {
   res.json({ data: listAiModels() });
 });
 
-personalRouter.get('/models/:id', requireAuth, (req, res) => {
+personalRouter.get('/models/:id', requirePersonalAuth, (req, res) => {
   const model = getAiModel(String(req.params.id));
   if (!model)
     return res.status(404).json({ error: { message: 'Not found', code: 'NOT_FOUND' } });
@@ -1244,7 +1245,7 @@ const audioUpload = multer({
 
 personalRouter.post(
   '/accounts/:id/audio',
-  requireAuth,
+  requirePersonalAuth,
   uploadLimiter,
   audioUpload.single('file'),
   async (req, res, next) => {
@@ -1282,7 +1283,7 @@ personalRouter.post(
   },
 );
 
-personalRouter.delete('/accounts/:id/audio', requireAuth, async (req, res, next) => {
+personalRouter.delete('/accounts/:id/audio', requirePersonalAuth, async (req, res, next) => {
   try {
     const user = (req as any).user as { id: string };
     const updated = await updateAccount(user.id, String(req.params.id), {
@@ -1304,7 +1305,7 @@ personalRouter.delete('/accounts/:id/audio', requireAuth, async (req, res, next)
 /* ContentStudio connected accounts (read-only)                         */
 /* ═══════════════════════════════════════════════════════════════════ */
 
-personalRouter.get('/contentstudio/accounts', requireAuth, async (req, res, next) => {
+personalRouter.get('/contentstudio/accounts', requirePersonalAuth, async (req, res, next) => {
   try {
     const { listConnectedAccounts } = await import('../services/contentStudio.js');
     const workspaceId = req.query.workspaceId ? String(req.query.workspaceId) : undefined;
@@ -1321,7 +1322,7 @@ personalRouter.get('/contentstudio/accounts', requireAuth, async (req, res, next
   }
 });
 
-personalRouter.get('/contentstudio/workspaces', requireAuth, async (_req, res, next) => {
+personalRouter.get('/contentstudio/workspaces', requirePersonalAuth, async (_req, res, next) => {
   try {
     const { listWorkspaces } = await import('../services/contentStudio.js');
     const { workspaces, listError } = await listWorkspaces();

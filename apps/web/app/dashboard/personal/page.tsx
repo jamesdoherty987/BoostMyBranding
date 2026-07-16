@@ -2415,7 +2415,7 @@ function PostCard({
                 src={post.videoUrl}
                 controls
                 playsInline
-                className="max-h-full w-full object-contain"
+                className="h-full w-full object-cover"
                 poster={posterUrl}
               />
               <button
@@ -2439,7 +2439,7 @@ function PostCard({
                   key={posterUrl}
                   src={posterUrl}
                   alt=""
-                  className="absolute inset-0 h-full w-full object-contain transition-transform duration-300 group-hover:scale-[1.01]"
+                  className="absolute inset-0 h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.01]"
                 />
               ) : (
                 <div className="absolute inset-0 flex items-center justify-center bg-slate-900">
@@ -2470,7 +2470,7 @@ function PostCard({
             <img
               src={posterUrl ?? post.mediaAssets[0].url}
               alt={videoTitle || topicSeed || 'Post'}
-              className="h-full w-full object-contain opacity-95"
+              className="h-full w-full object-cover opacity-95"
             />
             <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
           </div>

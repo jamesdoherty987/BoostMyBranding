@@ -32,6 +32,7 @@ import {
   Img,
   OffthreadVideo,
   Audio,
+  Sequence,
   Easing,
   spring,
   staticFile,
@@ -111,7 +112,9 @@ export const ViralShort: React.FC<VideoProps> = (props) => {
         <Audio src={extras.musicUrl} volume={musicVol} />
       ) : null}
       {extras.voiceoverUrl ? (
-        <Audio src={extras.voiceoverUrl} volume={1.0} />
+        <Sequence from={hookFrames}>
+          <Audio src={extras.voiceoverUrl} volume={1.0} />
+        </Sequence>
       ) : null}
 
       <Series>

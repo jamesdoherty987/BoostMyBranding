@@ -13,11 +13,11 @@
 import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import type { Request, Response, NextFunction } from 'express';
-import { eq, gt, and, isNull } from 'drizzle-orm';
-import { getDb, isDbConfigured, users, magicLinks, sessions, clients } from '@boost/database';
+import { eq, gt, and, isNull, desc } from 'drizzle-orm';
+import { getDb, isDbConfigured, users, magicLinks, sessions, clients, personalAccounts } from '@boost/database';
 import { slugify } from '@boost/core';
 import type { SubscriptionTier } from '@boost/core';
-import { env } from '../env.js';
+import { env, personalPublicAccessEnabled } from '../env.js';
 import { sendEmail, magicLinkEmail } from './resend.js';
 
 const SESSION_COOKIE = 'bmb_session';
@@ -316,6 +316,101 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     // rejections aren't caught by Express. Surface it as 503 instead so the
     // server stays up and the client can retry.
     console.warn('[auth] session lookup failed:', (e as Error).message);
+    return res
+      .status(503)
+      .json({ error: { message: 'Auth temporarily unavailable', code: 'AUTH_UNAVAILABLE' } });
+  }
+}
+
+/** Dev fallback when PERSONAL_PUBLIC_ACCESS is on without a database. */
+const PERSONAL_PUBLIC_DEV_USER_ID = '00000000-0000-4000-8000-000000000001';
+
+/** Cached owner for unauthenticated Personal access (first channel owner, else first team user). */
+let cachedPublicPersonalUserId: string | null | undefined;
+
+async function resolvePublicPersonalUserId(): Promise<string | null> {
+  if (cachedPublicPersonalUserId !== undefined) return cachedPublicPersonalUserId;
+  if (!isDbConfigured()) {
+    cachedPublicPersonalUserId = PERSONAL_PUBLIC_DEV_USER_ID;
+    return cachedPublicPersonalUserId;
+  }
+  const db = getDb();
+  const [account] = await db
+    .select({ userId: personalAccounts.userId })
+    .from(personalAccounts)
+    .orderBy(desc(personalAccounts.createdAt))
+    .limit(1);
+  if (account) {
+    cachedPublicPersonalUserId = account.userId;
+    return cachedPublicPersonalUserId;
+  }
+  const [admin] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.role, 'agency_admin'))
+    .limit(1);
+  if (admin) {
+    cachedPublicPersonalUserId = admin.id;
+    return cachedPublicPersonalUserId;
+  }
+  const [anyUser] = await db.select({ id: users.id }).from(users).limit(1);
+  cachedPublicPersonalUserId = anyUser?.id ?? null;
+  return cachedPublicPersonalUserId;
+}
+
+/**
+ * Personal routes: require Team sign-in by default. When PERSONAL_PUBLIC_ACCESS
+ * is on, anonymous visitors use the shared team workspace (signed-in users
+ * keep their own session).
+ */
+export async function requirePersonalAuth(req: Request, res: Response, next: NextFunction) {
+  if (!personalPublicAccessEnabled) {
+    return requireAuth(req, res, next);
+  }
+
+  const token = getSessionToken(req) ?? req.headers.authorization?.replace(/^Bearer /, '');
+  if (token) {
+    try {
+      const user = await resolveSession(token);
+      if (user) {
+        (req as any).user = user;
+        return next();
+      }
+    } catch (e) {
+      console.warn('[auth] personal public session lookup failed:', (e as Error).message);
+      return res
+        .status(503)
+        .json({ error: { message: 'Auth temporarily unavailable', code: 'AUTH_UNAVAILABLE' } });
+    }
+  }
+
+  try {
+    const publicUserId = await resolvePublicPersonalUserId();
+    if (!publicUserId) {
+      return res.status(503).json({
+        error: {
+          message: 'Personal public access is enabled but no team user exists yet — sign in once at /team',
+          code: 'MISCONFIGURED',
+        },
+      });
+    }
+    if (isDbConfigured()) {
+      (req as any).user = { id: publicUserId, role: 'agency_admin' };
+      return next();
+    }
+    let user = memUsers.get(publicUserId);
+    if (!user) {
+      user = {
+        id: publicUserId,
+        email: 'personal-public@local',
+        role: 'agency_admin',
+      };
+      memUsers.set(publicUserId, user);
+    }
+    (req as any).user = user;
+    next();
+  } catch (e) {
+    console.warn('[auth] public personal user lookup failed:', (e as Error).message);
     return res
       .status(503)
       .json({ error: { message: 'Auth temporarily unavailable', code: 'AUTH_UNAVAILABLE' } });

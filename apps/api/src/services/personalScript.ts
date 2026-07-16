@@ -285,7 +285,10 @@ OUTPUT CONTRACT:
 2. **Beats** — ${args.longform === true ? '**12–48 beats** (see LONG-FORM MODE above).' : '4-7 beats.'} Each beat:
    - \`voiceover\` — 1 short sentence, natural, conversational.
    - \`onScreen\` — shorter (3-8 words), burned-in big text.
-   - \`imageQuery\` — 2-6 concrete-noun keywords for Pexels/Unsplash/etc. Prefer specific tangible things over abstract concepts.
+   - \`imageQuery\` — 2-10 concrete-noun keywords for Pexels/Unsplash/etc. Prefer specific tangible things over abstract concepts.
+     IMPORTANT: every beat's imageQuery must be **visually distinct** from the others. No near-duplicates like "person thinking" repeated 5 times.
+     Each image must have a purpose tied to that beat's idea (e.g. "factory smokestacks at dusk" vs "coal plant aerial" vs "bar chart of emissions" vs "EV charging station close-up").
+     Avoid using the same core subject noun more than twice across the whole script unless it's required for the story.
    - \`durationSeconds\` — ${args.longform === true ? 'usually 3–10s per beat; vary pacing.' : 'usually 2-5s.'}
    - \`eyebrow\` — optional 1-3 word label.
 3. **Outro** — 1 sentence CTA in the theme's voice. Conversational, not salesy.

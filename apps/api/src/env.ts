@@ -187,6 +187,17 @@ const schema = z.object({
   REPLICATE_API_TOKEN: z.string().optional(),
 
   CRON_SECRET: z.string().optional(),
+
+  /**
+   * When `true`, the Personal tab works without Team sign-in. Default off.
+   */
+  PERSONAL_PUBLIC_ACCESS: z.preprocess((val) => {
+    if (val === '' || val === undefined || val === null) return undefined;
+    const s = String(val).trim().toLowerCase();
+    if (['true', '1', 'yes', 'on'].includes(s)) return 'true';
+    if (['false', '0', 'no', 'off'].includes(s)) return 'false';
+    return undefined;
+  }, z.enum(['true', 'false']).optional()),
 });
 
 const parsed = schema.safeParse(process.env);
@@ -273,6 +284,8 @@ if (r2Partial) {
   );
 }
 
+export const personalPublicAccessEnabled = env.PERSONAL_PUBLIC_ACCESS === 'true';
+
 export const features = {
   db: Boolean(env.DATABASE_URL?.trim()),
   claude: Boolean(env.ANTHROPIC_API_KEY?.trim()),
@@ -293,7 +306,15 @@ export const features = {
       env.CANVA_CLIENT_SECRET?.trim() &&
       env.CANVA_REDIRECT_URI?.trim(),
   ),
+  /** Personal tab API is reachable without Team sign-in (see PERSONAL_PUBLIC_ACCESS). */
+  personalPublicAccess: personalPublicAccessEnabled,
 };
+
+if (personalPublicAccessEnabled) {
+  console.warn(
+    '[env] PERSONAL_PUBLIC_ACCESS is enabled — the Personal tab works without Team sign-in.',
+  );
+}
 
 if (env.NODE_ENV === 'production' && !features.stripe) {
   console.warn(

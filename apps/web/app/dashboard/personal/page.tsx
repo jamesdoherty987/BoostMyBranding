@@ -884,6 +884,7 @@ function PublishingCard({
   >([]);
   const [loadBusy, setLoadBusy] = useState(false);
   const [saveBusy, setSaveBusy] = useState(false);
+  const [testEmailBusy, setTestEmailBusy] = useState(false);
   const [listBanner, setListBanner] = useState<'empty' | 'mismatch' | null>(null);
   const [contentStudioListError, setContentStudioListError] = useState<string | null>(null);
   const [workspacesList, setWorkspacesList] = useState<Array<{ id: string; name: string }> | null>(null);
@@ -1042,6 +1043,32 @@ function PublishingCard({
     }
   }
 
+  async function sendTestDeliveryEmail() {
+    setTestEmailBusy(true);
+    try {
+      // Persist current form values first so the test uses what you see on screen.
+      await api.updatePersonalAccount(account.id, {
+        contentStudioWorkspaceId: workspaceId.trim() ? workspaceId.trim() : null,
+        contentStudioAccountId: accountIdPick.trim() || null,
+        autoSchedule: postToContentStudio,
+        emailVideoOnReady,
+        videoDeliveryEmail: videoDeliveryEmail.trim() ? videoDeliveryEmail.trim() : null,
+      });
+      const res = await api.testPersonalVideoDeliveryEmail(account.id);
+      toast.success(
+        'Test email sent',
+        res.usedRealVideo
+          ? `Check ${res.to} (and spam). Used your latest video link.`
+          : `Check ${res.to} (and spam). No ready video yet — used a placeholder link.`,
+      );
+      onChanged();
+    } catch (e) {
+      toast.error('Test email failed', (e as Error).message);
+    } finally {
+      setTestEmailBusy(false);
+    }
+  }
+
   return (
     <Card>
       <CardContent className="p-6">
@@ -1151,6 +1178,18 @@ function PublishingCard({
             <p className="mt-2 text-[11px] leading-snug text-slate-600">
               Use <strong>Save posting settings</strong> below. If the toggle is on but the address is empty or invalid, the server skips sending.
             </p>
+            <div className="mt-3">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => void sendTestDeliveryEmail()}
+                disabled={testEmailBusy || saveBusy || !resendOk || !emailVideoOnReady || !videoDeliveryEmail.trim()}
+              >
+                {testEmailBusy ? <Spinner className="h-4 w-4" /> : null}
+                Send test email
+              </Button>
+            </div>
           </div>
         )}
 
@@ -1247,10 +1286,15 @@ function PublishingCard({
         ) : null}
 
         <div className="mt-4 flex flex-wrap gap-2">
-          <Button onClick={savePublishing} disabled={saveBusy || !csOk} size="sm">
+          <Button onClick={savePublishing} disabled={saveBusy} size="sm">
             {saveBusy ? <Spinner className="h-4 w-4" /> : <Save className="h-4 w-4" />}
             Save posting settings
           </Button>
+          {!csOk ? (
+            <span className="self-center text-[11px] text-slate-500">
+              Content Studio is off — you can still save email delivery settings.
+            </span>
+          ) : null}
         </div>
       </CardContent>
     </Card>

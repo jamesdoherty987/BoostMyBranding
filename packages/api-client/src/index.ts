@@ -1882,6 +1882,18 @@ export class BoostApi {
     });
   }
 
+  /** Send a test "video ready" email using saved Posting delivery settings. */
+  testPersonalVideoDeliveryEmail(id: string) {
+    return this.request<{
+      ok: true;
+      to: string;
+      usedPostId: string | null;
+      usedRealVideo: boolean;
+    }>(`/api/v1/personal/accounts/${id}/test-video-delivery-email`, {
+      method: 'POST',
+    });
+  }
+
   deletePersonalAccount(id: string) {
     return this.request<{ ok: true }>(`/api/v1/personal/accounts/${id}`, {
       method: 'DELETE',

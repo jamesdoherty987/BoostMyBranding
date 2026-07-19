@@ -21,7 +21,13 @@ export async function maybeEmailPersonalVideoReady(args: {
   topic: string;
   captionPreview: string;
 }): Promise<void> {
-  if (!features.resend) return;
+  if (!features.resend) {
+    console.warn(
+      '[personalVideoDeliveryEmail] skipped: RESEND_API_KEY is not set on the API (features.resend=false).',
+      { postId: args.postId, accountId: args.accountId },
+    );
+    return;
+  }
 
   const db = getDb();
   const [row] = await db

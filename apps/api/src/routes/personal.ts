@@ -11,6 +11,7 @@
  *   GET    /api/v1/personal/accounts/:id
  *   PATCH  /api/v1/personal/accounts/:id
  *   DELETE /api/v1/personal/accounts/:id
+ *   POST   /api/v1/personal/accounts/:id/test-video-delivery-email
  *   POST   /api/v1/personal/accounts/:id/generate
  *   POST   /api/v1/personal/accounts/:id/posts/:postId/cancel
  *   POST   /api/v1/personal/accounts/:id/posts/:postId/regenerate-thumbnail
@@ -56,6 +57,8 @@ import {
   resolvePersonalPostThumbnailDownload,
 } from '../services/personalAccounts.js';
 import type { PersonalAccountStyleBible } from '@boost/database';
+import { getDb, personalPosts } from '@boost/database';
+import { desc, eq, and, isNotNull } from 'drizzle-orm';
 import { generateForAccount } from '../services/personalPipeline.js';
 import { assertPersonalVideoExampleTitlesOrThrow, isExampleTitlesRequiredError } from '../services/personalTitlePolicy.js';
 import { enqueuePersonalGenerateForAccount } from '../services/personalGenerateQueue.js';
@@ -83,6 +86,7 @@ import {
 import { uploadLimiter } from '../middleware/rateLimit.js';
 import { features } from '../env.js';
 import { normalizeUploadImageIfAvif } from '../lib/normalizeUploadImage.js';
+import { maybeEmailPersonalVideoReady } from '../services/personalVideoDeliveryEmail.js';
 
 export const personalRouter = Router();
 
@@ -604,6 +608,93 @@ personalRouter.delete('/accounts/:id', requirePersonalAuth, async (req, res, nex
     next(e);
   }
 });
+
+/**
+ * Send a one-off "video ready" email using the account's saved delivery settings
+ * and the latest ready MP4 URL (or a placeholder link if none exist).
+ */
+personalRouter.post(
+  '/accounts/:id/test-video-delivery-email',
+  requirePersonalAuth,
+  async (req, res, next) => {
+    try {
+      if (!features.resend) {
+        return res.status(503).json({
+          error: {
+            message: 'RESEND_API_KEY is not configured on the API',
+            code: 'RESEND_OFF',
+          },
+        });
+      }
+      const user = (req as any).user as { id: string };
+      const accountId = String(req.params.id);
+      const row = await getAccount(user.id, accountId);
+      if (!row) {
+        return res
+          .status(404)
+          .json({ error: { message: 'Not found', code: 'NOT_FOUND' } });
+      }
+      if (!row.emailVideoOnReady) {
+        return res.status(400).json({
+          error: {
+            message: 'Turn on “Email when ready” and save posting settings first',
+            code: 'EMAIL_OFF',
+          },
+        });
+      }
+      const to = (row.videoDeliveryEmail ?? '').trim();
+      if (!to) {
+        return res.status(400).json({
+          error: {
+            message: 'Set a delivery email and save posting settings first',
+            code: 'EMAIL_MISSING',
+          },
+        });
+      }
+
+      const db = getDb();
+      const [latest] = await db
+        .select({
+          id: personalPosts.id,
+          videoUrl: personalPosts.videoUrl,
+          topic: personalPosts.topic,
+          caption: personalPosts.caption,
+        })
+        .from(personalPosts)
+        .where(
+          and(eq(personalPosts.accountId, accountId), isNotNull(personalPosts.videoUrl)),
+        )
+        .orderBy(desc(personalPosts.createdAt))
+        .limit(1);
+
+      const videoUrl =
+        (latest?.videoUrl ?? '').trim() ||
+        'https://example.com/boostmybranding-test-video.mp4';
+      const postId = latest?.id ?? `test-${Date.now()}`;
+
+      await maybeEmailPersonalVideoReady({
+        accountId,
+        postId,
+        videoUrl,
+        topic: (latest?.topic ?? '').trim() || 'Test delivery email',
+        captionPreview:
+          (latest?.caption ?? '').trim() ||
+          'This is a test from Personal → Posting (Send test email).',
+      });
+
+      res.json({
+        data: {
+          ok: true,
+          to,
+          usedPostId: latest?.id ?? null,
+          usedRealVideo: Boolean(latest?.videoUrl),
+        },
+      });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
 
 /* ─── Generate now ──────────────────────────────────────────────── */
 

@@ -2590,6 +2590,15 @@ function PostCard({
         >
           {headline}
         </div>
+        {post.createdAt ? (
+          <p
+            className="mt-1 flex items-center gap-1 text-[11px] text-slate-500"
+            title={new Date(post.createdAt).toISOString()}
+          >
+            <Clock className="h-3 w-3 shrink-0" aria-hidden />
+            <time dateTime={post.createdAt}>{new Date(post.createdAt).toLocaleString()}</time>
+          </p>
+        ) : null}
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <Button
             type="button"

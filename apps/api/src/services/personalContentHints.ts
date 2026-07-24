@@ -300,10 +300,11 @@ export function buildVisualBrandHintsForShots(styleBible?: PersonalAccountStyleB
   if (!styleBible) return undefined;
   const parts: string[] = [
     'Do not render channel titles, JSON titles, example video headlines, hook samples, or script snippets as typography in the image — diffusion models often literalize quoted strings from briefs. Convey the brand only through palette, composition, lighting, and subject matter.',
+    'Unless a script-locked on-image fact label is explicitly requested for this shot, generate a text-free frame: no captions, titles, watermarks, or readable signage.',
   ];
   if (styleBible.typography?.trim()) {
     parts.push(
-      `Overall type hierarchy / label feel (never spell sample titles): ${styleBible.typography.trim()}`,
+      `Overall type hierarchy / label feel (never spell sample titles; only apply when a script-locked label is present): ${styleBible.typography.trim()}`,
     );
   }
   const dos = styleBible.dos?.filter(Boolean).slice(0, 6) ?? [];

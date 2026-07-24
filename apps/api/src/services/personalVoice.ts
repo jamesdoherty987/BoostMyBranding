@@ -541,6 +541,10 @@ export function joinNarrationPartsWithVisualShotRanges(args: {
 
 /**
  * Per-shot **visual** durations from ElevenLabs character times (sums to ~`voiceSeconds`).
+ *
+ * When `cutAfterMention` is true (default), each new still (after shot 0) begins
+ * just **after** a key phrase in that shot's VO is spoken — so the matching image
+ * lands with the mention, not at the start of the line (when it would feel early).
  * Falls back to {@link shotDurationsFromVoicePartition} when alignment is missing or ranges invalid.
  */
 export function shotDurationsFromVoiceAlignment(args: {
@@ -549,18 +553,37 @@ export function shotDurationsFromVoiceAlignment(args: {
   voiceSeconds: number;
   minPerShot: number;
   maxPerShot: number;
+  /**
+   * Prefer cutting to shot *i* after a key phrase in that shot is spoken.
+   * Default true — documentary style: illustrate after you say it.
+   */
+  cutAfterMention?: boolean;
+  /** Preferred reveal phrases per shot (e.g. imageCaption); first match wins. */
+  mentionAnchors?: ReadonlyArray<string | undefined>;
+  /** Seconds after the matched phrase ends before the cut (default 0.12). */
+  postMentionLagSeconds?: number;
 }): number[] | null {
-  const { alignment, shotCharRanges, voiceSeconds, minPerShot, maxPerShot } = args;
+  const {
+    alignment,
+    shotCharRanges,
+    voiceSeconds,
+    minPerShot,
+    maxPerShot,
+    mentionAnchors,
+    postMentionLagSeconds,
+  } = args;
+  const cutAfterMention = args.cutAfterMention !== false;
   const n = shotCharRanges.length;
   if (n === 0 || !Number.isFinite(voiceSeconds) || voiceSeconds < 0.35) return null;
 
   const starts = alignment.characterStartTimesSeconds;
   const ends = alignment.characterEndTimesSeconds;
-  const narrLen = alignment.narrationText.length;
+  const narr = alignment.narrationText;
+  const narrLen = narr.length;
   const L = Math.min(narrLen, starts.length, ends.length);
   if (L < 1) return null;
 
-  const raw: number[] = [];
+  const windows: Array<{ t0: number; t1: number; a: number; b: number }> = [];
   for (let i = 0; i < n; i++) {
     const r = shotCharRanges[i]!;
     if (r.end <= r.start) return null;
@@ -569,8 +592,69 @@ export function shotDurationsFromVoiceAlignment(args: {
     const t0 = starts[a]!;
     const t1 = ends[b]!;
     if (!Number.isFinite(t0) || !Number.isFinite(t1) || t1 <= t0) return null;
-    const wall = t1 - t0 + 0.05;
-    raw.push(Math.max(minPerShot, Math.min(maxPerShot, wall)));
+    windows.push({ t0, t1, a, b });
+  }
+
+  let raw: number[];
+
+  if (!cutAfterMention || n === 1) {
+    raw = windows.map((w) => Math.max(minPerShot, Math.min(maxPerShot, w.t1 - w.t0 + 0.05)));
+  } else {
+    const lag = Math.max(0, Math.min(0.45, postMentionLagSeconds ?? 0.12));
+    const voiceStart = windows[0]!.t0;
+    const voiceEnd = windows[n - 1]!.t1 + 0.05;
+
+    const cutTimes: number[] = [voiceStart];
+    for (let i = 1; i < n; i++) {
+      const w = windows[i]!;
+      const span = Math.max(0.15, w.t1 - w.t0);
+      /** Wait a beat into the line, but keep most of this still under its VO. */
+      let minOff = Math.min(span * 0.35, Math.max(0.15, span * 0.14));
+      let maxOff = Math.min(span * 0.48, Math.max(0.28, span * 0.32));
+      if (maxOff < minOff) {
+        const mid = span * 0.25;
+        minOff = Math.min(minOff, mid);
+        maxOff = Math.max(maxOff, mid);
+      }
+      if (maxOff < minOff) {
+        minOff = 0;
+        maxOff = Math.max(0.12, span * 0.4);
+      }
+      const minInto = w.t0 + minOff;
+      const maxInto = w.t0 + maxOff;
+
+      let reveal =
+        findShotMentionRevealSeconds({
+          narr,
+          ends,
+          L,
+          windowStart: shotCharRanges[i]!.start,
+          windowEnd: shotCharRanges[i]!.end,
+          preferred: mentionAnchors?.[i],
+          postMentionLagSeconds: lag,
+        }) ?? minInto;
+
+      reveal = Math.max(minInto, Math.min(maxInto, reveal));
+      /** Leave the previous still at least ~minPerShot when possible. */
+      const earliest = cutTimes[i - 1]! + minPerShot * 0.7;
+      if (reveal < earliest) reveal = Math.min(maxInto, Math.max(earliest, minInto));
+      /** Never backtrack past the previous cut. */
+      if (reveal <= cutTimes[i - 1]!) {
+        reveal = Math.min(maxInto, cutTimes[i - 1]! + Math.max(0.12, minPerShot * 0.35));
+      }
+      if (reveal <= cutTimes[i - 1]!) {
+        reveal = cutTimes[i - 1]! + 0.12;
+      }
+      cutTimes.push(reveal);
+    }
+    cutTimes.push(voiceEnd);
+
+    raw = [];
+    for (let i = 0; i < n; i++) {
+      const d = cutTimes[i + 1]! - cutTimes[i]!;
+      if (!Number.isFinite(d) || d <= 0) return null;
+      raw.push(Math.max(minPerShot, Math.min(maxPerShot, d)));
+    }
   }
 
   let sum = raw.reduce((x, y) => x + y, 0);
@@ -608,6 +692,105 @@ export function shotDurationsFromVoiceAlignment(args: {
   }
 
   return scaled.map((x) => Math.round(Math.max(minPerShot, Math.min(maxPerShot, x)) * 20) / 20);
+}
+
+/**
+ * Wall-clock time (MP3 timeline) just after a key phrase in this shot's VO window.
+ * Prefers `preferred` (e.g. imageCaption), else a high-signal token from the slice.
+ */
+function findShotMentionRevealSeconds(args: {
+  narr: string;
+  ends: number[];
+  L: number;
+  windowStart: number;
+  windowEnd: number;
+  preferred?: string;
+  postMentionLagSeconds: number;
+}): number | null {
+  const { narr, ends, L, windowStart, windowEnd, preferred, postMentionLagSeconds } = args;
+  const winLo = Math.max(0, Math.min(windowStart, L));
+  const winHi = Math.max(winLo, Math.min(windowEnd, L));
+  if (winHi <= winLo) return null;
+
+  const win = narr.slice(winLo, winHi);
+  const candidates: string[] = [];
+  if (preferred?.trim()) candidates.push(preferred.trim());
+  for (const a of extractMentionAnchorsFromVoiceover(win)) {
+    if (!candidates.some((c) => c.toLowerCase() === a.toLowerCase())) candidates.push(a);
+  }
+
+  for (const text of candidates) {
+    if (!text || text.length > 56) continue;
+    let esc: string;
+    try {
+      esc = text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    } catch {
+      continue;
+    }
+    const re = new RegExp(esc, 'i');
+    const m = win.match(re);
+    if (!m || m.index === undefined) continue;
+    const a = winLo + m.index;
+    const bEx = a + m[0].length;
+    if (a < 0 || bEx > L || a >= bEx) continue;
+    const tEnd = ends[bEx - 1]!;
+    if (!Number.isFinite(tEnd)) continue;
+    return tEnd + postMentionLagSeconds;
+  }
+  return null;
+}
+
+/** High-signal phrases to align a visual cut after the narrator says them. */
+export function extractMentionAnchorsFromVoiceover(voiceover: string): string[] {
+  const vo = voiceover.replace(/\s+/g, ' ').trim();
+  if (!vo) return [];
+  const out: string[] = [];
+  const push = (s: string) => {
+    const t = s.trim();
+    if (t.length < 2 || t.length > 48) return;
+    /** Skip lone 1–2 digit fillers ("a 2", "in 1") — prefer years/stats. */
+    if (/^\d{1,2}$/.test(t)) return;
+    if (out.some((x) => x.toLowerCase() === t.toLowerCase())) return;
+    out.push(t);
+  };
+
+  for (const m of vo.matchAll(/\$[\d,.]+[A-Za-z]?|\b\d[\d,.]*\s?%|\b\d{3,4}\b|\b\d{2,}[\d,.]*\b/g)) {
+    push(m[0]!);
+  }
+  for (const m of vo.matchAll(/\b[A-Z]{2,}\b/g)) {
+    push(m[0]!);
+  }
+  for (const m of vo.matchAll(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b/g)) {
+    push(m[0]!);
+  }
+  for (const m of vo.matchAll(/\b[A-Z][a-z]{3,}\b/g)) {
+    push(m[0]!);
+  }
+
+  return out.slice(0, 6);
+}
+
+/**
+ * When character alignment is unavailable, nudge each still (after the first) later by
+ * shifting a fraction of its duration onto the previous shot — approximates "cut after mention".
+ */
+export function applyVisualMentionLagToDurations(
+  durations: number[],
+  opts?: { lagSeconds?: number; minPerShot?: number },
+): number[] {
+  const n = durations.length;
+  if (n < 2) return durations;
+  const lagWanted = Math.max(0.15, Math.min(0.85, opts?.lagSeconds ?? 0.4));
+  const minPer = Math.max(0.2, opts?.minPerShot ?? 0.45);
+  const out = durations.map((x) => x);
+  for (let i = 1; i < n; i++) {
+    const roomPrev = Math.max(0, out[i]! - minPer);
+    const lag = Math.min(lagWanted, roomPrev);
+    if (lag < 0.08) continue;
+    out[i]! -= lag;
+    out[i - 1]! += lag;
+  }
+  return out.map((x) => Math.round(Math.max(minPer, x) * 20) / 20);
 }
 
 /** Keyword overlay times for one shot (matches {@link personalStitcher.StitchKeywordCard} shape). */

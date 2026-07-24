@@ -541,7 +541,7 @@ export async function planStoryboard(args: DirectArgs): Promise<Storyboard> {
 
   if (args.allowSparseImageText === true && (args.keywordPopStyle ?? 'off') === 'off') {
     stripKeywordCardsForAiImageStoryboard(allShots);
-    thinSparseImageCaptionsOnShots(allShots, 0.28);
+    thinSparseImageCaptionsOnShots(allShots, 0.2);
     resyncImageCaptionsAfterVoiceEdits(allShots);
   }
 
@@ -886,6 +886,84 @@ const IMAGE_CAPTION_FILLER = new Set([
   'yesterday',
 ]);
 
+/** Common scene / mood nouns that look Title Case but should not burn into stills alone. */
+const IMAGE_CAPTION_SCENE_NOISE = new Set([
+  'forest',
+  'trail',
+  'mountain',
+  'kitchen',
+  'sunset',
+  'sunrise',
+  'city',
+  'street',
+  'ocean',
+  'beach',
+  'river',
+  'desert',
+  'garden',
+  'office',
+  'room',
+  'house',
+  'building',
+  'bridge',
+  'road',
+  'sky',
+  'cloud',
+  'clouds',
+  'night',
+  'morning',
+  'evening',
+  'portrait',
+  'landscape',
+  'closeup',
+  'close-up',
+  'scientist',
+  'worker',
+  'crowd',
+  'market',
+  'factory',
+  'lab',
+  'laboratory',
+  'museum',
+  'castle',
+  'church',
+  'temple',
+  'village',
+  'harbor',
+  'harbour',
+  'valley',
+  'field',
+  'farm',
+  'ship',
+  'plane',
+  'train',
+  'car',
+  'map',
+  'document',
+  'photo',
+  'image',
+  'scene',
+  'view',
+  'vista',
+  'moment',
+  'journey',
+  'adventure',
+  'mystery',
+  'history',
+  'future',
+  'past',
+  'power',
+  'change',
+  'truth',
+  'secret',
+  'danger',
+  'hope',
+  'fear',
+  'love',
+  'war',
+  'peace',
+]);
+
 function truncateImageCaptionWords(caption: string, maxWords: number): string {
   const w = caption.trim().split(/\s+/).filter(Boolean);
   if (w.length <= maxWords) return caption.trim();
@@ -894,8 +972,8 @@ function truncateImageCaptionWords(caption: string, maxWords: number): string {
 
 /**
  * Keep on-image text only when it is **worth burning in**: stats, money, dates,
- * acronyms, multi-word proper nouns, or substantive keywords — not hedges / filler alone.
- * Returns undefined to omit the label (better than weak type).
+ * acronyms, or proper nouns — not scene labels, mood words, or hedges.
+ * Prefer omitting a label over weak type on the still.
  */
 export function imageCaptionIsHighSignal(caption: string, _voiceover: string): boolean {
   const raw = caption.trim();
@@ -906,20 +984,12 @@ export function imageCaptionIsHighSignal(caption: string, _voiceover: string): b
   if (/\b[A-Z]{2,}\b/.test(raw)) return true;
   /** Two title-case words — likely person or place. */
   if (/\b[A-Z][a-z]+\s+[A-Z][a-z]+\b/.test(raw)) return true;
-
-  const lower = raw.toLowerCase();
-  const tokens = lower
-    .replace(/[^a-z0-9%$€£]+/g, ' ')
-    .split(/\s+/)
-    .filter(Boolean);
-  if (tokens.length === 0) return false;
-
-  const substantive5 = tokens.some((w) => w.length >= 5 && !IMAGE_CAPTION_FILLER.has(w));
-  if (substantive5) return true;
-
-  const good4 = tokens.filter((w) => w.length >= 4 && !IMAGE_CAPTION_FILLER.has(w));
-  if (good4.length >= 2) return true;
-  if (tokens.length === 1 && good4.length === 1) return true;
+  /** Single proper noun (Kyoto, Curie) — Title Case, not a common scene word. */
+  const singleProper = raw.match(/^([A-Z][a-z]{2,}|[A-Z]{2,})$/);
+  if (singleProper) {
+    const w = singleProper[1]!.toLowerCase();
+    if (!IMAGE_CAPTION_FILLER.has(w) && !IMAGE_CAPTION_SCENE_NOISE.has(w)) return true;
+  }
 
   return false;
 }
@@ -1016,8 +1086,8 @@ export function clampImageCaptionToVoiceover(
   return best ? normalizeDirectorCaptionSpaces(best).slice(0, maxLen) : undefined;
 }
 
-/** After high-signal filter + dedupe: keep only the strongest ~⅓ of in-image labels so most frames stay clean. */
-function sparseImageCaptionsToBudget(shots: DirectorShot[], maxFraction = 0.34): void {
+/** After high-signal filter + dedupe: keep only the strongest ~⅕ of in-image labels so most frames stay clean. */
+function sparseImageCaptionsToBudget(shots: DirectorShot[], maxFraction = 0.2): void {
   const withCap = shots
     .map((s, i) => ({ s, i }))
     .filter((x) => x.s.kind === 'ai_image' && x.s.imageCaption?.trim());
@@ -1515,21 +1585,23 @@ function buildDirectorPrompt(args: DirectArgs): string {
   const sparseTextBlock =
     args.allowSparseImageText && aiImageFactsOnly
       ? `\n\nON-IMAGE FACT LABELS ONLY (\`imageCaption\` — **this account**; the **image model** paints text into pixels — **no FFmpeg keyword pops**, no slate cards — **omit \`keywordCards\` entirely** for every shot):\n` +
+          `- **Default = no text:** Most stills must have **zero** painted type. Only add \`imageCaption\` when the VO states a **memorable fact viewers must retain** (date, year, person name, place name, money, %, acronym). If unsure, **omit**.\n` +
           `- **Narration only — never picture labels:** \`imageCaption\` must be a **verbatim substring** of that shot's \`voiceover\` (the spoken script line). It is **not** a title for the frame, not a mood line, not "what we see" (\`Forest trail\`, \`Busy kitchen\`, \`Sunset city\`, \`Scientist at work\`) unless those **exact** words are spoken in \`voiceover\`. If you cannot copy 1–4 words straight from \`voiceover\`, **omit** \`imageCaption\`.\n` +
           `- **Short & snappy:** **1–3 words** whenever possible (max 4). Pick the **most memorable** noun/verb/number chunk from that line — not a whole clause unless unavoidable.\n` +
           `- **Unique per shot:** never reuse the **exact same** \`imageCaption\` string on another shot; each labelled still needs its **own** phrase from **that** line only. If two beats would share the same label, **omit** on one of them.\n` +
           `- **One clear purpose per still:** every \`ai_image\` must show a **different** story beat and composition from the shot before and after — no filler wallpaper, no near-duplicate angles.\n` +
-          `- **Server quality bar:** labels that are only vague filler (no names, numbers, money, acronyms, or sharp keywords) are **removed** — **omit** \`imageCaption\` rather than forcing weak type.\n` +
+          `- **Server quality bar:** labels that are only vague filler or scene nouns (no names, numbers, money, acronyms, or sharp proper nouns) are **removed** — **omit** \`imageCaption\` rather than forcing weak type.\n` +
           `- **Digits and symbols:** When the VO states a stat, copy the **exact** digit string and symbols from that line (\`76%\` vs \`76 percent\`, \`$4.2T\` vs words) — never a different number or format than the narrator uses on this beat.\n` +
           `- **Script source only:** Do **not** invent labels from \`description\`, props, or "what would look good on screen". \`description\` only decides **where** type sits (sign, ticket, phone); **wording** is always from \`voiceover\`.\n` +
-          `- **Sparse:** use \`imageCaption\` on **at most ~25–30%** of \`ai_image\` shots — **most** \`ai_image\` shots must have **no** \`imageCaption\` field (or empty). Never label every still.\n` +
-          `- **Density check:** if you are unsure, **omit** — **≥ ~70%** of \`ai_image\` frames in the whole storyboard should have **no** \`imageCaption\` at all.\n` +
+          `- **Sparse:** use \`imageCaption\` on **at most ~15–20%** of \`ai_image\` shots — **most** \`ai_image\` shots must have **no** \`imageCaption\` field (or empty). Never label every still.\n` +
+          `- **Density check:** if you are unsure, **omit** — **≥ ~80%** of \`ai_image\` frames in the whole storyboard should have **no** \`imageCaption\` at all.\n` +
           `- **Max 4 words** when set. Never title, hook, channel name, or style-bible examples.\n` +
           `- **Inspiration:** when reference stills show typography, **match that lettering style** (serif vs sans, weight, case, colour); do not default to generic "bold tech sans" unless the refs look like that.\n` +
           `- Omit when the same words are already visible in the scene or the shot is not \`ai_image\`.`
       : args.allowSparseImageText
-        ? `\n\nON-IMAGE INFORMATION LABELS (\`imageCaption\` — **enabled** for this account; the **image model** paints text into the pixels — **no** FFmpeg lower-thirds or keyword pops for these facts):\n- **Narration only:** \`imageCaption\` must be words **spoken in that shot's \`voiceover\`** — not a visual caption of the photo (\`Mountain vista\`, \`Coffee close-up\`) unless the narrator literally says those words on this line.\n` +
-            `- Only when **this shot's** voiceover states a memorable **proper noun or number** viewers must retain — **dates, years, people's names, places, money, %, ages** — set \`imageCaption\` on that **\`ai_image\`** shot (max **4 words**). Examples of valid labels: "June 6, 1944", "Marie Curie", "Lagos", "$4.2T", "76%".\n` +
+        ? `\n\nON-IMAGE INFORMATION LABELS (\`imageCaption\` — **enabled** for this account; the **image model** paints text into the pixels — **no** FFmpeg lower-thirds or keyword pops for these facts):\n- **Default = no text:** omit \`imageCaption\` on **most** shots. Only burn type when **this shot's** voiceover states a memorable **proper noun or number** viewers must retain — **dates, years, people's names, places, money, %, ages**.\n` +
+            `- **Narration only:** \`imageCaption\` must be words **spoken in that shot's \`voiceover\`** — not a visual caption of the photo (\`Mountain vista\`, \`Coffee close-up\`) unless the narrator literally says those words on this line.\n` +
+            `- When set: max **4 words**, prefer **1–3**. Examples of valid labels: "June 6, 1944", "Marie Curie", "Lagos", "$4.2T", "76%".\n` +
             `- **Short & snappy:** prefer **1–3 words**; never paste a long clause. **Never** reuse the exact same \`imageCaption\` on two shots.\n` +
             `- **Server quality bar:** if the line has no strong name/number/keyword worth burning in, **omit** \`imageCaption\` — the server strips filler-only phrases.\n` +
             `- **Digits:** copy stats **exactly** as spoken on that line (same digits and symbols); do not round, reformat, or substitute a synonym for a place or name.\n` +
@@ -1538,20 +1610,20 @@ function buildDirectorPrompt(args: DirectArgs): string {
             `- **Composition:** Prefer a shot \`description\` where the label has a believable in-world anchor (signage, device screen, ticket, map tag, magazine line, museum placard) — avoid "text floating on empty sky".\n` +
             `- **Inspiration:** When the account's media library includes reference stills that show on-image typography, plan labels so generated stills can **echo that lettering style** (weight, colour, case) while staying on-topic.\n` +
             `- Prefer \`ai_image\` for shots that need a fact label when the story allows (labels are not applied to scraped stock or user clips).\n` +
-            `- Omit \`imageCaption\` on most shots; use sparingly when VO is fact-dense. Omit when the frame already shows the same text, or the shot is not \`ai_image\`.`
+            `- Use sparingly when VO is fact-dense (roughly ≤20% of \`ai_image\` shots). Omit when the frame already shows the same text, or the shot is not \`ai_image\`.`
         : '';
 
   const sparseDirectingRule = args.allowSparseImageText
     ? aiImageFactsOnly
-      ? '- **imageCaption / keywordCards:** AI-in-image labels only — **no \`keywordCards\`**; \`imageCaption\` = **verbatim snippet of that shot\'s \`voiceover\` only** (~≤30% of ai_image), never a visual description of the frame.\n'
-      : `- **imageCaption:** narration words only — never a "scene title" or picture caption unless those words are spoken in **that shot's** VO; omit unless necessary.\n`
-    : '';
+      ? '- **imageCaption / keywordCards:** AI-in-image labels only — **no \`keywordCards\`**; \`imageCaption\` = **verbatim high-signal snippet of that shot\'s \`voiceover\` only** (~≤20% of ai_image), never a visual description of the frame; **default omit**.\n'
+      : `- **imageCaption:** narration words only — never a "scene title" or picture caption unless those words are spoken in **that shot's** VO; **omit by default** unless a date/name/stat must stick.\n`
+    : '- **On-image text:** do **not** plan painted words/numbers on stills unless an \`imageCaption\` is explicitly warranted; prefer clean photography with no typography.\n';
 
   const imageCaptionJsonLine = args.allowSparseImageText
     ? aiImageFactsOnly
       ? '              "imageCaption": "<ai_image only, usually omit: 1–3 high-signal words — name / place / number / stat from THIS shot voiceover only; omit if nothing worth burning in; omit keywordCards>"'
       : '              "imageCaption": "<ai_image only: ≤4 words, ONLY a date/year/name/place/stat explicitly spoken in THIS shot\'s voiceover — never title/hook/example lines; usually omit>"'
-    : '              "imageCaption": "<optional ≤4 words on rare ai_image shots>"';
+    : '              "imageCaption": "<omit on nearly all shots — only rare ≤4-word fact if absolutely needed>"';
 
   const namesNumbersDirectingRule = aiImageFactsOnly
     ? '- **Fact text on screen:** this account uses **AI in-image labels only** — **omit \`keywordCards\`** on every shot; do not plan FFmpeg lower-thirds.\n'
@@ -1575,7 +1647,7 @@ function buildDirectorPrompt(args: DirectArgs): string {
     '". Title, hook, every voiceover line, and every \`imageQuery\` must stay in that lane — never merge beats or B-roll from a different video idea.\n' +
     '- **Consecutive shots must differ:** back-to-back shots may not share the same "hero object + same framing + same room corner" — change at least **two** of: primary subject in frame, scale (e.g. wide → detail), camera move, setting zone, or time/mood beat. Avoid "same scene, tiny tweak" slideshows.\n' +
     '- **Cinematography grid:** for consecutive \`ai_image\` / \`ai_video\` shots, **never** reuse the same \`camera\` + \`framing\` + \`lighting\` triple as the previous shot — change at least one field clearly (prefer two). Alternate wide vs close, static vs moving camera, and warm vs cool light when the story allows so the edit does not look like one repeated still.\n' +
-    '- **On-image text:** if you use \`imageCaption\`, it must be **unique** to that shot (never the same string twice) and tied to **that** line\'s opening or key stat — not filler text that could belong to any frame.\n';
+    '- **On-image text:** default is **no painted type**. If you use \`imageCaption\`, it must be **unique** to that shot (never the same string twice) and a high-signal fact from **that** line (date/name/stat) — not filler text that could belong to any frame.\n';
 
   const narrationQualityRule =
     '- **Narration quality:** Hook and every \`voiceover\` line must **earn** the listen — concrete **nouns, verbs, and facts** (who, where, what changed, how much). Ban vague hype ("insane", "you won\'t believe", "crazy", "wild") unless the style bible demands that register. Avoid filler stacks ("this thing", "that stuff", "something about"). **Vary** how adjacent lines **start**; do not chain many lines that all open with "So…", "And…", or "But…". Prefer active voice; cut throat-clearing ("ok so basically", "here\'s the thing") unless the account voice is explicitly casual that way.\n' +
@@ -1848,7 +1920,10 @@ export function shotToPrompt(args: {
 
   const imageQualityClause =
     !thumbnailCoverMode && shot.kind === 'ai_image'
-      ? 'STILL QUALITY BAR: crisp focus on the hero subject, coherent single light direction, physically plausible anatomy for people, clean edges — **no** watermarks, stock-site UI, random logos, duplicated faces in crowds, mangled hands or extra limbs, or meaningless clutter unrelated to the narration.'
+      ? 'STILL QUALITY BAR: crisp focus on the hero subject, coherent single light direction, physically plausible anatomy for people, clean edges — **no** watermarks, stock-site UI, random logos, duplicated faces in crowds, mangled hands or extra limbs, or meaningless clutter unrelated to the narration.' +
+        (shot.imageCaption?.trim()
+          ? ''
+          : ' Absolutely **no** readable text, letters, numbers, or typography anywhere in the frame.')
       : '';
 
   // 3. MOTION — camera + subject motion.
@@ -1884,6 +1959,9 @@ export function shotToPrompt(args: {
       ? `Lettering must **echo inspiration references** (serif vs sans, weight, case, colour) when those stills show type — avoid a default "tech sans" look unless the refs use it.`
       : `Use one restrained editorial type style consistent with the scene — avoid novelty decorative fonts unless the set is literally signage or a poster.`;
     styleStr += ` One in-scene typographic label only (signage, print, device UI, ticket, or subtle editorial burn-in). **Exact characters are SCRIPT-LOCKED in the opening block** — do not substitute scene-descriptive or "title of the photo" wording. ${typoLock} ${extra ? `${extra} ` : ''}Legible at HD; visually secondary to the subject.`;
+  } else if (shot.kind === 'ai_image' || shot.kind === 'ai_video') {
+    styleStr +=
+      ' NO ON-IMAGE TEXT — Do not paint letters, words, numbers, captions, titles, subtitles, watermarks, logos, or readable signage into the frame. Pure photography / illustration with no typography (far-background blur that is illegible is OK).';
   }
 
   const imageCaptionScriptLock =
@@ -1912,13 +1990,11 @@ export function shotToPrompt(args: {
     if (!voTrim) return '';
     if (shot.imageCaption?.trim()) return '';
     const vo = voTrim.replace(/"/g, "'").slice(0, 520);
-    const on = (shot.onScreen ?? '').trim().replace(/"/g, "'").slice(0, 120);
-    const parts = [
+    return [
       `NARRATION LOCK — The frame must visually support what the viewer hears on this beat: concrete props, setting, people, or a single clear metaphor explained by the script — not unrelated stock mood.`,
       `Spoken line for this shot: "${vo}".`,
-    ];
-    if (on) parts.push(`Optional short on-screen type (only if it fits the scene): "${on}".`);
-    return parts.join(' ');
+      `Do not invent on-screen captions or titles from this narration — depict the scene only.`,
+    ].join(' ');
   })();
 
   const structureClause =

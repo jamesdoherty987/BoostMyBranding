@@ -39,6 +39,7 @@ import {
   keywordStitchCardsFromVoiceAlignment,
   shotDurationsFromVoicePartition,
   shotDurationsFromVoiceAlignment,
+  applyVisualMentionLagToDurations,
   stripLeadingHookFromFirstVoiceover,
   minShotsForVoiceAndAvgClip,
   type VoiceCharacterAlignment,
@@ -605,7 +606,12 @@ export async function directorPipelineFromResolvedStoryboard(
     const negativePrompt = [
       'blurry, out of focus, jpeg artifacts, watermark, Getty/Shutterstock frame marks',
       'mangled hands, extra fingers, duplicated faces in crowds, melted anatomy',
-      'illegible micro-text unless script-locked above',
+      ...(fs.shot.kind === 'ai_image' && !fs.shot.imageCaption?.trim()
+        ? [
+            'text, letters, words, numbers, typography, captions, titles, subtitles',
+            'watermarks, logos, readable signage, UI overlays, posters with readable type',
+          ]
+        : ['illegible micro-text unless script-locked above']),
       ...(styleBible.donts ?? []),
       ...(character?.negativePrompt ? [character.negativePrompt] : []),
       ...(timelineIndex > 0 && (fs.shot.kind === 'ai_image' || fs.shot.kind === 'ai_video')
@@ -1255,6 +1261,11 @@ export async function directorPipelineFromResolvedStoryboard(
       : undefined;
 
   let visualDurations: number[] | null = null;
+  /**
+   * VO-window durations (no post-mention lag). Keyword overlays still key off spoken
+   * spans; visuals may hold the previous still while early words of the next line play.
+   */
+  let voiceWindowDurationsForKeywords: number[] | null = null;
   if (
     useVoiceover &&
     measuredVoiceSeconds != null &&
@@ -1273,16 +1284,36 @@ export async function directorPipelineFromResolvedStoryboard(
       alignmentForStitch &&
       joinedRanges.visualShotRanges.length === resolved.length
     ) {
+      const mentionAnchors = resolved.map((r) => {
+        const cap = r.fs.shot.imageCaption?.trim();
+        if (cap) return cap;
+        return undefined;
+      });
+      const alignedVoWindows = shotDurationsFromVoiceAlignment({
+        alignment: alignmentForStitch,
+        shotCharRanges: joinedRanges.visualShotRanges,
+        voiceSeconds: measuredVoiceSeconds,
+        minPerShot: minPerShotPartition,
+        maxPerShot: maxPerPartition,
+        cutAfterMention: false,
+      });
       const aligned = shotDurationsFromVoiceAlignment({
         alignment: alignmentForStitch,
         shotCharRanges: joinedRanges.visualShotRanges,
         voiceSeconds: measuredVoiceSeconds,
         minPerShot: minPerShotPartition,
         maxPerShot: maxPerPartition,
+        cutAfterMention: true,
+        mentionAnchors,
+        postMentionLagSeconds: 0.15,
       });
       if (aligned && aligned.length === resolved.length) {
         visualDurations = aligned;
-        logVisualPacing('director-mid', 'shot durations from ElevenLabs alignment (wall-clock)', {
+        voiceWindowDurationsForKeywords =
+          alignedVoWindows && alignedVoWindows.length === resolved.length
+            ? alignedVoWindows
+            : aligned;
+        logVisualPacing('director-mid', 'shot durations from ElevenLabs alignment (cut after mention)', {
           postId,
           measuredVoiceSeconds,
           durations: aligned.map((x) => Math.round(x * 100) / 100),
@@ -1368,6 +1399,17 @@ export async function directorPipelineFromResolvedStoryboard(
           nShots: vd.length,
         });
       }
+      voiceWindowDurationsForKeywords = vd.slice();
+      /** Approximate post-mention cuts when character alignment is unavailable. */
+      vd = applyVisualMentionLagToDurations(vd, {
+        lagSeconds: 0.4,
+        minPerShot: minPerShotPartition,
+      });
+      logVisualPacing('director-mid', 'voice partition after mention-lag nudge', {
+        postId,
+        vd: vd.map((x) => Math.round(x * 100) / 100),
+        sum: Math.round(vd.reduce((a, b) => a + b, 0) * 100) / 100,
+      });
       visualDurations = vd;
     }
     }
@@ -1427,9 +1469,9 @@ export async function directorPipelineFromResolvedStoryboard(
           filtered?.length
         ) {
           const span = shotSpanByIndex.get(i);
-          const vd = visualDurations;
-          const mp3Start = vd.slice(0, i).reduce((a, b) => a + b, 0);
-          const mp3End = mp3Start + vd[i]!;
+          const vdKw = voiceWindowDurationsForKeywords ?? visualDurations;
+          const mp3Start = vdKw.slice(0, i).reduce((a, b) => a + b, 0);
+          const mp3End = mp3Start + vdKw[i]!;
           if (span && span.end > span.start) {
             const aligned = keywordStitchCardsFromVoiceAlignment({
               cards: filtered,

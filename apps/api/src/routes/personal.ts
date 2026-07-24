@@ -18,6 +18,7 @@
  *   POST   /api/v1/personal/accounts/:id/posts/:postId/email-delivery
  *   GET    /api/v1/personal/delivery/:token
  *   GET    /api/v1/personal/delivery/:token/video
+ *   GET    /api/v1/personal/delivery/:token/preview
  *   GET    /api/v1/personal/delivery/:token/thumbnail
  *   GET    /api/v1/personal/accounts/:id/posts/:postId/download
  *   GET    /api/v1/personal/accounts/:id/posts/:postId/download-thumbnail
@@ -94,6 +95,7 @@ import { emailPersonalVideoReady } from '../services/personalVideoDeliveryEmail.
 import {
   personalDeliveryPublicBase,
   personalDeliverySavePageHtml,
+  PERSONAL_DELIVERY_PAGE_CSP,
   resolvePersonalDeliveryAsset,
 } from '../services/personalDeliveryLinks.js';
 
@@ -133,16 +135,23 @@ personalRouter.get('/delivery/:token', async (req, res, next) => {
     const base = `${personalDeliveryPublicBase()}/api/v1/personal/delivery/${encodeURIComponent(token)}`;
     const actionRaw = String(req.query.a ?? '').trim().toLowerCase();
     const action =
-      actionRaw === 'copy' || actionRaw === 'video' || actionRaw === 'thumb' ? actionRaw : null;
+      actionRaw === 'copy' ||
+      actionRaw === 'video' ||
+      actionRaw === 'thumb' ||
+      actionRaw === 'preview'
+        ? actionRaw
+        : null;
     res
       .status(200)
       .type('html')
       .setHeader('Cache-Control', 'private, no-store')
+      .setHeader('Content-Security-Policy', PERSONAL_DELIVERY_PAGE_CSP)
       .send(
         personalDeliverySavePageHtml({
           title: asset.title,
           videoDownloadUrl: `${base}/video`,
           thumbnailDownloadUrl: asset.thumbnailUrl ? `${base}/thumbnail` : null,
+          previewUrl: `${base}/preview`,
           videoFilename: asset.videoFilename,
           thumbnailFilename: asset.thumbnailFilename,
           action,
@@ -153,6 +162,43 @@ personalRouter.get('/delivery/:token', async (req, res, next) => {
   }
 });
 
+async function streamDeliveryAsset(
+  res: import('express').Response,
+  args: {
+    upstreamUrl: string;
+    filename: string;
+    fallbackContentType: string;
+    asAttachment: boolean;
+  },
+): Promise<void> {
+  const upstream = await fetch(args.upstreamUrl, { redirect: 'follow' });
+  if (!upstream.ok || !upstream.body) {
+    res.status(502).json({ error: { message: 'Could not fetch media', code: 'UPSTREAM_FAILED' } });
+    return;
+  }
+  const ct = upstream.headers.get('content-type') || args.fallbackContentType;
+  const { safe, utf8Name } = dispositionFilename(args.filename);
+  res.setHeader('Content-Type', ct);
+  res.setHeader(
+    'Content-Disposition',
+    `${args.asAttachment ? 'attachment' : 'inline'}; filename="${safe}"; filename*=UTF-8''${utf8Name}`,
+  );
+  res.setHeader('Cache-Control', 'private, no-store');
+  const nodeReadable = Readable.fromWeb(upstream.body as import('stream/web').ReadableStream);
+  try {
+    await pipeline(nodeReadable, res);
+  } catch (pipeErr) {
+    if (!res.writableEnded) {
+      try {
+        res.destroy();
+      } catch {
+        /* ignore */
+      }
+    }
+    console.warn('[personal.delivery] pipe:', (pipeErr as Error).message);
+  }
+}
+
 personalRouter.get('/delivery/:token/video', async (req, res, next) => {
   try {
     const token = decodeURIComponent(String(req.params.token ?? ''));
@@ -160,31 +206,30 @@ personalRouter.get('/delivery/:token/video', async (req, res, next) => {
     if (!asset) {
       return res.status(404).json({ error: { message: 'Invalid or expired link', code: 'NOT_FOUND' } });
     }
-    const upstream = await fetch(asset.videoUrl, { redirect: 'follow' });
-    if (!upstream.ok || !upstream.body) {
-      return res.status(502).json({ error: { message: 'Could not fetch video', code: 'UPSTREAM_FAILED' } });
+    await streamDeliveryAsset(res, {
+      upstreamUrl: asset.videoUrl,
+      filename: asset.videoFilename,
+      fallbackContentType: 'video/mp4',
+      asAttachment: true,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+personalRouter.get('/delivery/:token/preview', async (req, res, next) => {
+  try {
+    const token = decodeURIComponent(String(req.params.token ?? ''));
+    const asset = await resolvePersonalDeliveryAsset(token);
+    if (!asset) {
+      return res.status(404).json({ error: { message: 'Invalid or expired link', code: 'NOT_FOUND' } });
     }
-    const ct = upstream.headers.get('content-type') || 'video/mp4';
-    const { safe, utf8Name } = dispositionFilename(asset.videoFilename);
-    res.setHeader('Content-Type', ct);
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="${safe}"; filename*=UTF-8''${utf8Name}`,
-    );
-    res.setHeader('Cache-Control', 'private, no-store');
-    const nodeReadable = Readable.fromWeb(upstream.body as import('stream/web').ReadableStream);
-    try {
-      await pipeline(nodeReadable, res);
-    } catch (pipeErr) {
-      if (!res.writableEnded) {
-        try {
-          res.destroy();
-        } catch {
-          /* ignore */
-        }
-      }
-      console.warn('[personal.delivery.video] pipe:', (pipeErr as Error).message);
-    }
+    await streamDeliveryAsset(res, {
+      upstreamUrl: asset.videoUrl,
+      filename: asset.videoFilename,
+      fallbackContentType: 'video/mp4',
+      asAttachment: false,
+    });
   } catch (e) {
     next(e);
   }
@@ -197,33 +242,12 @@ personalRouter.get('/delivery/:token/thumbnail', async (req, res, next) => {
     if (!asset?.thumbnailUrl) {
       return res.status(404).json({ error: { message: 'No thumbnail', code: 'NO_THUMBNAIL' } });
     }
-    const upstream = await fetch(asset.thumbnailUrl, { redirect: 'follow' });
-    if (!upstream.ok || !upstream.body) {
-      return res.status(502).json({
-        error: { message: 'Could not fetch thumbnail', code: 'UPSTREAM_FAILED' },
-      });
-    }
-    const ct = upstream.headers.get('content-type') || 'image/jpeg';
-    const { safe, utf8Name } = dispositionFilename(asset.thumbnailFilename);
-    res.setHeader('Content-Type', ct);
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="${safe}"; filename*=UTF-8''${utf8Name}`,
-    );
-    res.setHeader('Cache-Control', 'private, no-store');
-    const nodeReadable = Readable.fromWeb(upstream.body as import('stream/web').ReadableStream);
-    try {
-      await pipeline(nodeReadable, res);
-    } catch (pipeErr) {
-      if (!res.writableEnded) {
-        try {
-          res.destroy();
-        } catch {
-          /* ignore */
-        }
-      }
-      console.warn('[personal.delivery.thumbnail] pipe:', (pipeErr as Error).message);
-    }
+    await streamDeliveryAsset(res, {
+      upstreamUrl: asset.thumbnailUrl,
+      filename: asset.thumbnailFilename,
+      fallbackContentType: 'image/jpeg',
+      asAttachment: true,
+    });
   } catch (e) {
     next(e);
   }

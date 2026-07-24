@@ -149,12 +149,15 @@ export function personalVideoReadyEmail(args: {
   savePageUrl: string;
   copyTitleUrl: string;
   saveVideoUrl: string;
+  previewUrl: string;
   saveThumbnailUrl?: string | null;
 }) {
   const title = (args.title || args.topic || 'Video').trim() || 'Video';
   const safeTitle = escapeHtml(title);
   const copyUrl = escapeHtml(args.copyTitleUrl);
   const videoSaveUrl = escapeHtml(args.saveVideoUrl);
+  const previewUrl = escapeHtml(args.previewUrl);
+  const pageUrl = escapeHtml(args.savePageUrl);
   const thumbSaveUrl = (args.saveThumbnailUrl ?? '').trim();
   const safeThumb = thumbSaveUrl ? escapeHtml(thumbSaveUrl) : '';
 
@@ -178,19 +181,29 @@ export function personalVideoReadyEmail(args: {
           </a>
         </p>
         <p style="margin:10px 0 0 0;">
+          <a href="${previewUrl}" style="display:block;background:#e2e8f0;color:#0f172a;padding:14px 18px;border-radius:12px;text-decoration:none;font-weight:650;text-align:center;">
+            Preview video
+          </a>
+        </p>
+        <p style="margin:10px 0 0 0;">
           <a href="${videoSaveUrl}" style="display:block;background:linear-gradient(90deg,#48D886,#1D9CA1);color:#ffffff;padding:14px 18px;border-radius:12px;text-decoration:none;font-weight:650;text-align:center;">
             Save video to Photos
           </a>
         </p>
         ${thumbButton}
+        <p style="margin:18px 0 0 0;text-align:center;">
+          <a href="${pageUrl}" style="color:#64748B;font-size:13px;">Open all options</a>
+        </p>
       </div>
     `,
     text: [
       title,
       '',
       `Copy title: ${args.copyTitleUrl}`,
+      `Preview: ${args.previewUrl}`,
       `Save video: ${args.saveVideoUrl}`,
       thumbSaveUrl ? `Save thumbnail: ${thumbSaveUrl}` : '',
+      `All options: ${args.savePageUrl}`,
     ]
       .filter(Boolean)
       .join('\n'),

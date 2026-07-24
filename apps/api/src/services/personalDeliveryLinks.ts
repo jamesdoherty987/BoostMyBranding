@@ -1,6 +1,9 @@
 /**
  * Signed, unauthenticated delivery links for personal videos (email → phone).
  * Anyone with the link can download until expiry — same trust model as a public R2 URL.
+ *
+ * The save page is HTML-first (`<a href>`) so buttons work even when CSP / in-app
+ * browsers block scripts. Optional inline JS only upgrades copy + share.
  */
 
 import crypto from 'node:crypto';
@@ -29,10 +32,11 @@ function signRaw(data: string): string {
 }
 
 export function createPersonalDeliveryToken(accountId: string, postId: string, ttlMs = TOKEN_TTL_MS): string {
+  const ttl = Number.isFinite(ttlMs) && ttlMs > 0 ? ttlMs : TOKEN_TTL_MS;
   const payload: PersonalDeliveryPayload = {
     a: accountId,
     p: postId,
-    e: Date.now() + Math.max(60_000, ttlMs),
+    e: Date.now() + ttl,
   };
   const body = b64url(JSON.stringify(payload));
   const sig = signRaw(body);
@@ -66,15 +70,20 @@ export function personalDeliveryPublicBase(): string {
 
 export function personalDeliveryUrls(accountId: string, postId: string) {
   const token = createPersonalDeliveryToken(accountId, postId);
-  const base = `${personalDeliveryPublicBase()}/api/v1/personal/delivery/${encodeURIComponent(token)}`;
+  const enc = encodeURIComponent(token);
+  const base = `${personalDeliveryPublicBase()}/api/v1/personal/delivery/${enc}`;
   return {
     token,
     pageUrl: base,
     copyUrl: `${base}?a=copy`,
+    /** Opens the hub page with the in-page player (keeps other buttons available). */
+    previewUrl: `${base}?a=preview`,
+    /** Raw MP4 stream for `<video src>` / direct playback. */
+    previewStreamUrl: `${base}/preview`,
     videoUrl: `${base}/video`,
     thumbnailUrl: `${base}/thumbnail`,
-    saveVideoUrl: `${base}?a=video`,
-    saveThumbUrl: `${base}?a=thumb`,
+    saveVideoUrl: `${base}/video`,
+    saveThumbUrl: `${base}/thumbnail`,
   };
 }
 
@@ -138,18 +147,36 @@ export async function resolvePersonalDeliveryAsset(
   };
 }
 
-/** Minimal mobile save page — copy title / save video / save thumbnail in one tap. */
+/** CSP for the delivery HTML page — allows inline script so Copy title can work. */
+export const PERSONAL_DELIVERY_PAGE_CSP = [
+  "default-src 'self'",
+  "base-uri 'self'",
+  "object-src 'none'",
+  "frame-ancestors 'none'",
+  "img-src 'self' data: https: blob:",
+  "media-src 'self' https: blob:",
+  "connect-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "script-src 'self' 'unsafe-inline'",
+].join('; ');
+
+/**
+ * Minimal mobile save page. Primary actions are real links (work without JS).
+ * Optional script upgrades Copy title + share-to-Photos when the browser allows it.
+ */
 export function personalDeliverySavePageHtml(args: {
   title: string;
   videoDownloadUrl: string;
   thumbnailDownloadUrl: string | null;
+  previewUrl: string;
   videoFilename: string;
   thumbnailFilename: string;
-  action: 'copy' | 'video' | 'thumb' | null;
+  action: 'copy' | 'video' | 'thumb' | 'preview' | null;
 }): string {
   const titleJson = JSON.stringify(args.title);
   const videoUrlJson = JSON.stringify(args.videoDownloadUrl);
   const thumbUrlJson = JSON.stringify(args.thumbnailDownloadUrl);
+  const previewUrlJson = JSON.stringify(args.previewUrl);
   const videoNameJson = JSON.stringify(args.videoFilename);
   const thumbNameJson = JSON.stringify(args.thumbnailFilename);
   const actionJson = JSON.stringify(args.action);
@@ -158,6 +185,16 @@ export function personalDeliverySavePageHtml(args: {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+  const safeVideoHref = escapeAttr(args.videoDownloadUrl);
+  const safePreviewHref = escapeAttr(args.previewUrl);
+  const safeThumbHref = args.thumbnailDownloadUrl ? escapeAttr(args.thumbnailDownloadUrl) : '';
+  const safeVideoName = escapeAttr(args.videoFilename);
+  const safeThumbName = escapeAttr(args.thumbnailFilename);
+
+  const thumbLink = safeThumbHref
+    ? `<a class="btn secondary" id="btnThumb" href="${safeThumbHref}" download="${safeThumbName}">Save thumbnail to Photos</a>`
+    : '';
+  const previewOn = args.action === 'preview' ? ' on' : '';
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -178,16 +215,26 @@ export function personalDeliverySavePageHtml(args: {
       width: 100%; max-width: 420px; background: #fff; border: 1px solid #e2e8f0; border-radius: 20px;
       padding: 28px 20px; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
     }
-    h1 { font-size: 22px; line-height: 1.25; margin: 0 0 8px; letter-spacing: -0.02em; }
-    p.hint { margin: 0 0 22px; color: #64748b; font-size: 14px; line-height: 1.4; }
-    .stack { display: flex; flex-direction: column; gap: 10px; }
-    button {
-      appearance: none; border: 0; border-radius: 14px; padding: 16px 18px; font-size: 16px; font-weight: 650;
-      text-align: center; cursor: pointer; display: block; width: 100%;
+    h1 { font-size: 22px; line-height: 1.25; margin: 0 0 8px; letter-spacing: -0.02em; word-break: break-word; }
+    p.hint { margin: 0 0 16px; color: #64748b; font-size: 14px; line-height: 1.4; }
+    .title-box {
+      width: 100%; border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px 14px; font-size: 15px;
+      background: #f8fafc; color: #0f172a; margin: 0 0 16px;
     }
-    .primary { background: linear-gradient(90deg,#48D886,#1D9CA1); color: #fff; }
-    .secondary { background: #0f172a; color: #f8fafc; }
-    .ghost { background: #f1f5f9; color: #0f172a; }
+    .stack { display: flex; flex-direction: column; gap: 10px; }
+    .btn, button.btn {
+      appearance: none; border: 0; border-radius: 14px; padding: 16px 18px; font-size: 16px; font-weight: 650;
+      text-align: center; cursor: pointer; display: block; width: 100%; text-decoration: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .primary { background: linear-gradient(90deg,#48D886,#1D9CA1); color: #fff !important; }
+    .secondary { background: #0f172a; color: #f8fafc !important; }
+    .ghost { background: #f1f5f9; color: #0f172a !important; }
+    .preview-wrap { margin: 0 0 16px; display: none; }
+    .preview-wrap.on { display: block; }
+    video {
+      width: 100%; max-height: 280px; border-radius: 14px; background: #0f172a; display: block;
+    }
     .status {
       margin-top: 14px; min-height: 1.25em; font-size: 14px; color: #0f766e; font-weight: 600; text-align: center;
     }
@@ -196,106 +243,134 @@ export function personalDeliverySavePageHtml(args: {
 </head>
 <body>
   <main>
-    <h1 id="title">${safeTitle}</h1>
-    <p class="hint" id="hint">One tap — copy the title, or save straight to Photos.</p>
+    <h1>${safeTitle}</h1>
+    <p class="hint">Tap a button below. On iPhone, after download use Share → Save Video / Save Image.</p>
+    <input class="title-box" id="titleInput" type="text" readonly value="${safeTitle}" aria-label="Video title" />
+    <div class="preview-wrap${previewOn}" id="previewWrap">
+      <video id="player" controls playsinline preload="metadata" src="${safePreviewHref}"></video>
+    </div>
     <div class="stack" id="stack">
-      <button type="button" class="ghost" id="btnCopy">Copy title</button>
-      <button type="button" class="primary" id="btnVideo">Save video to Photos</button>
-      ${
-        args.thumbnailDownloadUrl
-          ? `<button type="button" class="secondary" id="btnThumb">Save thumbnail to Photos</button>`
-          : ''
-      }
+      <button type="button" class="btn ghost" id="btnCopy">Copy title</button>
+      <a class="btn secondary" id="btnPreview" href="${safePreviewHref}">Preview video</a>
+      <a class="btn primary" id="btnVideo" href="${safeVideoHref}" download="${safeVideoName}">Save video to Photos</a>
+      ${thumbLink}
     </div>
     <p class="status" id="status" aria-live="polite"></p>
   </main>
   <script>
-    const TITLE = ${titleJson};
-    const VIDEO_URL = ${videoUrlJson};
-    const THUMB_URL = ${thumbUrlJson};
-    const VIDEO_NAME = ${videoNameJson};
-    const THUMB_NAME = ${thumbNameJson};
-    const ACTION = ${actionJson};
-    const statusEl = document.getElementById('status');
-    const hintEl = document.getElementById('hint');
-    const stackEl = document.getElementById('stack');
-    function setStatus(msg, isErr) {
-      statusEl.textContent = msg || '';
-      statusEl.className = 'status' + (isErr ? ' err' : '');
-    }
-    async function copyTitle() {
-      try {
-        await navigator.clipboard.writeText(TITLE);
-        setStatus('Title copied');
-        return;
-      } catch (_) {}
-      try {
-        const ta = document.createElement('textarea');
-        ta.value = TITLE;
-        ta.setAttribute('readonly', '');
-        ta.style.position = 'fixed';
-        ta.style.left = '-9999px';
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand('copy');
-        document.body.removeChild(ta);
-        setStatus('Title copied');
-      } catch (e) {
-        setStatus('Could not copy — long-press the title instead', true);
+    (function () {
+      var TITLE = ${titleJson};
+      var VIDEO_URL = ${videoUrlJson};
+      var THUMB_URL = ${thumbUrlJson};
+      var PREVIEW_URL = ${previewUrlJson};
+      var VIDEO_NAME = ${videoNameJson};
+      var THUMB_NAME = ${thumbNameJson};
+      var ACTION = ${actionJson};
+      var statusEl = document.getElementById('status');
+      var previewWrap = document.getElementById('previewWrap');
+      var player = document.getElementById('player');
+      function setStatus(msg, isErr) {
+        if (!statusEl) return;
+        statusEl.textContent = msg || '';
+        statusEl.className = 'status' + (isErr ? ' err' : '');
       }
-    }
-    async function shareOrDownload(url, filename, mime) {
-      setStatus('Preparing…');
-      try {
-        const res = await fetch(url, { credentials: 'omit', cache: 'no-store' });
-        if (!res.ok) throw new Error('Download failed');
-        const blob = await res.blob();
-        const file = new File([blob], filename, { type: mime || blob.type || 'application/octet-stream' });
-        if (navigator.canShare && navigator.canShare({ files: [file] })) {
-          await navigator.share({ files: [file], title: TITLE });
-          setStatus('Choose Save Video / Save Image');
-          return;
+      function copyTitle() {
+        var input = document.getElementById('titleInput');
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(TITLE).then(function () {
+              setStatus('Title copied');
+            }).catch(function () { fallbackCopy(input); });
+            return;
+          }
+        } catch (e) {}
+        fallbackCopy(input);
+      }
+      function fallbackCopy(input) {
+        try {
+          if (input) {
+            input.focus();
+            input.select();
+            input.setSelectionRange(0, input.value.length);
+          }
+          var ok = document.execCommand('copy');
+          setStatus(ok ? 'Title copied' : 'Select the title above and copy', !ok);
+        } catch (e) {
+          setStatus('Select the title above and copy', true);
         }
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        setTimeout(function () { URL.revokeObjectURL(a.href); }, 30000);
-        setStatus('Download started');
-      } catch (e) {
-        window.location.href = url;
       }
-    }
-    document.getElementById('btnCopy').addEventListener('click', function () { void copyTitle(); });
-    document.getElementById('btnVideo').addEventListener('click', function () {
-      void shareOrDownload(VIDEO_URL, VIDEO_NAME, 'video/mp4');
-    });
-    var btnThumb = document.getElementById('btnThumb');
-    if (btnThumb && THUMB_URL) {
-      btnThumb.addEventListener('click', function () {
-        void shareOrDownload(THUMB_URL, THUMB_NAME, 'image/jpeg');
+      function shareOrDownload(url, filename, mime) {
+        setStatus('Preparing…');
+        fetch(url, { credentials: 'omit', cache: 'no-store' })
+          .then(function (res) {
+            if (!res.ok) throw new Error('fail');
+            return res.blob();
+          })
+          .then(function (blob) {
+            var file = new File([blob], filename, { type: mime || blob.type || 'application/octet-stream' });
+            if (navigator.canShare && navigator.canShare({ files: [file] })) {
+              return navigator.share({ files: [file], title: TITLE }).then(function () {
+                setStatus('Choose Save Video / Save Image');
+              });
+            }
+            var a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(function () { URL.revokeObjectURL(a.href); }, 30000);
+            setStatus('Download started');
+          })
+          .catch(function () {
+            window.location.href = url;
+          });
+      }
+      var btnCopy = document.getElementById('btnCopy');
+      if (btnCopy) btnCopy.addEventListener('click', function (e) {
+        e.preventDefault();
+        copyTitle();
       });
-    }
-    /** iOS needs a real tap for share — email deep-links show one big confirm button. */
-    if (ACTION === 'copy') {
-      void copyTitle();
-    } else if (ACTION === 'video' || (ACTION === 'thumb' && THUMB_URL)) {
-      var isVideo = ACTION === 'video';
-      hintEl.textContent = 'Tap once to save to Photos.';
-      stackEl.innerHTML = '';
-      var confirm = document.createElement('button');
-      confirm.type = 'button';
-      confirm.className = isVideo ? 'primary' : 'secondary';
-      confirm.textContent = isVideo ? 'Save video to Photos' : 'Save thumbnail to Photos';
-      confirm.addEventListener('click', function () {
-        if (isVideo) void shareOrDownload(VIDEO_URL, VIDEO_NAME, 'video/mp4');
-        else void shareOrDownload(THUMB_URL, THUMB_NAME, 'image/jpeg');
+      var btnVideo = document.getElementById('btnVideo');
+      if (btnVideo) btnVideo.addEventListener('click', function (e) {
+        if (!(navigator.canShare)) return;
+        e.preventDefault();
+        shareOrDownload(VIDEO_URL, VIDEO_NAME, 'video/mp4');
       });
-      stackEl.appendChild(confirm);
-    }
+      var btnThumb = document.getElementById('btnThumb');
+      if (btnThumb && THUMB_URL) btnThumb.addEventListener('click', function (e) {
+        if (!(navigator.canShare)) return;
+        e.preventDefault();
+        shareOrDownload(THUMB_URL, THUMB_NAME, 'image/jpeg');
+      });
+      var btnPreview = document.getElementById('btnPreview');
+      if (btnPreview) btnPreview.addEventListener('click', function (e) {
+        e.preventDefault();
+        if (previewWrap) previewWrap.classList.add('on');
+        if (player) {
+          try { player.play(); } catch (err) {}
+        }
+        setStatus('Playing preview');
+      });
+      if (ACTION === 'copy') copyTitle();
+      if (ACTION === 'preview') {
+        if (previewWrap) previewWrap.classList.add('on');
+        if (player) { try { player.play(); } catch (err) {} }
+      }
+      if (ACTION === 'video') {
+        setStatus('Tap Save video again if the download did not start');
+      }
+    })();
   </script>
 </body>
 </html>`;
+}
+
+function escapeAttr(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }

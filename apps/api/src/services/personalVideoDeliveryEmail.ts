@@ -175,6 +175,7 @@ export async function emailPersonalVideoReady(args: {
     savePageUrl: links.pageUrl,
     copyTitleUrl: links.copyUrl,
     saveVideoUrl: links.saveVideoUrl,
+    previewUrl: links.previewUrl,
     saveThumbnailUrl: hasThumb ? links.saveThumbUrl : null,
   });
 

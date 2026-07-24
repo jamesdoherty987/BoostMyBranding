@@ -2,8 +2,8 @@
  * Signed, unauthenticated delivery links for personal videos (email → phone).
  * Anyone with the link can download until expiry — same trust model as a public R2 URL.
  *
- * The save page is HTML-first (`<a href>`) so buttons work even when CSP / in-app
- * browsers block scripts. Optional inline JS only upgrades copy + share.
+ * Hub page: real `<a href>` fallbacks + JS that detects iPhone (Share → Photos)
+ * vs desktop/laptop (file download). Preview plays inline via `/preview` + Range.
  */
 
 import crypto from 'node:crypto';
@@ -82,8 +82,9 @@ export function personalDeliveryUrls(accountId: string, postId: string) {
     previewStreamUrl: `${base}/preview`,
     videoUrl: `${base}/video`,
     thumbnailUrl: `${base}/thumbnail`,
-    saveVideoUrl: `${base}/video`,
-    saveThumbUrl: `${base}/thumbnail`,
+    /** Hub page so iPhone can Share → Photos; desktop auto-downloads from there. */
+    saveVideoUrl: `${base}?a=video`,
+    saveThumbUrl: `${base}?a=thumb`,
   };
 }
 
@@ -161,8 +162,7 @@ export const PERSONAL_DELIVERY_PAGE_CSP = [
 ].join('; ');
 
 /**
- * Minimal mobile save page. Primary actions are real links (work without JS).
- * Optional script upgrades Copy title + share-to-Photos when the browser allows it.
+ * Delivery hub: preview in-page; iPhone Share → Photos; desktop downloads the file.
  */
 export function personalDeliverySavePageHtml(args: {
   title: string;
@@ -222,10 +222,10 @@ export function personalDeliverySavePageHtml(args: {
       background: #f8fafc; color: #0f172a; margin: 0 0 16px;
     }
     .stack { display: flex; flex-direction: column; gap: 10px; }
-    .btn, button.btn {
+    .btn, button.btn, a.btn {
       appearance: none; border: 0; border-radius: 14px; padding: 16px 18px; font-size: 16px; font-weight: 650;
       text-align: center; cursor: pointer; display: block; width: 100%; text-decoration: none;
-      -webkit-tap-highlight-color: transparent;
+      -webkit-tap-highlight-color: transparent; font-family: inherit;
     }
     .primary { background: linear-gradient(90deg,#48D886,#1D9CA1); color: #fff !important; }
     .secondary { background: #0f172a; color: #f8fafc !important; }
@@ -233,21 +233,22 @@ export function personalDeliverySavePageHtml(args: {
     .preview-wrap { margin: 0 0 16px; display: none; }
     .preview-wrap.on { display: block; }
     video {
-      width: 100%; max-height: 280px; border-radius: 14px; background: #0f172a; display: block;
+      width: 100%; max-height: min(56vh, 360px); border-radius: 14px; background: #0f172a; display: block;
     }
     .status {
       margin-top: 14px; min-height: 1.25em; font-size: 14px; color: #0f766e; font-weight: 600; text-align: center;
     }
     .status.err { color: #b91c1c; }
+    .pulse { box-shadow: 0 0 0 3px rgba(29,156,161,0.35); }
   </style>
 </head>
 <body>
   <main>
     <h1>${safeTitle}</h1>
-    <p class="hint">Tap a button below. On iPhone, after download use Share → Save Video / Save Image.</p>
+    <p class="hint" id="hint">Tap a button below.</p>
     <input class="title-box" id="titleInput" type="text" readonly value="${safeTitle}" aria-label="Video title" />
     <div class="preview-wrap${previewOn}" id="previewWrap">
-      <video id="player" controls playsinline preload="metadata" src="${safePreviewHref}"></video>
+      <video id="player" controls playsinline webkit-playsinline preload="auto" src="${safePreviewHref}"></video>
     </div>
     <div class="stack" id="stack">
       <button type="button" class="btn ghost" id="btnCopy">Copy title</button>
@@ -267,13 +268,42 @@ export function personalDeliverySavePageHtml(args: {
       var THUMB_NAME = ${thumbNameJson};
       var ACTION = ${actionJson};
       var statusEl = document.getElementById('status');
+      var hintEl = document.getElementById('hint');
       var previewWrap = document.getElementById('previewWrap');
       var player = document.getElementById('player');
+      var btnVideo = document.getElementById('btnVideo');
+      var btnThumb = document.getElementById('btnThumb');
+      var btnPreview = document.getElementById('btnPreview');
+      var btnCopy = document.getElementById('btnCopy');
+
+      function isIos() {
+        var ua = navigator.userAgent || '';
+        if (/iPhone|iPad|iPod/i.test(ua)) return true;
+        // iPadOS 13+ reports as Mac with touch
+        if (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) return true;
+        return false;
+      }
+      var IOS = isIos();
+
       function setStatus(msg, isErr) {
         if (!statusEl) return;
         statusEl.textContent = msg || '';
         statusEl.className = 'status' + (isErr ? ' err' : '');
       }
+      function setHint(msg) {
+        if (hintEl) hintEl.textContent = msg;
+      }
+
+      if (IOS) {
+        setHint('On iPhone: Save opens Share — tap Save Video / Save Image. Prefer Safari if Share is missing.');
+        if (btnVideo) btnVideo.textContent = 'Save video to Photos';
+        if (btnThumb) btnThumb.textContent = 'Save thumbnail to Photos';
+      } else {
+        setHint('On computer: Preview plays here. Save downloads the file.');
+        if (btnVideo) btnVideo.textContent = 'Download video';
+        if (btnThumb) btnThumb.textContent = 'Download thumbnail';
+      }
+
       function copyTitle() {
         var input = document.getElementById('titleInput');
         try {
@@ -299,66 +329,126 @@ export function personalDeliverySavePageHtml(args: {
           setStatus('Select the title above and copy', true);
         }
       }
-      function shareOrDownload(url, filename, mime) {
-        setStatus('Preparing…');
-        fetch(url, { credentials: 'omit', cache: 'no-store' })
+
+      function downloadBlob(blob, filename) {
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(function () { URL.revokeObjectURL(a.href); }, 30000);
+        setStatus('Download started');
+      }
+
+      function iosShareFallback(kind) {
+        if (kind === 'video') {
+          showPreview();
+          setStatus('Share unavailable here. Tap play, then use the share icon → Save Video. Or open this page in Safari.', true);
+          return;
+        }
+        if (THUMB_URL) {
+          window.location.href = THUMB_URL;
+          return;
+        }
+        setStatus('Open this page in Safari, then try again.', true);
+      }
+
+      function saveMedia(url, filename, mime, kind) {
+        // iPhone: fetch file + Web Share → Photos. Desktop: download the file.
+        // Use /preview for video on iOS so the response is inline playable if share fails.
+        var fetchUrl = (IOS && kind === 'video' && PREVIEW_URL) ? PREVIEW_URL : url;
+        setStatus(IOS ? 'Preparing for Photos…' : 'Preparing download…');
+        fetch(fetchUrl, { credentials: 'omit', cache: 'no-store' })
           .then(function (res) {
             if (!res.ok) throw new Error('fail');
             return res.blob();
           })
           .then(function (blob) {
-            var file = new File([blob], filename, { type: mime || blob.type || 'application/octet-stream' });
-            if (navigator.canShare && navigator.canShare({ files: [file] })) {
+            var type = mime || blob.type || 'application/octet-stream';
+            var file = new File([blob], filename, { type: type });
+            if (IOS && navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
               return navigator.share({ files: [file], title: TITLE }).then(function () {
-                setStatus('Choose Save Video / Save Image');
+                setStatus(kind === 'video' ? 'In Share, tap Save Video' : 'In Share, tap Save Image');
+              }).catch(function (err) {
+                if (err && err.name === 'AbortError') {
+                  setStatus('Cancelled');
+                  return;
+                }
+                iosShareFallback(kind);
               });
             }
-            var a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-            setTimeout(function () { URL.revokeObjectURL(a.href); }, 30000);
-            setStatus('Download started');
+            if (IOS) {
+              iosShareFallback(kind);
+              return;
+            }
+            downloadBlob(blob, filename);
           })
           .catch(function () {
+            if (IOS) {
+              iosShareFallback(kind);
+              return;
+            }
             window.location.href = url;
           });
       }
-      var btnCopy = document.getElementById('btnCopy');
+
+      function showPreview() {
+        if (previewWrap) previewWrap.classList.add('on');
+        if (!player) {
+          setStatus('Preview unavailable', true);
+          return;
+        }
+        if (!player.getAttribute('src') && PREVIEW_URL) {
+          player.setAttribute('src', PREVIEW_URL);
+        }
+        try { player.load(); } catch (e) {}
+        var playPromise = player.play();
+        if (playPromise && typeof playPromise.then === 'function') {
+          playPromise.then(function () {
+            setStatus('Playing preview');
+          }).catch(function () {
+            setStatus('Tap play on the video');
+          });
+        } else {
+          setStatus('Tap play on the video');
+        }
+      }
+
       if (btnCopy) btnCopy.addEventListener('click', function (e) {
         e.preventDefault();
         copyTitle();
       });
-      var btnVideo = document.getElementById('btnVideo');
-      if (btnVideo) btnVideo.addEventListener('click', function (e) {
-        if (!(navigator.canShare)) return;
-        e.preventDefault();
-        shareOrDownload(VIDEO_URL, VIDEO_NAME, 'video/mp4');
-      });
-      var btnThumb = document.getElementById('btnThumb');
-      if (btnThumb && THUMB_URL) btnThumb.addEventListener('click', function (e) {
-        if (!(navigator.canShare)) return;
-        e.preventDefault();
-        shareOrDownload(THUMB_URL, THUMB_NAME, 'image/jpeg');
-      });
-      var btnPreview = document.getElementById('btnPreview');
       if (btnPreview) btnPreview.addEventListener('click', function (e) {
         e.preventDefault();
-        if (previewWrap) previewWrap.classList.add('on');
-        if (player) {
-          try { player.play(); } catch (err) {}
-        }
-        setStatus('Playing preview');
+        showPreview();
       });
+      if (btnVideo) btnVideo.addEventListener('click', function (e) {
+        e.preventDefault();
+        saveMedia(VIDEO_URL, VIDEO_NAME, 'video/mp4', 'video');
+      });
+      if (btnThumb && THUMB_URL) btnThumb.addEventListener('click', function (e) {
+        e.preventDefault();
+        saveMedia(THUMB_URL, THUMB_NAME, 'image/jpeg', 'image');
+      });
+
       if (ACTION === 'copy') copyTitle();
-      if (ACTION === 'preview') {
-        if (previewWrap) previewWrap.classList.add('on');
-        if (player) { try { player.play(); } catch (err) {} }
-      }
+      if (ACTION === 'preview') showPreview();
       if (ACTION === 'video') {
-        setStatus('Tap Save video again if the download did not start');
+        if (IOS) {
+          if (btnVideo) btnVideo.classList.add('pulse');
+          setStatus('Tap Save video to Photos');
+        } else {
+          saveMedia(VIDEO_URL, VIDEO_NAME, 'video/mp4', 'video');
+        }
+      }
+      if (ACTION === 'thumb' && THUMB_URL) {
+        if (IOS) {
+          if (btnThumb) btnThumb.classList.add('pulse');
+          setStatus('Tap Save thumbnail to Photos');
+        } else {
+          saveMedia(THUMB_URL, THUMB_NAME, 'image/jpeg', 'image');
+        }
       }
     })();
   </script>

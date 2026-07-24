@@ -164,7 +164,7 @@ export function personalVideoReadyEmail(args: {
   const thumbButton = safeThumb
     ? `<p style="margin:10px 0 0 0;">
           <a href="${safeThumb}" style="display:block;background:#0f172a;color:#f8fafc;padding:14px 18px;border-radius:12px;text-decoration:none;font-weight:650;text-align:center;">
-            Save thumbnail to Photos
+            Save thumbnail
           </a>
         </p>`
     : '';
@@ -187,7 +187,7 @@ export function personalVideoReadyEmail(args: {
         </p>
         <p style="margin:10px 0 0 0;">
           <a href="${videoSaveUrl}" style="display:block;background:linear-gradient(90deg,#48D886,#1D9CA1);color:#ffffff;padding:14px 18px;border-radius:12px;text-decoration:none;font-weight:650;text-align:center;">
-            Save video to Photos
+            Save video
           </a>
         </p>
         ${thumbButton}

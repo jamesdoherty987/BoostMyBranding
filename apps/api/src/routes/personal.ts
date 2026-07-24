@@ -163,6 +163,7 @@ personalRouter.get('/delivery/:token', async (req, res, next) => {
 });
 
 async function streamDeliveryAsset(
+  req: import('express').Request,
   res: import('express').Response,
   args: {
     upstreamUrl: string;
@@ -171,19 +172,41 @@ async function streamDeliveryAsset(
     asAttachment: boolean;
   },
 ): Promise<void> {
-  const upstream = await fetch(args.upstreamUrl, { redirect: 'follow' });
-  if (!upstream.ok || !upstream.body) {
+  const rangeHeader = typeof req.headers.range === 'string' ? req.headers.range : undefined;
+  const wantRange = Boolean(rangeHeader && !args.asAttachment);
+
+  async function openUpstream(withRange: boolean) {
+    const upstreamHeaders: Record<string, string> = {};
+    if (withRange && rangeHeader) upstreamHeaders.Range = rangeHeader;
+    return fetch(args.upstreamUrl, {
+      redirect: 'follow',
+      headers: upstreamHeaders,
+    });
+  }
+
+  // Forward Range so HTML5 <video> can seek / start playback (esp. iOS Safari).
+  let upstream = await openUpstream(wantRange);
+  if (wantRange && (upstream.status === 416 || (!upstream.ok && upstream.status !== 206))) {
+    upstream = await openUpstream(false);
+  }
+  if ((!upstream.ok && upstream.status !== 206) || !upstream.body) {
     res.status(502).json({ error: { message: 'Could not fetch media', code: 'UPSTREAM_FAILED' } });
     return;
   }
   const ct = upstream.headers.get('content-type') || args.fallbackContentType;
   const { safe, utf8Name } = dispositionFilename(args.filename);
+  res.status(upstream.status === 206 ? 206 : 200);
   res.setHeader('Content-Type', ct);
   res.setHeader(
     'Content-Disposition',
     `${args.asAttachment ? 'attachment' : 'inline'}; filename="${safe}"; filename*=UTF-8''${utf8Name}`,
   );
   res.setHeader('Cache-Control', 'private, no-store');
+  res.setHeader('Accept-Ranges', 'bytes');
+  const contentLength = upstream.headers.get('content-length');
+  if (contentLength) res.setHeader('Content-Length', contentLength);
+  const contentRange = upstream.headers.get('content-range');
+  if (contentRange) res.setHeader('Content-Range', contentRange);
   const nodeReadable = Readable.fromWeb(upstream.body as import('stream/web').ReadableStream);
   try {
     await pipeline(nodeReadable, res);
@@ -206,7 +229,7 @@ personalRouter.get('/delivery/:token/video', async (req, res, next) => {
     if (!asset) {
       return res.status(404).json({ error: { message: 'Invalid or expired link', code: 'NOT_FOUND' } });
     }
-    await streamDeliveryAsset(res, {
+    await streamDeliveryAsset(req, res, {
       upstreamUrl: asset.videoUrl,
       filename: asset.videoFilename,
       fallbackContentType: 'video/mp4',
@@ -224,7 +247,7 @@ personalRouter.get('/delivery/:token/preview', async (req, res, next) => {
     if (!asset) {
       return res.status(404).json({ error: { message: 'Invalid or expired link', code: 'NOT_FOUND' } });
     }
-    await streamDeliveryAsset(res, {
+    await streamDeliveryAsset(req, res, {
       upstreamUrl: asset.videoUrl,
       filename: asset.videoFilename,
       fallbackContentType: 'video/mp4',
@@ -242,7 +265,7 @@ personalRouter.get('/delivery/:token/thumbnail', async (req, res, next) => {
     if (!asset?.thumbnailUrl) {
       return res.status(404).json({ error: { message: 'No thumbnail', code: 'NO_THUMBNAIL' } });
     }
-    await streamDeliveryAsset(res, {
+    await streamDeliveryAsset(req, res, {
       upstreamUrl: asset.thumbnailUrl,
       filename: asset.thumbnailFilename,
       fallbackContentType: 'image/jpeg',

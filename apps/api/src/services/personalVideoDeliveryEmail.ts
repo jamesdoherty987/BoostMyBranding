@@ -1,16 +1,13 @@
 /**
  * Optional Resend notification when a personal channel finishes a new render.
- * Sends a **link** to the hosted MP4 (no attachment — size / deliverability), with
- * download / open-in-browser CTAs, camera-roll save steps for phones, and a dashboard link.
- *
- * Reads `emailVideoOnReady` / `videoDeliveryEmail` / `accountName` from the DB
- * at send time so a long render still honors settings saved after the job started.
+ * Sends a **short** email with title + one-tap save links (copy / video / thumbnail).
  */
 
-import { eq } from 'drizzle-orm';
-import { getDb, personalAccounts } from '@boost/database';
-import { env, features } from '../env.js';
+import { and, eq } from 'drizzle-orm';
+import { getDb, personalAccounts, personalPosts } from '@boost/database';
+import { features } from '../env.js';
 import { sendEmail, personalVideoReadyEmail } from './resend.js';
+import { personalDeliveryUrls } from './personalDeliveryLinks.js';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -43,24 +40,28 @@ async function loadDeliveryAccount(accountId: string) {
   return row ?? null;
 }
 
-async function sendPersonalVideoReadyMail(args: {
-  accountName: string;
-  to: string;
-  postId: string;
-  videoUrl: string;
-  topic: string;
-  captionPreview: string;
-}): Promise<{ id: string }> {
-  const openInAppUrl = `${env.DASHBOARD_URL.replace(/\/+$/, '')}/personal`;
-  const tpl = personalVideoReadyEmail({
-    accountName: args.accountName,
-    topic: args.topic || 'Personal post',
-    captionPreview: args.captionPreview || '',
-    videoUrl: args.videoUrl,
-    postId: args.postId,
-    openInAppUrl,
-  });
-  return sendEmail({ to: args.to, subject: tpl.subject, html: tpl.html, text: tpl.text });
+function titleFromScript(script: unknown, topic: string): string {
+  if (script && typeof script === 'object' && typeof (script as { title?: unknown }).title === 'string') {
+    const t = String((script as { title: string }).title).trim();
+    if (t) return t;
+  }
+  return (topic || '').trim() || 'Video';
+}
+
+async function loadPostForDelivery(accountId: string, postId: string) {
+  const db = getDb();
+  const [row] = await db
+    .select({
+      id: personalPosts.id,
+      topic: personalPosts.topic,
+      script: personalPosts.script,
+      videoUrl: personalPosts.videoUrl,
+      thumbnailUrl: personalPosts.thumbnailUrl,
+    })
+    .from(personalPosts)
+    .where(and(eq(personalPosts.id, postId), eq(personalPosts.accountId, accountId)))
+    .limit(1);
+  return row ?? null;
 }
 
 /**
@@ -159,15 +160,26 @@ export async function emailPersonalVideoReady(args: {
     };
   }
 
+  const post = await loadPostForDelivery(args.accountId, args.postId);
+  const title = post
+    ? titleFromScript(post.script, post.topic || args.topic)
+    : (args.topic || '').trim() || 'Video';
+  const hasThumb = Boolean((post?.thumbnailUrl ?? '').trim());
+  const links = personalDeliveryUrls(args.accountId, args.postId);
+
+  const tpl = personalVideoReadyEmail({
+    accountName: row.accountName,
+    title,
+    topic: args.topic,
+    postId: args.postId,
+    savePageUrl: links.pageUrl,
+    copyTitleUrl: links.copyUrl,
+    saveVideoUrl: links.saveVideoUrl,
+    saveThumbnailUrl: hasThumb ? links.saveThumbUrl : null,
+  });
+
   try {
-    const result = await sendPersonalVideoReadyMail({
-      accountName: row.accountName,
-      to,
-      postId: args.postId,
-      videoUrl: url,
-      topic: args.topic,
-      captionPreview: args.captionPreview,
-    });
+    const result = await sendEmail({ to, subject: tpl.subject, html: tpl.html, text: tpl.text });
     const toRedacted = to.includes('@') ? `${to.slice(0, 2)}…@${to.split('@')[1]}` : '(set)';
     console.info('[personalVideoDeliveryEmail] sent', {
       postId: args.postId,

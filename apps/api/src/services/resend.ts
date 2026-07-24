@@ -137,96 +137,60 @@ export function clientInviteEmail(args: {
   };
 }
 
-/** Safe ASCII filename for email `download` hints (browsers may ignore cross-origin). */
-function safeVideoDownloadFilename(topic: string): string {
-  const t = topic
-    .replace(/[\\/:*?"<>|]+/g, '')
-    .replace(/\s+/g, '_')
-    .trim()
-    .slice(0, 72);
-  const base = t || 'video';
-  return base.toLowerCase().endsWith('.mp4') ? base : `${base}.mp4`;
-}
-
 /** Link-based delivery — large MP4s are not attached (Resend size limits). */
 export function personalVideoReadyEmail(args: {
   accountName: string;
-  topic: string;
-  captionPreview: string;
-  videoUrl: string;
+  /** Video title shown in the email (preferred over topic). */
+  title: string;
+  topic?: string;
+  captionPreview?: string;
   postId: string;
-  /** Logged-in users get a proper `Content-Disposition: attachment` download from the API. */
-  openInAppUrl?: string;
+  /** One-tap save page (copy title / save video / save thumbnail). */
+  savePageUrl: string;
+  copyTitleUrl: string;
+  saveVideoUrl: string;
+  saveThumbnailUrl?: string | null;
 }) {
-  const safeName = escapeHtml(args.accountName);
-  const safeTopic = escapeHtml(args.topic);
-  const safeCaption =
-    args.captionPreview.length > 400
-      ? `${escapeHtml(args.captionPreview.slice(0, 400))}…`
-      : escapeHtml(args.captionPreview);
-  const safeUrl = escapeHtml(args.videoUrl);
-  const safePost = escapeHtml(args.postId);
-  const downloadName = escapeHtml(safeVideoDownloadFilename(args.topic));
-  const appUrl = (args.openInAppUrl ?? '').trim();
-  const safeApp = appUrl ? escapeHtml(appUrl) : '';
-  const appButton =
-    safeApp.length > 0
-      ? `<p style="margin:12px 0 0 0;">
-          <a href="${safeApp}" style="display:inline-block;background:#0f172a;color:#f8fafc;padding:12px 22px;border-radius:12px;text-decoration:none;font-weight:600;border:1px solid #334155;">
-            Open in BoostMyBranding
+  const title = (args.title || args.topic || 'Video').trim() || 'Video';
+  const safeTitle = escapeHtml(title);
+  const copyUrl = escapeHtml(args.copyTitleUrl);
+  const videoSaveUrl = escapeHtml(args.saveVideoUrl);
+  const thumbSaveUrl = (args.saveThumbnailUrl ?? '').trim();
+  const safeThumb = thumbSaveUrl ? escapeHtml(thumbSaveUrl) : '';
+
+  const thumbButton = safeThumb
+    ? `<p style="margin:10px 0 0 0;">
+          <a href="${safeThumb}" style="display:block;background:#0f172a;color:#f8fafc;padding:14px 18px;border-radius:12px;text-decoration:none;font-weight:650;text-align:center;">
+            Save thumbnail to Photos
           </a>
-        </p>
-        <p style="color:#64748B;font-size:12px;line-height:1.5;margin:8px 0 0 0;">Sign in, open your Personal channel, then use <strong>Download</strong> on the post for a file save with the correct filename.</p>`
-      : '';
+        </p>`
+    : '';
 
   return {
-    subject: `Video ready — ${args.accountName}`,
+    subject: title,
     html: `
-      <div style="font-family:Inter,sans-serif;max-width:560px;margin:0 auto;padding:24px;">
-        <h1 style="font-size:20px;">Your video is ready</h1>
-        <p style="color:#334155;"><strong>${safeName}</strong> — topic: <strong>${safeTopic}</strong></p>
-        <p style="margin:20px 0 8px 0;display:flex;flex-wrap:wrap;gap:10px;align-items:center;">
-          <a href="${safeUrl}" download="${downloadName}" style="display:inline-block;background:linear-gradient(90deg,#48D886,#1D9CA1);color:white;padding:12px 22px;border-radius:12px;text-decoration:none;font-weight:600;">
-            Download video
-          </a>
-          <a href="${safeUrl}" style="display:inline-block;color:#0f766e;padding:12px 16px;border-radius:12px;text-decoration:underline;font-weight:600;font-size:14px;">
-            Open video in browser
+      <div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;max-width:420px;margin:0 auto;padding:28px 20px;">
+        <p style="margin:0 0 6px 0;color:#64748B;font-size:12px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;">Video ready</p>
+        <h1 style="font-size:22px;line-height:1.25;margin:0 0 22px 0;color:#0f172a;letter-spacing:-0.02em;">${safeTitle}</h1>
+        <p style="margin:0;">
+          <a href="${copyUrl}" style="display:block;background:#f1f5f9;color:#0f172a;padding:14px 18px;border-radius:12px;text-decoration:none;font-weight:650;text-align:center;">
+            Copy title
           </a>
         </p>
-        ${appButton}
-        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:16px;margin:22px 0;">
-          <p style="margin:0 0 10px 0;font-weight:600;color:#0f172a;font-size:14px;">Save to camera roll (phone)</p>
-          <p style="margin:0;color:#475569;font-size:13px;line-height:1.55;">
-            <strong>iPhone / iPad:</strong> Tap <strong>Open video in browser</strong> (or <strong>Download video</strong>) so it opens in <strong>Safari</strong> if you can — then tap the <strong>Share</strong> icon → <strong>Save Video</strong> to add it to Photos (camera roll). If the link opened inside your mail app, use the “⋯” / share menu and choose <strong>Open in Safari</strong> first.<br/><br/>
-            <strong>Android:</strong> Tap <strong>Download video</strong>, then open the file from notifications or Downloads and use <strong>Share</strong> or <strong>Save to Gallery</strong> (wording varies by device).
-          </p>
-        </div>
-        <p style="color:#64748B;font-size:13px;line-height:1.5;">Direct link (copy if a button does not work):<br/><a href="${safeUrl}" style="color:#0d9488;word-break:break-all;">${safeUrl}</a></p>
-        <p style="color:#64748B;font-size:13px;line-height:1.5;">Post id: <code>${safePost}</code></p>
-        <hr style="border:none;border-top:1px solid #e2e8f0;margin:20px 0;" />
-        <p style="color:#475569;font-size:13px;line-height:1.5;"><strong>Caption preview</strong><br/>${safeCaption || '<em>(none)</em>'}</p>
+        <p style="margin:10px 0 0 0;">
+          <a href="${videoSaveUrl}" style="display:block;background:linear-gradient(90deg,#48D886,#1D9CA1);color:#ffffff;padding:14px 18px;border-radius:12px;text-decoration:none;font-weight:650;text-align:center;">
+            Save video to Photos
+          </a>
+        </p>
+        ${thumbButton}
       </div>
     `,
     text: [
-      `Video ready for ${args.accountName} — ${args.topic}`,
+      title,
       '',
-      'DOWNLOAD (tap and hold on phone to save, or open in a browser):',
-      args.videoUrl,
-      '',
-      safeApp
-        ? [
-            'OPEN IN APP (sign in → Personal channel → Download on the post for best filename):',
-            appUrl,
-            '',
-          ].join('\n')
-        : '',
-      'SAVE TO CAMERA ROLL:',
-      '- iPhone/iPad: Open the link in Safari → Share → Save Video.',
-      '- Android: Download the file, then Share / Save to Gallery from Downloads.',
-      '',
-      `Post id: ${args.postId}`,
-      '',
-      args.captionPreview ? `Caption preview:\n${args.captionPreview.slice(0, 600)}` : '',
+      `Copy title: ${args.copyTitleUrl}`,
+      `Save video: ${args.saveVideoUrl}`,
+      thumbSaveUrl ? `Save thumbnail: ${thumbSaveUrl}` : '',
     ]
       .filter(Boolean)
       .join('\n'),

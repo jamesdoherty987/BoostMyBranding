@@ -1180,7 +1180,7 @@ function PublishingCard({
             </div>
             <p className="mt-2 text-[11px] leading-snug text-slate-600">
               Use <strong>Save posting settings</strong> below. Finished videos also have an <strong>Email</strong>{' '}
-              button that sends a download / Save to Photos link to this address (even if auto-email is off). If the
+              button that sends a short link email (copy title / save video / save thumbnail to Photos). If the
               address is empty or invalid, the server skips sending.
             </p>
             <div className="mt-3">
@@ -2716,7 +2716,7 @@ function PostCard({
                         const res = await api.emailPersonalPostDelivery(accountId, post.id);
                         toast.success(
                           'Email sent',
-                          `Check ${res.to} (and spam) for Download video and iPhone Save to Photos steps.`,
+                          `Check ${res.to} (and spam) — tap Save video / Save thumbnail to add to Photos.`,
                         );
                       } catch (err) {
                         toast.error('Email failed', (err as Error).message);

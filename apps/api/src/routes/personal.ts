@@ -16,6 +16,9 @@
  *   POST   /api/v1/personal/accounts/:id/posts/:postId/cancel
  *   POST   /api/v1/personal/accounts/:id/posts/:postId/regenerate-thumbnail
  *   POST   /api/v1/personal/accounts/:id/posts/:postId/email-delivery
+ *   GET    /api/v1/personal/delivery/:token
+ *   GET    /api/v1/personal/delivery/:token/video
+ *   GET    /api/v1/personal/delivery/:token/thumbnail
  *   GET    /api/v1/personal/accounts/:id/posts/:postId/download
  *   GET    /api/v1/personal/accounts/:id/posts/:postId/download-thumbnail
  *   GET    /api/v1/personal/accounts/:id/posts
@@ -88,6 +91,11 @@ import { uploadLimiter } from '../middleware/rateLimit.js';
 import { features } from '../env.js';
 import { normalizeUploadImageIfAvif } from '../lib/normalizeUploadImage.js';
 import { emailPersonalVideoReady } from '../services/personalVideoDeliveryEmail.js';
+import {
+  personalDeliveryPublicBase,
+  personalDeliverySavePageHtml,
+  resolvePersonalDeliveryAsset,
+} from '../services/personalDeliveryLinks.js';
 
 export const personalRouter = Router();
 
@@ -102,6 +110,124 @@ const PLATFORMS = [
   'youtube',
   'google_business',
 ] as const;
+
+/* ─── Public email delivery links (signed token, no session) ─────── */
+
+function dispositionFilename(filename: string): { safe: string; utf8Name: string } {
+  const safe =
+    filename.replace(/[\r\n"]/g, '').replace(/[^\x20-\x7E]+/g, '_').slice(0, 180) || 'download';
+  const utf8Name = encodeURIComponent(filename.replace(/[\r\n"]/g, '')).slice(0, 240);
+  return { safe, utf8Name };
+}
+
+personalRouter.get('/delivery/:token', async (req, res, next) => {
+  try {
+    const token = decodeURIComponent(String(req.params.token ?? ''));
+    const asset = await resolvePersonalDeliveryAsset(token);
+    if (!asset) {
+      res.status(404).type('html').send(
+        `<!DOCTYPE html><html><body style="font-family:sans-serif;padding:24px"><p>This link is invalid or expired.</p></body></html>`,
+      );
+      return;
+    }
+    const base = `${personalDeliveryPublicBase()}/api/v1/personal/delivery/${encodeURIComponent(token)}`;
+    const actionRaw = String(req.query.a ?? '').trim().toLowerCase();
+    const action =
+      actionRaw === 'copy' || actionRaw === 'video' || actionRaw === 'thumb' ? actionRaw : null;
+    res
+      .status(200)
+      .type('html')
+      .setHeader('Cache-Control', 'private, no-store')
+      .send(
+        personalDeliverySavePageHtml({
+          title: asset.title,
+          videoDownloadUrl: `${base}/video`,
+          thumbnailDownloadUrl: asset.thumbnailUrl ? `${base}/thumbnail` : null,
+          videoFilename: asset.videoFilename,
+          thumbnailFilename: asset.thumbnailFilename,
+          action,
+        }),
+      );
+  } catch (e) {
+    next(e);
+  }
+});
+
+personalRouter.get('/delivery/:token/video', async (req, res, next) => {
+  try {
+    const token = decodeURIComponent(String(req.params.token ?? ''));
+    const asset = await resolvePersonalDeliveryAsset(token);
+    if (!asset) {
+      return res.status(404).json({ error: { message: 'Invalid or expired link', code: 'NOT_FOUND' } });
+    }
+    const upstream = await fetch(asset.videoUrl, { redirect: 'follow' });
+    if (!upstream.ok || !upstream.body) {
+      return res.status(502).json({ error: { message: 'Could not fetch video', code: 'UPSTREAM_FAILED' } });
+    }
+    const ct = upstream.headers.get('content-type') || 'video/mp4';
+    const { safe, utf8Name } = dispositionFilename(asset.videoFilename);
+    res.setHeader('Content-Type', ct);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${safe}"; filename*=UTF-8''${utf8Name}`,
+    );
+    res.setHeader('Cache-Control', 'private, no-store');
+    const nodeReadable = Readable.fromWeb(upstream.body as import('stream/web').ReadableStream);
+    try {
+      await pipeline(nodeReadable, res);
+    } catch (pipeErr) {
+      if (!res.writableEnded) {
+        try {
+          res.destroy();
+        } catch {
+          /* ignore */
+        }
+      }
+      console.warn('[personal.delivery.video] pipe:', (pipeErr as Error).message);
+    }
+  } catch (e) {
+    next(e);
+  }
+});
+
+personalRouter.get('/delivery/:token/thumbnail', async (req, res, next) => {
+  try {
+    const token = decodeURIComponent(String(req.params.token ?? ''));
+    const asset = await resolvePersonalDeliveryAsset(token);
+    if (!asset?.thumbnailUrl) {
+      return res.status(404).json({ error: { message: 'No thumbnail', code: 'NO_THUMBNAIL' } });
+    }
+    const upstream = await fetch(asset.thumbnailUrl, { redirect: 'follow' });
+    if (!upstream.ok || !upstream.body) {
+      return res.status(502).json({
+        error: { message: 'Could not fetch thumbnail', code: 'UPSTREAM_FAILED' },
+      });
+    }
+    const ct = upstream.headers.get('content-type') || 'image/jpeg';
+    const { safe, utf8Name } = dispositionFilename(asset.thumbnailFilename);
+    res.setHeader('Content-Type', ct);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${safe}"; filename*=UTF-8''${utf8Name}`,
+    );
+    res.setHeader('Cache-Control', 'private, no-store');
+    const nodeReadable = Readable.fromWeb(upstream.body as import('stream/web').ReadableStream);
+    try {
+      await pipeline(nodeReadable, res);
+    } catch (pipeErr) {
+      if (!res.writableEnded) {
+        try {
+          res.destroy();
+        } catch {
+          /* ignore */
+        }
+      }
+      console.warn('[personal.delivery.thumbnail] pipe:', (pipeErr as Error).message);
+    }
+  } catch (e) {
+    next(e);
+  }
+});
 
 /* ─── Themes ─────────────────────────────────────────────────────── */
 

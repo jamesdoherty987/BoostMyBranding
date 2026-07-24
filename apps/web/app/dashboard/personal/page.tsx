@@ -28,6 +28,7 @@ import {
   Download,
   ImageDown,
   Info,
+  Mail,
 } from 'lucide-react';
 import { Badge, Button, Card, CardContent, Input, Textarea, Spinner, toast, Dialog, confirmDialog } from '@boost/ui';
 import {
@@ -825,6 +826,8 @@ function AccountDetail({
             accountId={account.id}
             posts={posts}
             isLoading={postsLoading}
+            videoDeliveryEmail={account.videoDeliveryEmail ?? null}
+            emailDeliveryEnabled={Boolean(features?.resend)}
             onPostsChanged={async (): Promise<void> => {
               await refetchPosts();
             }}
@@ -1176,7 +1179,9 @@ function PublishingCard({
               </Field>
             </div>
             <p className="mt-2 text-[11px] leading-snug text-slate-600">
-              Use <strong>Save posting settings</strong> below. If the toggle is on but the address is empty or invalid, the server skips sending.
+              Use <strong>Save posting settings</strong> below. Finished videos also have an <strong>Email</strong>{' '}
+              button that sends a download / Save to Photos link to this address (even if auto-email is off). If the
+              address is empty or invalid, the server skips sending.
             </p>
             <div className="mt-3">
               <Button
@@ -1807,15 +1812,21 @@ function PostsGrid({
   accountId,
   posts,
   isLoading,
+  videoDeliveryEmail,
+  emailDeliveryEnabled,
   onPostsChanged,
 }: {
   accountId: string;
   posts: PersonalPost[] | undefined;
   isLoading: boolean;
+  videoDeliveryEmail: string | null;
+  emailDeliveryEnabled: boolean;
   onPostsChanged: () => void | Promise<void>;
 }) {
   const failedInView = (posts ?? []).filter((p) => p.status === 'failed');
   const [clearingFailed, setClearingFailed] = useState(false);
+  const canEmailPosts =
+    emailDeliveryEnabled && Boolean((videoDeliveryEmail ?? '').trim());
 
   async function clearAllFailed() {
     if (
@@ -1904,12 +1915,21 @@ function PostsGrid({
             Each finished post has{' '}
             <span className="font-semibold text-slate-600">Add video to Camera Roll</span> and{' '}
             <span className="font-semibold text-slate-600">Add thumbnail to Camera Roll</span> (when a thumbnail
-            exists). On iPhone, the share sheet opens after a second tap once the file is ready.
+            exists). Use <span className="font-semibold text-slate-600">Email</span> to send a download /
+            Save to Photos link to the address in Posting. On iPhone, the share sheet opens after a second tap
+            once the file is ready.
           </p>
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {list.map((p) => (
-            <PostCard key={p.id} accountId={accountId} post={p} onPostsChanged={onPostsChanged} />
+            <PostCard
+              key={p.id}
+              accountId={accountId}
+              post={p}
+              canEmailDelivery={canEmailPosts}
+              deliveryEmailHint={(videoDeliveryEmail ?? '').trim() || null}
+              onPostsChanged={onPostsChanged}
+            />
           ))}
         </div>
       </CardContent>
@@ -2325,10 +2345,14 @@ function postGenerationProgressUi(post: PersonalPost): { percent: number; label:
 function PostCard({
   post,
   accountId,
+  canEmailDelivery,
+  deliveryEmailHint,
   onPostsChanged,
 }: {
   post: PersonalPost;
   accountId: string;
+  canEmailDelivery: boolean;
+  deliveryEmailHint: string | null;
   onPostsChanged: () => void | Promise<void>;
 }) {
   const statusMeta = statusFor(post.status);
@@ -2352,6 +2376,7 @@ function PostCard({
   const [shareSaveBusy, setShareSaveBusy] = useState(false);
   const [thumbDownloadBusy, setThumbDownloadBusy] = useState(false);
   const [thumbShareSaveBusy, setThumbShareSaveBusy] = useState(false);
+  const [emailBusy, setEmailBusy] = useState(false);
   /** iOS WebKit: `share()` must run on a second tap after `fetch` (see share helpers above). */
   const [shareGesture, setShareGesture] = useState<SharePhotosGesture | null>(null);
   const narrow = useIsNarrowScreen();
@@ -2365,7 +2390,8 @@ function PostCard({
   /** On phones with Web Share, hide top-level file downloads to keep one obvious path to Photos. */
   const simplifyMobileSave = narrow && clientShare;
   const shareSheetOpen = shareGesture != null;
-  const saveRowBusy = downloadBusy || shareSaveBusy || thumbDownloadBusy || thumbShareSaveBusy;
+  const saveRowBusy =
+    downloadBusy || shareSaveBusy || thumbDownloadBusy || thumbShareSaveBusy || emailBusy;
   const saveRowDisabled = saveRowBusy || shareSheetOpen;
   useEffect(() => {
     setPlaying(false);
@@ -2670,6 +2696,59 @@ function PostCard({
                 {shareSaveBusy ? <Spinner className="h-3 w-3 shrink-0" /> : <Share2 className="h-3 w-3 shrink-0" />}
                 <span>Add video to Camera Roll</span>
               </Button>
+              {canEmailDelivery ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="touch-manipulation max-sm:min-h-11 max-sm:px-3 h-7 gap-1 px-2 text-[11px]"
+                  disabled={saveRowDisabled}
+                  title={
+                    deliveryEmailHint
+                      ? `Email a download / Save to Photos link to ${deliveryEmailHint}`
+                      : 'Email a download / Save to Photos link'
+                  }
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void (async () => {
+                      setEmailBusy(true);
+                      try {
+                        const res = await api.emailPersonalPostDelivery(accountId, post.id);
+                        toast.success(
+                          'Email sent',
+                          `Check ${res.to} (and spam) for Download video and iPhone Save to Photos steps.`,
+                        );
+                      } catch (err) {
+                        toast.error('Email failed', (err as Error).message);
+                      } finally {
+                        setEmailBusy(false);
+                      }
+                    })();
+                  }}
+                >
+                  {emailBusy ? <Spinner className="h-3 w-3" /> : <Mail className="h-3 w-3" />}
+                  Email
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="touch-manipulation max-sm:min-h-11 max-sm:px-3 h-7 gap-1 px-2 text-[11px]"
+                  disabled={saveRowDisabled}
+                  title="Set a delivery email under Personal → Posting, then you can email this video"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toast.info(
+                      'Email not configured',
+                      'Open Posting, set Video delivery email (and ensure Resend is set up on the API), then Save.',
+                    );
+                  }}
+                >
+                  <Mail className="h-3 w-3" />
+                  Email
+                </Button>
+              )}
             </>
           ) : null}
           {canSaveOrDownloadPostThumbnail(post) ? (

@@ -1894,6 +1894,14 @@ export class BoostApi {
     });
   }
 
+  /** Email this finished post's video link to the account's configured delivery address. */
+  emailPersonalPostDelivery(accountId: string, postId: string) {
+    return this.request<{ ok: true; to: string }>(
+      `/api/v1/personal/accounts/${accountId}/posts/${postId}/email-delivery`,
+      { method: 'POST' },
+    );
+  }
+
   deletePersonalAccount(id: string) {
     return this.request<{ ok: true }>(`/api/v1/personal/accounts/${id}`, {
       method: 'DELETE',

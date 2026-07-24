@@ -15,6 +15,7 @@
  *   POST   /api/v1/personal/accounts/:id/generate
  *   POST   /api/v1/personal/accounts/:id/posts/:postId/cancel
  *   POST   /api/v1/personal/accounts/:id/posts/:postId/regenerate-thumbnail
+ *   POST   /api/v1/personal/accounts/:id/posts/:postId/email-delivery
  *   GET    /api/v1/personal/accounts/:id/posts/:postId/download
  *   GET    /api/v1/personal/accounts/:id/posts/:postId/download-thumbnail
  *   GET    /api/v1/personal/accounts/:id/posts
@@ -86,7 +87,7 @@ import {
 import { uploadLimiter } from '../middleware/rateLimit.js';
 import { features } from '../env.js';
 import { normalizeUploadImageIfAvif } from '../lib/normalizeUploadImage.js';
-import { maybeEmailPersonalVideoReady } from '../services/personalVideoDeliveryEmail.js';
+import { emailPersonalVideoReady } from '../services/personalVideoDeliveryEmail.js';
 
 export const personalRouter = Router();
 
@@ -672,7 +673,7 @@ personalRouter.post(
         'https://example.com/boostmybranding-test-video.mp4';
       const postId = latest?.id ?? `test-${Date.now()}`;
 
-      await maybeEmailPersonalVideoReady({
+      const result = await emailPersonalVideoReady({
         accountId,
         postId,
         videoUrl,
@@ -680,12 +681,26 @@ personalRouter.post(
         captionPreview:
           (latest?.caption ?? '').trim() ||
           'This is a test from Personal → Posting (Send test email).',
+        requireAutoToggle: false,
       });
+      if (!result.ok) {
+        const status =
+          result.code === 'EMAIL_MISSING' ||
+          result.code === 'EMAIL_INVALID' ||
+          result.code === 'NO_VIDEO'
+            ? 400
+            : result.code === 'RESEND_OFF'
+              ? 503
+              : 500;
+        return res.status(status).json({
+          error: { message: result.message, code: result.code },
+        });
+      }
 
       res.json({
         data: {
           ok: true,
-          to,
+          to: result.to,
           usedPostId: latest?.id ?? null,
           usedRealVideo: Boolean(latest?.videoUrl),
         },
@@ -823,6 +838,94 @@ personalRouter.post('/accounts/:id/posts/:postId/cancel', requirePersonalAuth, a
     next(e);
   }
 });
+
+/**
+ * Manually email this post's video to the account's configured delivery address
+ * (download + iPhone Photos save steps). Does not require "Email when ready".
+ */
+personalRouter.post(
+  '/accounts/:id/posts/:postId/email-delivery',
+  requirePersonalAuth,
+  async (req, res, next) => {
+    try {
+      if (!features.resend) {
+        return res.status(503).json({
+          error: {
+            message: 'RESEND_API_KEY is not configured on the API',
+            code: 'RESEND_OFF',
+          },
+        });
+      }
+      const user = (req as any).user as { id: string };
+      const accountId = String(req.params.id);
+      const postId = String(req.params.postId);
+      const account = await getAccount(user.id, accountId);
+      if (!account) {
+        return res
+          .status(404)
+          .json({ error: { message: 'Not found', code: 'NOT_FOUND' } });
+      }
+
+      const db = getDb();
+      const [post] = await db
+        .select({
+          id: personalPosts.id,
+          videoUrl: personalPosts.videoUrl,
+          topic: personalPosts.topic,
+          caption: personalPosts.caption,
+        })
+        .from(personalPosts)
+        .where(and(eq(personalPosts.id, postId), eq(personalPosts.accountId, accountId)))
+        .limit(1);
+
+      if (!post) {
+        return res
+          .status(404)
+          .json({ error: { message: 'Post not found', code: 'NOT_FOUND' } });
+      }
+
+      const videoUrl = (post.videoUrl ?? '').trim();
+      if (!videoUrl) {
+        return res.status(400).json({
+          error: {
+            message: 'This post has no finished video URL yet',
+            code: 'NO_VIDEO',
+          },
+        });
+      }
+
+      const result = await emailPersonalVideoReady({
+        accountId,
+        postId: post.id,
+        videoUrl,
+        topic: (post.topic ?? '').trim() || 'Personal post',
+        captionPreview: (post.caption ?? '').trim(),
+        requireAutoToggle: false,
+      });
+
+      if (!result.ok) {
+        const status =
+          result.code === 'EMAIL_MISSING' ||
+          result.code === 'EMAIL_INVALID' ||
+          result.code === 'NO_VIDEO' ||
+          result.code === 'EMAIL_OFF'
+            ? 400
+            : result.code === 'RESEND_OFF'
+              ? 503
+              : result.code === 'ACCOUNT_NOT_FOUND'
+                ? 404
+                : 500;
+        return res.status(status).json({
+          error: { message: result.message, code: result.code },
+        });
+      }
+
+      res.json({ data: { ok: true, to: result.to } });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
 
 personalRouter.post(
   '/accounts/:id/posts/:postId/regenerate-thumbnail',

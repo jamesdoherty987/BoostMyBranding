@@ -74,6 +74,7 @@ import {
   parseSourcingCheckpointByShotId,
   hasDirectorStoryboard,
 } from './personalDirectorPipelineMid.js';
+import { maybeEmailPersonalPostFailed } from './personalVideoDeliveryEmail.js';
 
 async function resumeDirectorInto(
   args: GenerateForAccountArgs,
@@ -92,7 +93,15 @@ async function resumeDirectorInto(
     throw new Error('Resume post not found for this account');
   }
   if (!post.templateId.startsWith('director:')) {
-    await markFailed(post.id, 'Cannot resume — this post was not generated in director mode.');
+    const msg = 'Cannot resume — this post was not generated in director mode.';
+    await markFailed(post.id, msg);
+    void maybeEmailPersonalPostFailed({
+      accountId: account.id,
+      postId: post.id,
+      topic: post.topic,
+      error: msg,
+      includeSaveLink: false,
+    }).catch((err) => console.warn('[personal] failure email:', (err as Error).message));
     return {
       postId: post.id,
       videoUrl: null,
@@ -116,6 +125,13 @@ async function resumeDirectorInto(
             ? e.message
             : String(e);
       await markFailed(post.id, msg);
+      void maybeEmailPersonalPostFailed({
+        accountId: account.id,
+        postId: post.id,
+        topic: post.topic,
+        error: msg,
+        includeSaveLink: false,
+      }).catch((err) => console.warn('[personal] failure email:', (err as Error).message));
       throw e;
     }
   }
@@ -139,10 +155,16 @@ async function resumeDirectorInto(
       (m) => m.role === 'inspiration' || m.role === 'style_reference',
     ).length;
     if (longformEnabled && inspirationResumeCount < 1) {
-      await markFailed(
-        post.id,
-        'Long-form requires at least one Media library item with role “Inspiration” or “Style reference” so every shot matches your visual references. Open Media → upload → set role → save.',
-      );
+      const msg =
+        'Long-form requires at least one Media library item with role “Inspiration” or “Style reference” so every shot matches your visual references. Open Media → upload → set role → save.';
+      await markFailed(post.id, msg);
+      void maybeEmailPersonalPostFailed({
+        accountId: account.id,
+        postId: post.id,
+        topic: post.topic,
+        error: msg,
+        includeSaveLink: false,
+      }).catch((err) => console.warn('[personal] failure email:', (err as Error).message));
       return {
         postId: post.id,
         videoUrl: null,
@@ -189,14 +211,27 @@ async function resumeDirectorInto(
             ? e.message
             : String(e);
       await markFailed(post.id, msg);
+      void maybeEmailPersonalPostFailed({
+        accountId: account.id,
+        postId: post.id,
+        topic: post.topic,
+        error: msg,
+        includeSaveLink: false,
+      }).catch((err) => console.warn('[personal] failure email:', (err as Error).message));
       throw e;
     }
   }
 
-  await markFailed(
-    post.id,
-    'This generation cannot be resumed automatically. Start a new generate.',
-  );
+  const cannotResumeMsg =
+    'This generation cannot be resumed automatically. Start a new generate.';
+  await markFailed(post.id, cannotResumeMsg);
+  void maybeEmailPersonalPostFailed({
+    accountId: account.id,
+    postId: post.id,
+    topic: post.topic,
+    error: cannotResumeMsg,
+    includeSaveLink: false,
+  }).catch((err) => console.warn('[personal] failure email:', (err as Error).message));
   return {
     postId: post.id,
     videoUrl: null,
@@ -478,10 +513,16 @@ export async function generateForAccountDirector(
     const longformEnabled = genConfig.longformEnabled === true || isAnimatedTheme;
 
     if (longformEnabled && inspirationItems.length < 1) {
-      await markFailed(
+      const msg =
+        'Long-form requires at least one Media library item with role “Inspiration” or “Style reference” so every shot matches your visual references. Open Media → upload → set role → save.';
+      await markFailed(postId, msg);
+      void maybeEmailPersonalPostFailed({
+        accountId: account.id,
         postId,
-        'Long-form requires at least one Media library item with role “Inspiration” or “Style reference” so every shot matches your visual references. Open Media → upload → set role → save.',
-      );
+        topic,
+        error: msg,
+        includeSaveLink: false,
+      }).catch((err) => console.warn('[personal] failure email:', (err as Error).message));
       return {
         postId,
         videoUrl: null,
@@ -657,7 +698,15 @@ export async function generateForAccountDirector(
     }
 
     if (storyboard.blocked) {
-      await markFailed(postId, `Blocked: ${storyboard.blockReason ?? 'unspecified'}`);
+      const msg = `Blocked: ${storyboard.blockReason ?? 'unspecified'}`;
+      await markFailed(postId, msg);
+      void maybeEmailPersonalPostFailed({
+        accountId: account.id,
+        postId,
+        topic,
+        error: msg,
+        includeSaveLink: false,
+      }).catch((err) => console.warn('[personal] failure email:', (err as Error).message));
       return {
         postId,
         videoUrl: null,
@@ -732,6 +781,13 @@ export async function generateForAccountDirector(
       } catch (dbErr) {
         console.error('[director] markFailed could not persist:', (dbErr as Error).message);
       }
+      void maybeEmailPersonalPostFailed({
+        accountId: account.id,
+        postId,
+        topic,
+        error: msg,
+        includeSaveLink: false,
+      }).catch((err) => console.warn('[personal] failure email:', (err as Error).message));
     }
     try {
       broadcast({

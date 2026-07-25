@@ -26,6 +26,7 @@ import {
 } from './personalAiThumbnail.js';
 import { stripDirectorResumeKeys, type Storyboard } from './personalDirector.js';
 import type { PersonalGenerationInfo } from './personalGenerationMeta.js';
+import { maybeEmailPersonalPostFailed } from './personalVideoDeliveryEmail.js';
 
 /**
  * Topic string for rows created as soon as the user clicks Generate, while the
@@ -1158,8 +1159,14 @@ export async function failStaleRenderingPersonalPosts(): Promise<number> {
   if (!isDbConfigured()) return 0;
   const db = getDb();
   const cutoff = new Date(Date.now() - stalePersonalPipelineMs());
+  const staleEncodeMsg =
+    'Video encoding had no progress for many hours (stalled encode, sleep, or overload). Try generating again.';
   const rows = await db
-    .select({ id: personalPosts.id })
+    .select({
+      id: personalPosts.id,
+      accountId: personalPosts.accountId,
+      topic: personalPosts.topic,
+    })
     .from(personalPosts)
     .where(
       and(
@@ -1178,13 +1185,19 @@ export async function failStaleRenderingPersonalPosts(): Promise<number> {
       .update(personalPosts)
       .set({
         status: 'failed',
-        errorMessage:
-          'Video encoding had no progress for many hours (stalled encode, sleep, or overload). Try generating again.',
+        errorMessage: staleEncodeMsg,
         renderProgress: null,
         renderProgressLabel: null,
         updatedAt: new Date(),
       })
       .where(eq(personalPosts.id, r.id));
+    void maybeEmailPersonalPostFailed({
+      accountId: r.accountId,
+      postId: r.id,
+      topic: r.topic,
+      error: staleEncodeMsg,
+      includeSaveLink: false,
+    }).catch((err) => console.warn('[personal] failure email:', (err as Error).message));
     n++;
   }
   if (n > 0) {
@@ -1192,7 +1205,11 @@ export async function failStaleRenderingPersonalPosts(): Promise<number> {
   }
   if (!personalDirectorResumeOnBootEnabled()) {
     const rowsPreStitch = await db
-      .select({ id: personalPosts.id })
+      .select({
+        id: personalPosts.id,
+        accountId: personalPosts.accountId,
+        topic: personalPosts.topic,
+      })
       .from(personalPosts)
       .where(
         and(
@@ -1208,13 +1225,19 @@ export async function failStaleRenderingPersonalPosts(): Promise<number> {
         .update(personalPosts)
         .set({
           status: 'failed',
-          errorMessage:
-            'Video encoding had no progress for many hours (stalled encode, sleep, or overload). Try generating again.',
+          errorMessage: staleEncodeMsg,
           renderProgress: null,
           renderProgressLabel: null,
           updatedAt: new Date(),
         })
         .where(eq(personalPosts.id, r.id));
+      void maybeEmailPersonalPostFailed({
+        accountId: r.accountId,
+        postId: r.id,
+        topic: r.topic,
+        error: staleEncodeMsg,
+        includeSaveLink: false,
+      }).catch((err) => console.warn('[personal] failure email:', (err as Error).message));
       n++;
     }
     if (rowsPreStitch.length > 0) {
@@ -1235,8 +1258,14 @@ export async function failStaleEarlyPhasePersonalPosts(): Promise<number> {
   if (!isDbConfigured()) return 0;
   const db = getDb();
   const cutoff = new Date(Date.now() - stalePersonalPipelineMs());
+  const staleEarlyMsg =
+    'Generation had no progress for many hours (stalled AI, sleep, or overload). Try generating again.';
   const rows = await db
-    .select({ id: personalPosts.id })
+    .select({
+      id: personalPosts.id,
+      accountId: personalPosts.accountId,
+      topic: personalPosts.topic,
+    })
     .from(personalPosts)
     .where(
       and(
@@ -1256,13 +1285,19 @@ export async function failStaleEarlyPhasePersonalPosts(): Promise<number> {
       .update(personalPosts)
       .set({
         status: 'failed',
-        errorMessage:
-          'Generation had no progress for many hours (stalled AI, sleep, or overload). Try generating again.',
+        errorMessage: staleEarlyMsg,
         renderProgress: null,
         renderProgressLabel: null,
         updatedAt: new Date(),
       })
       .where(eq(personalPosts.id, r.id));
+    void maybeEmailPersonalPostFailed({
+      accountId: r.accountId,
+      postId: r.id,
+      topic: r.topic,
+      error: staleEarlyMsg,
+      includeSaveLink: false,
+    }).catch((err) => console.warn('[personal] failure email:', (err as Error).message));
     n++;
   }
   if (n > 0) {
@@ -1270,7 +1305,11 @@ export async function failStaleEarlyPhasePersonalPosts(): Promise<number> {
   }
   if (!personalDirectorResumeOnBootEnabled()) {
     const rowsDirectorSourcing = await db
-      .select({ id: personalPosts.id })
+      .select({
+        id: personalPosts.id,
+        accountId: personalPosts.accountId,
+        topic: personalPosts.topic,
+      })
       .from(personalPosts)
       .where(
         and(
@@ -1281,17 +1320,25 @@ export async function failStaleEarlyPhasePersonalPosts(): Promise<number> {
         ),
       )
       .limit(80);
+    const sourcingMsg = BOOT_DIRECTOR_SOURCING_NO_RESUME_MSG.slice(0, BOOT_ERR_DISPLAY_MAX);
     for (const r of rowsDirectorSourcing) {
       await db
         .update(personalPosts)
         .set({
           status: 'failed',
-          errorMessage: BOOT_DIRECTOR_SOURCING_NO_RESUME_MSG.slice(0, BOOT_ERR_DISPLAY_MAX),
+          errorMessage: sourcingMsg,
           renderProgress: null,
           renderProgressLabel: null,
           updatedAt: new Date(),
         })
         .where(eq(personalPosts.id, r.id));
+      void maybeEmailPersonalPostFailed({
+        accountId: r.accountId,
+        postId: r.id,
+        topic: r.topic,
+        error: sourcingMsg,
+        includeSaveLink: false,
+      }).catch((err) => console.warn('[personal] failure email:', (err as Error).message));
       n++;
     }
     if (rowsDirectorSourcing.length > 0) {

@@ -79,7 +79,10 @@ export function isDefaultRetryable(err: unknown): boolean {
   const code: string | undefined = anyErr?.code ?? anyErr?.name;
   if (status) return status === 429 || (status >= 500 && status < 600);
   if (code === 'ETIMEDOUT' || code === 'ECONNRESET' || code === 'ENOTFOUND' || code === 'AbortError') return true;
-  if (anyErr?.message && /timeout|rate limit|overloaded/i.test(anyErr.message)) return true;
+  const msg = typeof anyErr?.message === 'string' ? anyErr.message : '';
+  if (msg && /timeout|rate limit|overloaded|fetch failed|ECONNRESET|network/i.test(msg)) return true;
+  // ContentStudio often puts HTTP status only in the message text.
+  if (msg && /ContentStudio API (429|5\d{2})\b/i.test(msg)) return true;
   return false;
 }
 

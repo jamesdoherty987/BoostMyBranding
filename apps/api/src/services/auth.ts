@@ -301,31 +301,10 @@ export function getSessionToken(req: Request) {
   return (req as any).cookies?.[SESSION_COOKIE] ?? undefined;
 }
 
-export async function requireAuth(req: Request, res: Response, next: NextFunction) {
-  const token = getSessionToken(req) ?? req.headers.authorization?.replace(/^Bearer /, '');
-  try {
-    const user = await resolveSession(token);
-    if (!user) {
-      return res.status(401).json({ error: { message: 'Not signed in', code: 'UNAUTHORIZED' } });
-    }
-    (req as any).user = user;
-    next();
-  } catch (e) {
-    // A DB hiccup (Neon idle timeout, transient TLS ETIMEDOUT, etc.) used to
-    // bubble out and crash the whole process because async middleware
-    // rejections aren't caught by Express. Surface it as 503 instead so the
-    // server stays up and the client can retry.
-    console.warn('[auth] session lookup failed:', (e as Error).message);
-    return res
-      .status(503)
-      .json({ error: { message: 'Auth temporarily unavailable', code: 'AUTH_UNAVAILABLE' } });
-  }
-}
-
 /** Dev fallback when PERSONAL_PUBLIC_ACCESS is on without a database. */
 const PERSONAL_PUBLIC_DEV_USER_ID = '00000000-0000-4000-8000-000000000001';
 
-/** Cached owner for unauthenticated Personal access (first channel owner, else first team user). */
+/** Cached owner for unauthenticated dashboard access (first channel owner, else first team user). */
 let cachedPublicPersonalUserId: string | null | undefined;
 
 async function resolvePublicPersonalUserId(): Promise<string | null> {
@@ -359,44 +338,28 @@ async function resolvePublicPersonalUserId(): Promise<string | null> {
 }
 
 /**
- * Personal routes: require Team sign-in by default. When PERSONAL_PUBLIC_ACCESS
- * is on, anonymous visitors use the shared team workspace (signed-in users
- * keep their own session).
+ * When PERSONAL_PUBLIC_ACCESS is on and there is no valid session, attach the
+ * shared team workspace user so every dashboard tab works without sign-in.
  */
-export async function requirePersonalAuth(req: Request, res: Response, next: NextFunction) {
-  if (!personalPublicAccessEnabled) {
-    return requireAuth(req, res, next);
-  }
-
-  const token = getSessionToken(req) ?? req.headers.authorization?.replace(/^Bearer /, '');
-  if (token) {
-    try {
-      const user = await resolveSession(token);
-      if (user) {
-        (req as any).user = user;
-        return next();
-      }
-    } catch (e) {
-      console.warn('[auth] personal public session lookup failed:', (e as Error).message);
-      return res
-        .status(503)
-        .json({ error: { message: 'Auth temporarily unavailable', code: 'AUTH_UNAVAILABLE' } });
-    }
-  }
-
+async function attachPublicDashboardUser(
+  req: Request,
+  res: Response,
+): Promise<boolean> {
   try {
     const publicUserId = await resolvePublicPersonalUserId();
     if (!publicUserId) {
-      return res.status(503).json({
+      res.status(503).json({
         error: {
-          message: 'Personal public access is enabled but no team user exists yet — sign in once at /team',
+          message:
+            'Public dashboard access is enabled but no team user exists yet — sign in once at /team',
           code: 'MISCONFIGURED',
         },
       });
+      return false;
     }
     if (isDbConfigured()) {
       (req as any).user = { id: publicUserId, role: 'agency_admin' };
-      return next();
+      return true;
     }
     let user = memUsers.get(publicUserId);
     if (!user) {
@@ -408,13 +371,54 @@ export async function requirePersonalAuth(req: Request, res: Response, next: Nex
       memUsers.set(publicUserId, user);
     }
     (req as any).user = user;
-    next();
+    return true;
   } catch (e) {
-    console.warn('[auth] public personal user lookup failed:', (e as Error).message);
+    console.warn('[auth] public dashboard user lookup failed:', (e as Error).message);
+    res
+      .status(503)
+      .json({ error: { message: 'Auth temporarily unavailable', code: 'AUTH_UNAVAILABLE' } });
+    return false;
+  }
+}
+
+/**
+ * Require Team sign-in by default. When PERSONAL_PUBLIC_ACCESS is on, anonymous
+ * visitors use the shared team workspace across all dashboard tabs (signed-in
+ * users keep their own session).
+ */
+export async function requireAuth(req: Request, res: Response, next: NextFunction) {
+  const token = getSessionToken(req) ?? req.headers.authorization?.replace(/^Bearer /, '');
+  try {
+    const user = token ? await resolveSession(token) : null;
+    if (user) {
+      (req as any).user = user;
+      return next();
+    }
+  } catch (e) {
+    // A DB hiccup (Neon idle timeout, transient TLS ETIMEDOUT, etc.) used to
+    // bubble out and crash the whole process because async middleware
+    // rejections aren't caught by Express. Surface it as 503 instead so the
+    // server stays up and the client can retry.
+    console.warn('[auth] session lookup failed:', (e as Error).message);
     return res
       .status(503)
       .json({ error: { message: 'Auth temporarily unavailable', code: 'AUTH_UNAVAILABLE' } });
   }
+
+  if (personalPublicAccessEnabled) {
+    if (await attachPublicDashboardUser(req, res)) next();
+    return;
+  }
+
+  return res.status(401).json({ error: { message: 'Not signed in', code: 'UNAUTHORIZED' } });
+}
+
+/**
+ * Personal routes use the same auth gate as the rest of the dashboard
+ * (including PERSONAL_PUBLIC_ACCESS for all tabs).
+ */
+export async function requirePersonalAuth(req: Request, res: Response, next: NextFunction) {
+  return requireAuth(req, res, next);
 }
 
 export function requireRole(...roles: string[]) {

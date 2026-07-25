@@ -53,9 +53,9 @@ import {
   resolveMusicBedSlideshow,
   resolveMusicBedViral,
 } from './personalMusicMix.js';
-import { schedulePost } from './contentStudio.js';
 import {
   contentStudioAccountIdsOverride,
+  schedulePersonalPostWithRetry,
   shouldSchedulePersonalToContentStudio,
 } from './personalContentPosting.js';
 import { generateImage } from './fal.js';
@@ -69,7 +69,10 @@ import {
   appendPersonalGenerationLog,
 } from './personalAccounts.js';
 import { features } from '../env.js';
-import { maybeEmailPersonalVideoReady } from './personalVideoDeliveryEmail.js';
+import {
+  maybeEmailPersonalPostFailed,
+  maybeEmailPersonalVideoReady,
+} from './personalVideoDeliveryEmail.js';
 import { withRetry } from './retry.js';
 import { checkScriptRules } from './personalQuality.js';
 import { assertPersonalVideoExampleTitlesOrThrow } from './personalTitlePolicy.js';
@@ -611,6 +614,7 @@ async function generateForAccountScript(
     /* ── 6. Schedule ─────────────────────────────────────────── */
     let contentStudioPostId: string | null = null;
     let scheduledAt: Date | null = null;
+    let scheduleError: string | null = null;
     const shouldSchedule = shouldSchedulePersonalToContentStudio(args, account);
 
     if (shouldSchedule) {
@@ -618,22 +622,26 @@ async function generateForAccountScript(
         ? new Date(args.scheduledAt)
         : new Date(Date.now() + 60 * 60 * 1000); // +1h default
       try {
-        const res = await schedulePost({
-          platform: account.platform,
-          caption: finalCaption,
-          // For slideshow / static_image accounts, ContentStudio will post
-          // the rendered MP4 as a short — Reels/Shorts handle it the same
-          // way they would a video. If we ever want to post a true image
-          // slideshow on IG, we'd pass imageUrl + media[] instead.
-          videoUrl: rendered.videoUrl,
-          scheduledAt: when,
-          workspaceId: account.contentStudioWorkspaceId ?? undefined,
-          contentStudioAccountIds: contentStudioAccountIdsOverride(account),
-        });
+        const res = await schedulePersonalPostWithRetry(
+          {
+            platform: account.platform,
+            caption: finalCaption,
+            // For slideshow / static_image accounts, ContentStudio will post
+            // the rendered MP4 as a short — Reels/Shorts handle it the same
+            // way they would a video. If we ever want to post a true image
+            // slideshow on IG, we'd pass imageUrl + media[] instead.
+            videoUrl: rendered.videoUrl,
+            scheduledAt: when,
+            workspaceId: account.contentStudioWorkspaceId ?? undefined,
+            contentStudioAccountIds: contentStudioAccountIdsOverride(account),
+          },
+          { label: `personal:schedule:${postId}` },
+        );
         contentStudioPostId = res.id;
         scheduledAt = when;
       } catch (e) {
-        console.warn('[personalPipeline] schedule failed:', (e as Error).message);
+        scheduleError = e instanceof Error ? e.message : String(e);
+        console.error('[personalPipeline] schedule failed after retries:', scheduleError);
       }
     }
 
@@ -661,6 +669,7 @@ async function generateForAccountScript(
         contentStudioPostId,
         scheduledAt,
         status: scheduledAt ? 'scheduled' : 'ready',
+        errorMessage: scheduleError ? scheduleError.slice(0, 500) : null,
         costCents: totalCostCents,
         postKind: rendered.formatKind,
         renderProgress: null,
@@ -681,13 +690,23 @@ async function generateForAccountScript(
       })
       .where(eq(personalAccounts.id, account.id));
 
-    void maybeEmailPersonalVideoReady({
-      accountId: account.id,
-      postId,
-      videoUrl: rendered.videoUrl,
-      topic,
-      captionPreview: finalCaption,
-    }).catch((e) => console.warn('[personal] video delivery email:', (e as Error).message));
+    if (scheduleError) {
+      void maybeEmailPersonalPostFailed({
+        accountId: account.id,
+        postId,
+        topic,
+        error: `ContentStudio schedule failed: ${scheduleError}`,
+        includeSaveLink: true,
+      }).catch((e) => console.warn('[personal] failure email:', (e as Error).message));
+    } else {
+      void maybeEmailPersonalVideoReady({
+        accountId: account.id,
+        postId,
+        videoUrl: rendered.videoUrl,
+        topic,
+        captionPreview: finalCaption,
+      }).catch((e) => console.warn('[personal] video delivery email:', (e as Error).message));
+    }
 
     broadcastEvent(account.id, postId, 'done', { videoUrl: rendered.videoUrl });
 
@@ -706,6 +725,13 @@ async function generateForAccountScript(
       } catch (dbErr) {
         console.error('[personal] markFailed could not persist:', (dbErr as Error).message);
       }
+      void maybeEmailPersonalPostFailed({
+        accountId: account.id,
+        postId,
+        topic,
+        error: msg,
+        includeSaveLink: false,
+      }).catch((err) => console.warn('[personal] failure email:', (err as Error).message));
     }
     try {
       broadcastEvent(account.id, postId, 'failed', { error: msg });

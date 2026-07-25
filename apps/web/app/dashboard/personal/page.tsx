@@ -139,15 +139,13 @@ export default function PersonalDashboardPage() {
                   <div className="mt-3 space-y-2 text-xs leading-relaxed text-rose-800/90">
                     <p>
                       The browser could not reach the API (often the dev server is stopped, the URL is
-                      wrong, or CORS blocked the request). Confirm{' '}
+                      wrong, or CORS blocked the request). Prefer leaving{' '}
                       <code className="rounded bg-rose-100 px-1 font-mono text-[11px]">NEXT_PUBLIC_API_URL</code>{' '}
-                      in your web env matches a running API (default{' '}
-                      <code className="font-mono">http://127.0.0.1:4000</code> in dev). In production, leave{' '}
-                      <code className="rounded bg-rose-100 px-1 font-mono text-[11px]">NEXT_PUBLIC_API_URL</code> unset
-                      so requests use same-origin <code className="font-mono">/api</code> (Vercel → Railway). Then restart the API after
-                      pulling changes. Use either{' '}
+                      unset so requests use same-origin <code className="font-mono">/api</code> (Next
+                      rewrites to the API). Only set it if you intentionally call the API on another
+                      host. Then restart web + API after pulling changes. Use either{' '}
                       <code className="font-mono">localhost</code> or <code className="font-mono">127.0.0.1</code>{' '}
-                      consistently for both dashboard and API env URLs.
+                      consistently for the dashboard URL.
                     </p>
                   </div>
                 ) : (

@@ -189,7 +189,8 @@ const schema = z.object({
   CRON_SECRET: z.string().optional(),
 
   /**
-   * When `true`, the Personal tab works without Team sign-in. Default off.
+   * When `true`, the whole agency dashboard (all tabs, including Personal)
+   * works without Team sign-in. Default off.
    */
   PERSONAL_PUBLIC_ACCESS: z.preprocess((val) => {
     if (val === '' || val === undefined || val === null) return undefined;
@@ -306,13 +307,13 @@ export const features = {
       env.CANVA_CLIENT_SECRET?.trim() &&
       env.CANVA_REDIRECT_URI?.trim(),
   ),
-  /** Personal tab API is reachable without Team sign-in (see PERSONAL_PUBLIC_ACCESS). */
+  /** Dashboard APIs are reachable without Team sign-in (see PERSONAL_PUBLIC_ACCESS). */
   personalPublicAccess: personalPublicAccessEnabled,
 };
 
 if (personalPublicAccessEnabled) {
   console.warn(
-    '[env] PERSONAL_PUBLIC_ACCESS is enabled — the Personal tab works without Team sign-in.',
+    '[env] PERSONAL_PUBLIC_ACCESS is enabled — all dashboard tabs work without Team sign-in.',
   );
 }
 

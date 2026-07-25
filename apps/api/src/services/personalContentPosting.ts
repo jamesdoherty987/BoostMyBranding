@@ -4,6 +4,8 @@
 
 import type { personalAccounts } from '@boost/database';
 import { env, features } from '../env.js';
+import { schedulePost, type SchedulePostArgs } from './contentStudio.js';
+import { isDefaultRetryable, withRetry } from './retry.js';
 
 export type PersonalAccountRow = typeof personalAccounts.$inferSelect;
 
@@ -44,4 +46,27 @@ export function shouldSchedulePersonalToContentStudio(
 export function contentStudioAccountIdsOverride(account: PersonalAccountRow): string[] | undefined {
   const id = account.contentStudioAccountId?.trim();
   return id ? [id] : undefined;
+}
+
+/**
+ * Schedule via ContentStudio with retries so transient API / network failures
+ * do not leave a finished video unposted.
+ */
+export async function schedulePersonalPostWithRetry(
+  args: SchedulePostArgs,
+  opts?: { label?: string },
+): Promise<{ id: string }> {
+  return withRetry(() => schedulePost(args), {
+    label: opts?.label ?? 'personal:schedulePost',
+    attempts: 5,
+    baseDelayMs: 800,
+    maxDelayMs: 20_000,
+    retryOn: (err) => {
+      if (isDefaultRetryable(err)) return true;
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/ContentStudio API (429|5\d{2})\b/i.test(msg)) return true;
+      if (/timeout|ECONNRESET|fetch failed|network|socket/i.test(msg)) return true;
+      return false;
+    },
+  });
 }

@@ -338,6 +338,7 @@ export async function runDuePersonalAccounts(): Promise<{
     ok: boolean;
     postId?: string;
     error?: string;
+    skipped?: boolean;
   }> = [];
 
   // Process one account at a time so heavy director pipelines (many fal jobs)
@@ -347,33 +348,52 @@ export async function runDuePersonalAccounts(): Promise<{
     const batch = due.slice(i, i + CONCURRENCY);
     const outs = await Promise.all(
       batch.map(async (acc) => {
+        // Claim the slot first so overlapping cron ticks / replicas cannot
+        // enqueue duplicate generations while next_run_at is still due.
+        const claimedNext = rollNextRunAt(acc, new Date());
+        const [claimed] = await db
+          .update(personalAccounts)
+          .set({ nextRunAt: claimedNext, updatedAt: new Date() })
+          .where(
+            and(
+              eq(personalAccounts.id, acc.id),
+              eq(personalAccounts.status, 'active'),
+              eq(personalAccounts.autoGenerateOnSchedule, true),
+              isNotNull(personalAccounts.nextRunAt),
+              lte(personalAccounts.nextRunAt, now),
+            ),
+          )
+          .returning({ id: personalAccounts.id });
+        if (!claimed) {
+          return {
+            accountId: acc.id,
+            ok: true,
+            skipped: true,
+          };
+        }
+
         try {
           const result = await enqueuePersonalGenerateForAccount(acc.id, () =>
             generateForAccount({ accountId: acc.id }),
           );
-          // Roll nextRunAt forward.
-          const nextRun = rollNextRunAt(acc, new Date());
-          await db
-            .update(personalAccounts)
-            .set({ nextRunAt: nextRun, updatedAt: new Date() })
-            .where(eq(personalAccounts.id, acc.id));
           return {
             accountId: acc.id,
             ok: true,
             postId: result.postId,
           };
         } catch (e) {
-          // Still roll nextRunAt forward on failure so a broken account
-          // doesn't re-fire every 5 minutes. Delay by 1 hour.
+          // Delay by 1 hour so a broken account doesn't re-fire every 5 minutes.
           const delayed = new Date(Date.now() + 60 * 60 * 1000);
           await db
             .update(personalAccounts)
             .set({ nextRunAt: delayed, updatedAt: new Date() })
             .where(eq(personalAccounts.id, acc.id));
+          const error = (e as Error).message;
+          console.error(`[cron personal] account ${acc.id} failed:`, error);
           return {
             accountId: acc.id,
             ok: false,
-            error: (e as Error).message,
+            error,
           };
         }
       }),

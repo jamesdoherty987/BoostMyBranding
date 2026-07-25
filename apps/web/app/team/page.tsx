@@ -17,7 +17,11 @@ import { api } from '@/lib/api';
 import { ApiError } from '@boost/api-client';
 import { ArrowRight, Lock, User, Mail, Loader2 } from 'lucide-react';
 
-const DASHBOARD_URL = process.env.NEXT_PUBLIC_DASHBOARD_URL ?? 'http://localhost:3000/dashboard';
+/** Prefer same-origin so the session cookie set on this host stays valid. */
+const AFTER_LOGIN_PATH = '/dashboard';
+/** Absolute URL for magic-link email redirects (API requires a full URL). */
+const MAGIC_REDIRECT_URL =
+  process.env.NEXT_PUBLIC_DASHBOARD_URL ?? 'http://localhost:3000/dashboard';
 
 type Mode = 'login' | 'register' | 'forgot';
 
@@ -36,16 +40,16 @@ export default function TeamAuthPage() {
     try {
       if (mode === 'login') {
         await api.login(email.trim(), password);
-        window.location.href = DASHBOARD_URL;
+        window.location.href = AFTER_LOGIN_PATH;
       } else if (mode === 'register') {
         await api.registerTeam({
           email: email.trim(),
           password,
           name: name.trim() || email.split('@')[0]!,
         });
-        window.location.href = DASHBOARD_URL;
+        window.location.href = AFTER_LOGIN_PATH;
       } else {
-        await api.sendMagicLink(email.trim(), DASHBOARD_URL);
+        await api.sendMagicLink(email.trim(), MAGIC_REDIRECT_URL);
         setForgotSent(true);
       }
     } catch (err) {

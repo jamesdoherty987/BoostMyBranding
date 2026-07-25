@@ -247,7 +247,11 @@ export async function schedulePost(args: SchedulePostArgs): Promise<{ id: string
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`ContentStudio API ${res.status}: ${text.slice(0, 400)}`);
+    const err = new Error(`ContentStudio API ${res.status}: ${text.slice(0, 400)}`) as Error & {
+      status: number;
+    };
+    err.status = res.status;
+    throw err;
   }
   const json = (await res.json()) as {
     data?: { id?: string };

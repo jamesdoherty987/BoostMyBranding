@@ -210,6 +210,57 @@ export function personalVideoReadyEmail(args: {
   };
 }
 
+/** Alert when scheduled personal generation or ContentStudio posting fails. */
+export function personalPostFailedEmail(args: {
+  accountName: string;
+  topic: string;
+  postId: string;
+  error: string;
+  /** When set, video rendered but scheduling/publish failed — include save link. */
+  savePageUrl?: string | null;
+}) {
+  const topic = (args.topic || 'Video').trim() || 'Video';
+  const safeTopic = escapeHtml(topic);
+  const safeAccount = escapeHtml(args.accountName || 'Personal account');
+  const safeError = escapeHtml((args.error || 'Unknown error').slice(0, 800));
+  const pageUrl = (args.savePageUrl ?? '').trim();
+  const safePage = pageUrl ? escapeHtml(pageUrl) : '';
+  const saveBlock = safePage
+    ? `<p style="margin:18px 0 0 0;">
+          <a href="${safePage}" style="display:block;background:#0f172a;color:#f8fafc;padding:14px 18px;border-radius:12px;text-decoration:none;font-weight:650;text-align:center;">
+            Open video / options
+          </a>
+        </p>`
+    : '';
+
+  return {
+    subject: `Error: ${topic}`,
+    html: `
+      <div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;max-width:420px;margin:0 auto;padding:28px 20px;">
+        <p style="margin:0 0 6px 0;color:#B45309;font-size:12px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;">Posting error</p>
+        <h1 style="font-size:22px;line-height:1.25;margin:0 0 12px 0;color:#0f172a;letter-spacing:-0.02em;">${safeTopic}</h1>
+        <p style="margin:0 0 16px 0;color:#64748B;font-size:14px;line-height:1.45;">
+          Something went wrong for <strong style="color:#0f172a;">${safeAccount}</strong>. The scheduled post did not complete successfully.
+        </p>
+        <pre style="margin:0;padding:14px 16px;background:#f8fafc;border-radius:12px;color:#334155;font-size:12px;line-height:1.45;white-space:pre-wrap;word-break:break-word;">${safeError}</pre>
+        ${saveBlock}
+        <p style="margin:18px 0 0 0;color:#94A3B8;font-size:12px;">Post id: ${escapeHtml(args.postId)}</p>
+      </div>
+    `,
+    text: [
+      `Posting error: ${topic}`,
+      `Account: ${args.accountName}`,
+      '',
+      args.error,
+      '',
+      pageUrl ? `Open: ${pageUrl}` : '',
+      `Post id: ${args.postId}`,
+    ]
+      .filter(Boolean)
+      .join('\n'),
+  };
+}
+
 function escapeHtml(s: string): string {
   return s
     .replace(/&/g, '&amp;')

@@ -45,11 +45,11 @@ import {
   type VoiceCharacterAlignment,
 } from './personalVoice.js';
 import { resolveChainedMusicBed } from './personalMusicChain.js';
-import { schedulePost } from './contentStudio.js';
 import { broadcast } from './realtime.js';
 import { env, features } from '../env.js';
 import {
   contentStudioAccountIdsOverride,
+  schedulePersonalPostWithRetry,
   shouldSchedulePersonalToContentStudio,
 } from './personalContentPosting.js';
 import { withRetry, withTimeout } from './retry.js';
@@ -84,7 +84,10 @@ import { logVisualPacing } from './personalDebugVisualPacing.js';
 import { buildPersonalThumbnailShotAlign, createPersonalPostThumbnail, shortThumbnailOverlayLine } from './personalAiThumbnail.js';
 import { resolvePersonalInspirationImageUrls } from './personalInspirationRefs.js';
 import type { GenerateForAccountArgs, GenerateForAccountResult } from './personalPipeline.js';
-import { maybeEmailPersonalVideoReady } from './personalVideoDeliveryEmail.js';
+import {
+  maybeEmailPersonalPostFailed,
+  maybeEmailPersonalVideoReady,
+} from './personalVideoDeliveryEmail.js';
 
 const SOURCING_DEBUG_CONSOLE = process.env.PERSONAL_DEBUG_SOURCING === '1';
 
@@ -1700,32 +1703,37 @@ export async function directorPipelineFromResolvedStoryboard(
 
   let contentStudioPostId: string | null = null;
   let scheduledAt: Date | null = null;
+  let scheduleError: string | null = null;
   const shouldSchedule = shouldSchedulePersonalToContentStudio(args, account);
   if (shouldSchedule) {
     const when = args.scheduledAt
       ? new Date(args.scheduledAt)
       : new Date(Date.now() + 60 * 60 * 1000);
     try {
-      const res = await schedulePost({
-        platform: account.platform,
-        caption: finalDirectorCaption,
-        videoUrl: stitched.videoUrl,
-        scheduledAt: when,
-        workspaceId: account.contentStudioWorkspaceId ?? undefined,
-        contentStudioAccountIds: contentStudioAccountIdsOverride(account),
-        ...(longformEnabled && isYoutube
-          ? {
-              youtubeTitle:
-                storyboard.title?.trim().slice(0, 100) || topic.trim().slice(0, 100) || undefined,
-              youtubeLongForm: true,
-              ...(thumbnailUrl ? { youtubeThumbnailUrl: thumbnailUrl } : {}),
-            }
-          : {}),
-      });
+      const res = await schedulePersonalPostWithRetry(
+        {
+          platform: account.platform,
+          caption: finalDirectorCaption,
+          videoUrl: stitched.videoUrl,
+          scheduledAt: when,
+          workspaceId: account.contentStudioWorkspaceId ?? undefined,
+          contentStudioAccountIds: contentStudioAccountIdsOverride(account),
+          ...(longformEnabled && isYoutube
+            ? {
+                youtubeTitle:
+                  storyboard.title?.trim().slice(0, 100) || topic.trim().slice(0, 100) || undefined,
+                youtubeLongForm: true,
+                ...(thumbnailUrl ? { youtubeThumbnailUrl: thumbnailUrl } : {}),
+              }
+            : {}),
+        },
+        { label: `personal:schedule:${postId}` },
+      );
       contentStudioPostId = res.id;
       scheduledAt = when;
     } catch (e) {
-      console.warn('[director] schedule failed:', (e as Error).message);
+      scheduleError = e instanceof Error ? e.message : String(e);
+      console.error('[director] schedule failed after retries:', scheduleError);
     }
   }
 
@@ -1765,6 +1773,7 @@ export async function directorPipelineFromResolvedStoryboard(
       contentStudioPostId,
       scheduledAt,
       status: scheduledAt ? 'scheduled' : 'ready',
+      errorMessage: scheduleError ? scheduleError.slice(0, 500) : null,
       costCents: totalCostCents,
       postKind: 'video',
       renderProgress: null,
@@ -1784,13 +1793,23 @@ export async function directorPipelineFromResolvedStoryboard(
     })
     .where(eq(personalAccounts.id, account.id));
 
-  void maybeEmailPersonalVideoReady({
-    accountId: account.id,
-    postId,
-    videoUrl: stitched.videoUrl,
-    topic: topic.trim() || 'Video',
-    captionPreview: finalDirectorCaption,
-  }).catch((e) => console.warn('[personal] video delivery email:', (e as Error).message));
+  if (scheduleError) {
+    void maybeEmailPersonalPostFailed({
+      accountId: account.id,
+      postId,
+      topic: topic.trim() || 'Video',
+      error: `ContentStudio schedule failed: ${scheduleError}`,
+      includeSaveLink: true,
+    }).catch((e) => console.warn('[personal] failure email:', (e as Error).message));
+  } else {
+    void maybeEmailPersonalVideoReady({
+      accountId: account.id,
+      postId,
+      videoUrl: stitched.videoUrl,
+      topic: topic.trim() || 'Video',
+      captionPreview: finalDirectorCaption,
+    }).catch((e) => console.warn('[personal] video delivery email:', (e as Error).message));
+  }
 
   broadcast({
     type: 'personal:progress',
@@ -1982,34 +2001,39 @@ export async function finishDirectorFromPreStitchCheckpoint(
 
   let contentStudioPostId: string | null = null;
   let scheduledAt: Date | null = null;
+  let scheduleError: string | null = null;
   const shouldSchedule = shouldSchedulePersonalToContentStudio(genArgs, account);
   if (shouldSchedule) {
     const when = genArgs.scheduledAt
       ? new Date(genArgs.scheduledAt)
       : new Date(Date.now() + 60 * 60 * 1000);
     try {
-      const res = await schedulePost({
-        platform: account.platform,
-        caption: resumeDirectorCaption,
-        videoUrl: stitched.videoUrl,
-        scheduledAt: when,
-        workspaceId: account.contentStudioWorkspaceId ?? undefined,
-        contentStudioAccountIds: contentStudioAccountIdsOverride(account),
-        ...(pre.extractYoutubeThumbnail === true && isYoutubeAccount(account.platform)
-          ? {
-              youtubeTitle:
-                storyboard.title?.trim().slice(0, 100) ||
-                post.topic.trim().slice(0, 100) ||
-                undefined,
-              youtubeLongForm: true,
-              ...(thumbnailUrl ? { youtubeThumbnailUrl: thumbnailUrl } : {}),
-            }
-          : {}),
-      });
+      const res = await schedulePersonalPostWithRetry(
+        {
+          platform: account.platform,
+          caption: resumeDirectorCaption,
+          videoUrl: stitched.videoUrl,
+          scheduledAt: when,
+          workspaceId: account.contentStudioWorkspaceId ?? undefined,
+          contentStudioAccountIds: contentStudioAccountIdsOverride(account),
+          ...(pre.extractYoutubeThumbnail === true && isYoutubeAccount(account.platform)
+            ? {
+                youtubeTitle:
+                  storyboard.title?.trim().slice(0, 100) ||
+                  post.topic.trim().slice(0, 100) ||
+                  undefined,
+                youtubeLongForm: true,
+                ...(thumbnailUrl ? { youtubeThumbnailUrl: thumbnailUrl } : {}),
+              }
+            : {}),
+        },
+        { label: `personal:schedule:resume:${postId}` },
+      );
       contentStudioPostId = res.id;
       scheduledAt = when;
     } catch (e) {
-      console.warn('[director] schedule failed (resume):', (e as Error).message);
+      scheduleError = e instanceof Error ? e.message : String(e);
+      console.error('[director] schedule failed after retries (resume):', scheduleError);
     }
   }
 
@@ -2055,6 +2079,7 @@ export async function finishDirectorFromPreStitchCheckpoint(
       contentStudioPostId,
       scheduledAt,
       status: scheduledAt ? 'scheduled' : 'ready',
+      errorMessage: scheduleError ? scheduleError.slice(0, 500) : null,
       costCents: totalCostCents,
       postKind: 'video',
       renderProgress: null,
@@ -2074,13 +2099,24 @@ export async function finishDirectorFromPreStitchCheckpoint(
     })
     .where(eq(personalAccounts.id, account.id));
 
-  void maybeEmailPersonalVideoReady({
-    accountId: account.id,
-    postId,
-    videoUrl: stitched.videoUrl,
-    topic: (post.topic ?? '').trim() || 'Video',
-    captionPreview: resumeDirectorCaption,
-  }).catch((e) => console.warn('[personal] video delivery email:', (e as Error).message));
+  const resumeTopic = (post.topic ?? '').trim() || 'Video';
+  if (scheduleError) {
+    void maybeEmailPersonalPostFailed({
+      accountId: account.id,
+      postId,
+      topic: resumeTopic,
+      error: `ContentStudio schedule failed: ${scheduleError}`,
+      includeSaveLink: true,
+    }).catch((e) => console.warn('[personal] failure email:', (e as Error).message));
+  } else {
+    void maybeEmailPersonalVideoReady({
+      accountId: account.id,
+      postId,
+      videoUrl: stitched.videoUrl,
+      topic: resumeTopic,
+      captionPreview: resumeDirectorCaption,
+    }).catch((e) => console.warn('[personal] video delivery email:', (e as Error).message));
+  }
 
   broadcast({
     type: 'personal:progress',

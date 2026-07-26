@@ -73,6 +73,7 @@ function section(name: string) {
   assert.match(html, /download="clip\.mp4"/);
   assert.match(html, /isIos/);
   assert.match(html, /navigator\.share/);
+  assert.match(html, /armSecondTap|pendingShare|Share — then Save Video/);
   assert.match(html, /preview-wrap on/);
   assert.match(html, /<h1>Test &quot;Title&quot; &lt;b&gt;x&lt;\/b&gt;<\/h1>/);
   assert.match(PERSONAL_DELIVERY_PAGE_CSP, /unsafe-inline/);

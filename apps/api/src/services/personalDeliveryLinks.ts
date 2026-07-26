@@ -294,8 +294,12 @@ export function personalDeliverySavePageHtml(args: {
         if (hintEl) hintEl.textContent = msg;
       }
 
+      // Prepared File for the second iOS tap (share must run in the same gesture as the tap).
+      var pendingShare = null; // { file, kind, btn, labelReady, labelShare }
+      var preparing = false;
+
       if (IOS) {
-        setHint('On iPhone: Save opens Share — tap Save Video / Save Image. Prefer Safari if Share is missing.');
+        setHint('On iPhone: tap Save once to prepare, then tap Share and choose Save Video / Save Image. Prefer Safari.');
         if (btnVideo) btnVideo.textContent = 'Save video to Photos';
         if (btnThumb) btnThumb.textContent = 'Save thumbnail to Photos';
       } else {
@@ -341,10 +345,18 @@ export function personalDeliverySavePageHtml(args: {
         setStatus('Download started');
       }
 
+      function clearPendingShare() {
+        if (pendingShare && pendingShare.btn) {
+          pendingShare.btn.textContent = pendingShare.labelReady;
+          pendingShare.btn.classList.remove('pulse');
+        }
+        pendingShare = null;
+      }
+
       function iosShareFallback(kind) {
         if (kind === 'video') {
           showPreview();
-          setStatus('Share unavailable here. Tap play, then use the share icon → Save Video. Or open this page in Safari.', true);
+          setStatus('Could not open Share. Tap play, then the share icon → Save Video. Or open this page in Safari.', true);
           return;
         }
         if (THUMB_URL) {
@@ -354,42 +366,103 @@ export function personalDeliverySavePageHtml(args: {
         setStatus('Open this page in Safari, then try again.', true);
       }
 
-      function saveMedia(url, filename, mime, kind) {
-        // iPhone: fetch file + Web Share → Photos. Desktop: download the file.
-        // Use /preview for video on iOS so the response is inline playable if share fails.
-        var fetchUrl = (IOS && kind === 'video' && PREVIEW_URL) ? PREVIEW_URL : url;
-        setStatus(IOS ? 'Preparing for Photos…' : 'Preparing download…');
+      /** Must run synchronously inside a click handler (iOS WebKit gesture). */
+      function sharePreparedNow(prepared) {
+        if (!navigator.share) {
+          iosShareFallback(prepared.kind);
+          return;
+        }
+        var sharePromise;
+        try {
+          sharePromise = navigator.share({ files: [prepared.file], title: TITLE });
+        } catch (err) {
+          iosShareFallback(prepared.kind);
+          return;
+        }
+        if (!sharePromise || typeof sharePromise.then !== 'function') {
+          iosShareFallback(prepared.kind);
+          return;
+        }
+        sharePromise.then(function () {
+          setStatus(prepared.kind === 'video' ? 'In Share, tap Save Video' : 'In Share, tap Save Image');
+          clearPendingShare();
+        }).catch(function (err) {
+          if (err && err.name === 'AbortError') {
+            setStatus('Cancelled');
+            return;
+          }
+          iosShareFallback(prepared.kind);
+        });
+      }
+
+      function armSecondTap(btn, file, kind, labelReady, labelShare) {
+        pendingShare = { file: file, kind: kind, btn: btn, labelReady: labelReady, labelShare: labelShare };
+        if (btn) {
+          btn.textContent = labelShare;
+          btn.classList.add('pulse');
+        }
+        setStatus(kind === 'video'
+          ? 'Ready — tap Share, then Save Video'
+          : 'Ready — tap Share, then Save Image');
+      }
+
+      function saveMedia(url, filename, mime, kind, btn) {
+        var labelReady = kind === 'video' ? 'Save video to Photos' : 'Save thumbnail to Photos';
+        var labelShare = kind === 'video' ? 'Share — then Save Video' : 'Share — then Save Image';
+
+        // Second tap: share immediately while the gesture is still valid.
+        if (IOS && pendingShare && pendingShare.kind === kind && pendingShare.file) {
+          sharePreparedNow(pendingShare);
+          return;
+        }
+
+        if (preparing) return;
+        clearPendingShare();
+
+        if (!IOS) {
+          setStatus('Preparing download…');
+          fetch(url, { credentials: 'omit', cache: 'no-store' })
+            .then(function (res) {
+              if (!res.ok) throw new Error('fail');
+              return res.blob();
+            })
+            .then(function (blob) {
+              downloadBlob(blob, filename);
+            })
+            .catch(function () {
+              window.location.href = url;
+            });
+          return;
+        }
+
+        // iPhone: fetch on tap 1, share on tap 2 (required — share after await loses the gesture).
+        var fetchUrl = (kind === 'video' && PREVIEW_URL) ? PREVIEW_URL : url;
+        preparing = true;
+        setStatus('Preparing for Photos…');
         fetch(fetchUrl, { credentials: 'omit', cache: 'no-store' })
           .then(function (res) {
-            if (!res.ok) throw new Error('fail');
+            if (!res.ok) throw new Error('HTTP ' + res.status);
             return res.blob();
           })
           .then(function (blob) {
-            var type = mime || blob.type || 'application/octet-stream';
+            preparing = false;
+            if (!blob || blob.size < 32) throw new Error('empty');
+            var type = mime || blob.type || (kind === 'video' ? 'video/mp4' : 'image/jpeg');
+            // Prefer an explicit media MIME — some iOS builds reject octet-stream for Photos.
+            if (kind === 'video' && !/^video\\//i.test(type)) type = 'video/mp4';
+            if (kind !== 'video' && !/^image\\//i.test(type)) type = 'image/jpeg';
             var file = new File([blob], filename, { type: type });
-            if (IOS && navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
-              return navigator.share({ files: [file], title: TITLE }).then(function () {
-                setStatus(kind === 'video' ? 'In Share, tap Save Video' : 'In Share, tap Save Image');
-              }).catch(function (err) {
-                if (err && err.name === 'AbortError') {
-                  setStatus('Cancelled');
-                  return;
-                }
-                iosShareFallback(kind);
-              });
-            }
-            if (IOS) {
+            if (!navigator.share) {
               iosShareFallback(kind);
               return;
             }
-            downloadBlob(blob, filename);
+            // Do not require canShare here — it often returns false for larger videos even when share works.
+            armSecondTap(btn, file, kind, labelReady, labelShare);
           })
-          .catch(function () {
-            if (IOS) {
-              iosShareFallback(kind);
-              return;
-            }
-            window.location.href = url;
+          .catch(function (err) {
+            preparing = false;
+            console.warn('[delivery] prepare failed', err && err.message ? err.message : err);
+            iosShareFallback(kind);
           });
       }
 
@@ -425,11 +498,11 @@ export function personalDeliverySavePageHtml(args: {
       });
       if (btnVideo) btnVideo.addEventListener('click', function (e) {
         e.preventDefault();
-        saveMedia(VIDEO_URL, VIDEO_NAME, 'video/mp4', 'video');
+        saveMedia(VIDEO_URL, VIDEO_NAME, 'video/mp4', 'video', btnVideo);
       });
       if (btnThumb && THUMB_URL) btnThumb.addEventListener('click', function (e) {
         e.preventDefault();
-        saveMedia(THUMB_URL, THUMB_NAME, 'image/jpeg', 'image');
+        saveMedia(THUMB_URL, THUMB_NAME, 'image/jpeg', 'image', btnThumb);
       });
 
       if (ACTION === 'copy') copyTitle();
@@ -437,17 +510,17 @@ export function personalDeliverySavePageHtml(args: {
       if (ACTION === 'video') {
         if (IOS) {
           if (btnVideo) btnVideo.classList.add('pulse');
-          setStatus('Tap Save video to Photos');
+          setStatus('Tap Save video to Photos (then Share once more)');
         } else {
-          saveMedia(VIDEO_URL, VIDEO_NAME, 'video/mp4', 'video');
+          saveMedia(VIDEO_URL, VIDEO_NAME, 'video/mp4', 'video', btnVideo);
         }
       }
       if (ACTION === 'thumb' && THUMB_URL) {
         if (IOS) {
           if (btnThumb) btnThumb.classList.add('pulse');
-          setStatus('Tap Save thumbnail to Photos');
+          setStatus('Tap Save thumbnail to Photos (then Share once more)');
         } else {
-          saveMedia(THUMB_URL, THUMB_NAME, 'image/jpeg', 'image');
+          saveMedia(THUMB_URL, THUMB_NAME, 'image/jpeg', 'image', btnThumb);
         }
       }
     })();

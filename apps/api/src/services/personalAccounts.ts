@@ -1024,7 +1024,7 @@ function personalRenderingBootResetEnabled(): boolean {
  * checkpoints). {@link resumeInterruptedDirectorPersonalPostsOnBoot} in
  * `personalDirectorPipeline.ts` enqueues those jobs.
  *
- * - Default **on** when Railway or Render env is detected (typical single API).
+ * - Default **on** for local `development`/`test` and Railway/Render (single API).
  * - Set `PERSONAL_RESUME_DIRECTOR_ON_BOOT=false` when running **multiple** API
  *   replicas against one database so two instances don’t resume the same post.
  */
@@ -1032,8 +1032,11 @@ export function personalDirectorResumeOnBootEnabled(): boolean {
   const raw = process.env.PERSONAL_RESUME_DIRECTOR_ON_BOOT?.trim().toLowerCase();
   if (raw === 'true' || raw === '1' || raw === 'yes' || raw === 'on') return true;
   if (raw === 'false' || raw === '0' || raw === 'no' || raw === 'off') return false;
-  // Default ON for common single-API PaaS (Railway / Render). Multi-replica deploys
-  // should set PERSONAL_RESUME_DIRECTOR_ON_BOOT=false so two instances don’t race the same row.
+  // Local single-API + common PaaS. Multi-replica deploys should set
+  // PERSONAL_RESUME_DIRECTOR_ON_BOOT=false so two instances don’t race the same row.
+  if (process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test') {
+    return true;
+  }
   const onRailwayOrRender =
     Boolean(String(process.env.RAILWAY_PUBLIC_DOMAIN ?? '').trim()) ||
     Boolean(String(process.env.RAILWAY_ENVIRONMENT ?? '').trim()) ||

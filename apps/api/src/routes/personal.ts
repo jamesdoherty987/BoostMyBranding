@@ -935,6 +935,9 @@ personalRouter.post('/accounts/:id/generate', requirePersonalAuth, async (req, r
       const reserved = await createReservedQueuedPersonalPost({
         userId: user.id,
         accountId: account.id,
+        scheduleToContentStudio: body.scheduleToContentStudio,
+        scheduledAt: body.scheduledAt,
+        autoSchedule: body.autoSchedule,
       });
       reservedPostId = reserved.id;
     }

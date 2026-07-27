@@ -39,6 +39,7 @@ import {
   failStaleRenderingPersonalPosts,
   personalDirectorResumeOnBootEnabled,
 } from './personalAccounts.js';
+import { scheduleReadyPersonalPosts } from './personalContentPosting.js';
 
 export function startScheduler() {
   if (!isDbConfigured()) {
@@ -47,6 +48,9 @@ export function startScheduler() {
   }
 
   cron.schedule('* * * * *', () => { publishDue().catch((e) => console.error('[cron publishDue]', e)); }, { timezone: 'UTC' });
+  cron.schedule('* * * * *', () => {
+    scheduleReadyPersonalPosts().catch((e) => console.error('[cron personalScheduleReady]', e));
+  }, { timezone: 'UTC' });
   cron.schedule('*/2 * * * *', () => { analyzePendingImages(10).catch((e) => console.error('[cron analyze]', e)); }, { timezone: 'UTC' });
   cron.schedule('0 9 1 * *', () => { generateMonthlyBatches().catch((e) => console.error('[cron monthly]', e)); }, { timezone: 'UTC' });
   cron.schedule('*/5 * * * *', () => { runDuePersonalAccounts().catch((e) => console.error('[cron personal]', e)); }, { timezone: 'UTC' });
@@ -60,7 +64,7 @@ export function startScheduler() {
   }, { timezone: 'UTC' });
 
   console.log(
-    '⏱  Scheduler started (publish=1m · analyze=2m · personalAutopilot=5m when account has scheduled generation on · personalStalePipeline=5m · monthly=day-1 09:00)',
+    '⏱  Scheduler started (publish=1m · personalScheduleReady=1m · analyze=2m · personalAutopilot=5m when account has scheduled generation on · personalStalePipeline=5m · monthly=day-1 09:00)',
   );
 
   void (async () => {

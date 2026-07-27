@@ -46,11 +46,14 @@ import { resolveLockedChannelVideoTitle } from './personalChannelTitle.js';
 /** Embedded in persisted storyboard JSON; stripped before Claude replans. */
 export const PERSONAL_SCRIPT_CK_PRE = '__pipelineCheckpoint' as const;
 export const PERSONAL_SCRIPT_CK_SRC = '__sourcingCheckpoint' as const;
+/** Pipeline meta: whether this post should be pushed to ContentStudio after render. */
+export const PERSONAL_SCRIPT_SCHEDULE_INTENT = '__scheduleIntent' as const;
 
 export function stripDirectorResumeKeys(raw: Record<string, unknown>): Record<string, unknown> {
   const o = { ...raw };
   delete o[PERSONAL_SCRIPT_CK_PRE];
   delete o[PERSONAL_SCRIPT_CK_SRC];
+  delete o[PERSONAL_SCRIPT_SCHEDULE_INTENT];
   return o;
 }
 

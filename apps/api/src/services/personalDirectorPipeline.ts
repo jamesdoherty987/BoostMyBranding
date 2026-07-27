@@ -75,6 +75,11 @@ import {
   hasDirectorStoryboard,
 } from './personalDirectorPipelineMid.js';
 import { maybeEmailPersonalPostFailed } from './personalVideoDeliveryEmail.js';
+import {
+  buildPersonalScheduleIntent,
+  mergePersonalScheduleIntentIntoArgs,
+  withPersonalScheduleIntent,
+} from './personalContentPosting.js';
 
 async function resumeDirectorInto(
   args: GenerateForAccountArgs,
@@ -92,6 +97,8 @@ async function resumeDirectorInto(
   if (!post || post.accountId !== account.id) {
     throw new Error('Resume post not found for this account');
   }
+  // Restore "Generate & schedule" / autopilot intent after process restart.
+  args = mergePersonalScheduleIntentIntoArgs(args, post.script);
   if (!post.templateId.startsWith('director:')) {
     const msg = 'Cannot resume — this post was not generated in director mode.';
     await markFailed(post.id, msg);
@@ -286,12 +293,17 @@ export async function resumeInterruptedDirectorPersonalPostsOnBoot(): Promise<nu
       })
       .where(eq(personalPosts.id, post.id));
 
-    void enqueuePersonalGenerateForAccount(post.accountId, () =>
-      generateForAccount({
+    const { mergePersonalScheduleIntentIntoArgs } = await import('./personalContentPosting.js');
+    const resumeArgs = mergePersonalScheduleIntentIntoArgs(
+      {
         accountId: post.accountId,
         resumeFromPostId: post.id,
         dryRun: false,
-      }),
+      },
+      post.script,
+    );
+    void enqueuePersonalGenerateForAccount(post.accountId, () =>
+      generateForAccount(resumeArgs),
     );
     n++;
   }
@@ -386,12 +398,14 @@ export async function generateForAccountDirector(
       throw new Error('Theme changed while post was in queue');
     }
     postId = args.reservedPostId;
+    args = mergePersonalScheduleIntentIntoArgs(args, existing.script);
+    const scheduleIntent = buildPersonalScheduleIntent(args, account);
     const [claimed] = await db
       .update(personalPosts)
       .set({
         topic,
         status: 'scripting',
-        script: {},
+        script: withPersonalScheduleIntent({}, scheduleIntent) as any,
         updatedAt: new Date(),
       })
       .where(and(eq(personalPosts.id, postId), eq(personalPosts.status, 'queued')))
@@ -400,6 +414,7 @@ export async function generateForAccountDirector(
       throw new Error('Could not claim reserved post — it may have been cancelled or superseded.');
     }
   } else {
+    const scheduleIntent = buildPersonalScheduleIntent(args, account);
     const [post] = await db
       .insert(personalPosts)
       .values({
@@ -407,7 +422,7 @@ export async function generateForAccountDirector(
         templateId: expectedTemplateId,
         postKind: (account.formatKind as 'video' | 'slideshow' | 'static_image') ?? 'video',
         topic,
-        script: {},
+        script: withPersonalScheduleIntent({}, scheduleIntent) as any,
         status: 'scripting',
       })
       .returning();

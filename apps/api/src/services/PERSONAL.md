@@ -104,8 +104,8 @@ Then restart the API dev process so it reconnects cleanly.
 
 - **Credentials:** `CONTENTSTUDIO_API_KEY` and `CONTENTSTUDIO_WORKSPACE_ID` in `.env` (API).
 - **Per channel:** Optional `contentstudio_workspace_id` and `contentstudio_account_id` on `personal_accounts` (Overview → Publishing). Account id pins which connected social account receives the post when several exist for the same platform.
-- **When posts are scheduled:** (1) **Auto-schedule** is on and either **Auto-approve** is on *or* a **pinned ContentStudio account** is set on the account (workspace + API key required), or (2) dashboard **Generate & schedule post** (`scheduleToContentStudio: true` on `POST …/generate`), or (3) cron autopilot uses the same rules as (1).
-- **Scheduler:** `runDuePersonalAccounts` runs every **5 minutes** (`scheduler.ts`), selects `active` accounts with `auto_generate_on_schedule`, due `next_run_at`, and calls `generateForAccount({ accountId })`.
+- **When posts are scheduled:** (1) **Auto-schedule** is on (Posting tab: send finished videos to Content Studio; workspace + API key required), or (2) dashboard **Generate & schedule post** (`scheduleToContentStudio: true` on `POST …/generate`), or (3) cron autopilot uses the same rules as (1). Schedule intent is persisted on the post so restarts still queue to ContentStudio; a 1-minute cron retries `ready` posts that still need scheduling.
+- **Scheduler:** `runDuePersonalAccounts` runs every **5 minutes** (`scheduler.ts`), selects `active` accounts with `auto_generate_on_schedule`, due `next_run_at`, and calls `generateForAccount({ accountId })`. `scheduleReadyPersonalPosts` runs every **1 minute** for ContentStudio enqueue retries.
 
 ## Extending
 

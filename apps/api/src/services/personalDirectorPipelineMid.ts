@@ -48,9 +48,12 @@ import { resolveChainedMusicBed } from './personalMusicChain.js';
 import { broadcast } from './realtime.js';
 import { env, features } from '../env.js';
 import {
+  buildPersonalScheduleIntent,
   contentStudioAccountIdsOverride,
+  mergePersonalScheduleIntentIntoArgs,
   schedulePersonalPostWithRetry,
   shouldSchedulePersonalToContentStudio,
+  withPersonalScheduleIntent,
 } from './personalContentPosting.js';
 import { withRetry, withTimeout } from './retry.js';
 import { getCharacterAnchorImages, getCharacterUnsafe } from './personalCharacters.js';
@@ -475,15 +478,19 @@ export async function directorPipelineFromResolvedStoryboard(
         logSourcingConsole(postId, `checkpoint DB write start (${shotCount} shot(s) in map)`);
       }
       const scriptBase = stripDirectorResumeKeys(storyboard as unknown as Record<string, unknown>);
+      const scheduleIntent = buildPersonalScheduleIntent(args, account);
       try {
         await db
           .update(personalPosts)
           .set({
-            script: {
-              ...scriptBase,
-              outputAspectRatio: aspectRatio,
-              [CK_SRC]: { v: 1, byShotId: sourcingByShotId },
-            } as any,
+            script: withPersonalScheduleIntent(
+              {
+                ...scriptBase,
+                outputAspectRatio: aspectRatio,
+                [CK_SRC]: { v: 1, byShotId: sourcingByShotId },
+              },
+              scheduleIntent,
+            ) as any,
             updatedAt: new Date(),
           })
           .where(eq(personalPosts.id, postId));
@@ -1552,11 +1559,14 @@ export async function directorPipelineFromResolvedStoryboard(
     namesNumbersTitleCard: undefined,
   };
 
-  const scriptForRow = {
-    ...stripDirectorResumeKeys(storyboard as unknown as Record<string, unknown>),
-    outputAspectRatio: aspectRatio,
-    [CK_PRE]: preStitchCk,
-  };
+  const scriptForRow = withPersonalScheduleIntent(
+    {
+      ...stripDirectorResumeKeys(storyboard as unknown as Record<string, unknown>),
+      outputAspectRatio: aspectRatio,
+      [CK_PRE]: preStitchCk,
+    },
+    buildPersonalScheduleIntent(args, account),
+  );
 
   await db
     .update(personalPosts)
@@ -1745,22 +1755,26 @@ export async function directorPipelineFromResolvedStoryboard(
         : 'library';
   }
 
-  const scriptFinal = {
-    ...stripDirectorResumeKeys(storyboard as unknown as Record<string, unknown>),
-    outputAspectRatio: aspectRatio,
-    generationInfo: buildDirectorGenerationInfo({
-      genConfig,
-      account,
-      character: character ? { voiceId: character.voiceId ?? null } : null,
-      longformEnabled,
-      longformAnimationStyle,
-      musicAttribution,
-      musicSource,
-      themeTemplate: theme.template,
-      totalCostCents,
-      pickImageModelForLongform,
-    }),
-  };
+  const scriptFinal = withPersonalScheduleIntent(
+    {
+      ...stripDirectorResumeKeys(storyboard as unknown as Record<string, unknown>),
+      outputAspectRatio: aspectRatio,
+      generationInfo: buildDirectorGenerationInfo({
+        genConfig,
+        account,
+        character: character ? { voiceId: character.voiceId ?? null } : null,
+        longformEnabled,
+        longformAnimationStyle,
+        musicAttribution,
+        musicSource,
+        themeTemplate: theme.template,
+        totalCostCents,
+        pickImageModelForLongform,
+      }),
+    },
+    // Keep intent when schedule failed so cron can retry; clear once CS accepted.
+    scheduledAt ? null : buildPersonalScheduleIntent(args, account),
+  );
 
   await db
     .update(personalPosts)
@@ -1885,11 +1899,12 @@ export async function finishDirectorFromPreStitchCheckpoint(
   post: typeof personalPosts.$inferSelect,
   account: typeof personalAccounts.$inferSelect,
   theme: PersonalTheme,
-  genArgs: GenerateForAccountArgs,
+  genArgsIn: GenerateForAccountArgs,
   pre: PreStitchCheckpoint,
 ): Promise<GenerateForAccountResult> {
   const db = getDb();
   const postId = post.id;
+  const genArgs = mergePersonalScheduleIntentIntoArgs(genArgsIn, post.script);
   const storyboard = stripDirectorResumeKeys(post.script as Record<string, unknown>) as unknown as Storyboard;
 
   let totalCostCents = pre.totalCostCentsBeforeStitch + 3;
@@ -2051,22 +2066,25 @@ export async function finishDirectorFromPreStitchCheckpoint(
       wantMusicBedResume && customAU && mUrlResume === customAU ? 'custom_bed' : 'library';
   }
 
-  const scriptFinal = {
-    ...stripDirectorResumeKeys(storyboard as unknown as Record<string, unknown>),
-    outputAspectRatio: aspectRatio,
-    generationInfo: buildDirectorGenerationInfo({
-      genConfig: genCfg,
-      account,
-      character: null,
-      longformEnabled: longformResume,
-      longformAnimationStyle: genCfg.longformAnimationStyle,
-      musicAttribution: post.musicAttribution,
-      musicSource: musicSourceResume,
-      themeTemplate: theme.template,
-      totalCostCents,
-      pickImageModelForLongform,
-    }),
-  };
+  const scriptFinal = withPersonalScheduleIntent(
+    {
+      ...stripDirectorResumeKeys(storyboard as unknown as Record<string, unknown>),
+      outputAspectRatio: aspectRatio,
+      generationInfo: buildDirectorGenerationInfo({
+        genConfig: genCfg,
+        account,
+        character: null,
+        longformEnabled: longformResume,
+        longformAnimationStyle: genCfg.longformAnimationStyle,
+        musicAttribution: post.musicAttribution,
+        musicSource: musicSourceResume,
+        themeTemplate: theme.template,
+        totalCostCents,
+        pickImageModelForLongform,
+      }),
+    },
+    scheduledAt ? null : buildPersonalScheduleIntent(genArgs, account),
+  );
 
   await db
     .update(personalPosts)

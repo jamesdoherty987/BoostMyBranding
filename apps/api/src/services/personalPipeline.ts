@@ -54,9 +54,12 @@ import {
   resolveMusicBedViral,
 } from './personalMusicMix.js';
 import {
+  buildPersonalScheduleIntent,
   contentStudioAccountIdsOverride,
+  mergePersonalScheduleIntentIntoArgs,
   schedulePersonalPostWithRetry,
   shouldSchedulePersonalToContentStudio,
+  withPersonalScheduleIntent,
 } from './personalContentPosting.js';
 import { generateImage } from './fal.js';
 import { broadcast } from './realtime.js';
@@ -93,7 +96,7 @@ export interface GenerateForAccountArgs {
   autoSchedule?: boolean;
   /**
    * When true, schedule to ContentStudio after render if the API is configured
-   * and a workspace id exists (env or per-account), even when autoApprove is off.
+   * and a workspace id exists (env or per-account).
    * Use for "Generate & schedule post" from the dashboard.
    */
   scheduleToContentStudio?: boolean;
@@ -231,12 +234,14 @@ async function generateForAccountScript(
       throw new Error('Theme changed while post was in queue');
     }
     postId = args.reservedPostId;
+    args = mergePersonalScheduleIntentIntoArgs(args, existing.script);
+    const scheduleIntent = buildPersonalScheduleIntent(args, account);
     const [claimed] = await db
       .update(personalPosts)
       .set({
         topic,
         status: 'scripting',
-        script: {},
+        script: withPersonalScheduleIntent({}, scheduleIntent) as any,
         updatedAt: new Date(),
       })
       .where(and(eq(personalPosts.id, postId), eq(personalPosts.status, 'queued')))
@@ -245,6 +250,7 @@ async function generateForAccountScript(
       throw new Error('Could not claim reserved post — it may have been cancelled or superseded.');
     }
   } else {
+    const scheduleIntent = buildPersonalScheduleIntent(args, account);
     const [post] = await db
       .insert(personalPosts)
       .values({
@@ -255,7 +261,7 @@ async function generateForAccountScript(
           theme.defaultFormat ??
           'video',
         topic,
-        script: {}, // filled in step 1
+        script: withPersonalScheduleIntent({}, scheduleIntent) as any,
         status: 'scripting',
       })
       .returning();
@@ -646,19 +652,22 @@ async function generateForAccountScript(
     }
 
     /* ── 7. Persist final state ──────────────────────────────── */
-    const scriptFinal = {
-      ...(script as unknown as Record<string, unknown>),
-      outputAspectRatio,
-      generationInfo: buildLegacyGenerationInfo({
-        genConfig,
-        account,
-        character: character ? { voiceId: character.voiceId ?? null } : null,
-        musicAttribution,
-        musicSource,
-        themeTemplate: theme.template,
-        totalCostCents,
-      }),
-    };
+    const scriptFinal = withPersonalScheduleIntent(
+      {
+        ...(script as unknown as Record<string, unknown>),
+        outputAspectRatio,
+        generationInfo: buildLegacyGenerationInfo({
+          genConfig,
+          account,
+          character: character ? { voiceId: character.voiceId ?? null } : null,
+          musicAttribution,
+          musicSource,
+          themeTemplate: theme.template,
+          totalCostCents,
+        }),
+      },
+      scheduledAt ? null : buildPersonalScheduleIntent(args, account),
+    );
     await db
       .update(personalPosts)
       .set({

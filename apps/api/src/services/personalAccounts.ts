@@ -650,6 +650,10 @@ export async function resolvePersonalPostThumbnailDownload(
 export async function createReservedQueuedPersonalPost(args: {
   userId: string;
   accountId: string;
+  /** Persist so boot resume / cron still schedule after "Generate & schedule". */
+  scheduleToContentStudio?: boolean;
+  scheduledAt?: string;
+  autoSchedule?: boolean;
 }): Promise<{ id: string }> {
   assertDb();
   const account = await getAccount(args.userId, args.accountId);
@@ -664,6 +668,17 @@ export async function createReservedQueuedPersonalPost(args: {
     (account.generatorConfig as PersonalGeneratorConfig) ?? {};
   const useDirector = genConfig.useDirector ?? true;
   const templateId = useDirector ? `director:${theme.template}` : theme.template;
+  const { buildPersonalScheduleIntent, withPersonalScheduleIntent } = await import(
+    './personalContentPosting.js'
+  );
+  const intent = buildPersonalScheduleIntent(
+    {
+      scheduleToContentStudio: args.scheduleToContentStudio,
+      scheduledAt: args.scheduledAt,
+      autoSchedule: args.autoSchedule,
+    },
+    account,
+  );
   const db = getDb();
   const [row] = await db
     .insert(personalPosts)
@@ -675,7 +690,7 @@ export async function createReservedQueuedPersonalPost(args: {
         theme.defaultFormat ??
         'video',
       topic: PERSONAL_QUEUE_TOPIC_PLACEHOLDER,
-      script: { __personalQueueSlot: true } as any,
+      script: withPersonalScheduleIntent({ __personalQueueSlot: true }, intent) as any,
       status: 'queued',
     })
     .returning({ id: personalPosts.id });

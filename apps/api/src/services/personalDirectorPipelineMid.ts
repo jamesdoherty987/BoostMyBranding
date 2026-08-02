@@ -1808,21 +1808,45 @@ export async function directorPipelineFromResolvedStoryboard(
     .where(eq(personalAccounts.id, account.id));
 
   if (scheduleError) {
-    void maybeEmailPersonalPostFailed({
-      accountId: account.id,
-      postId,
-      topic: topic.trim() || 'Video',
-      error: `ContentStudio schedule failed: ${scheduleError}`,
-      includeSaveLink: true,
-    }).catch((e) => console.warn('[personal] failure email:', (e as Error).message));
+    try {
+      await maybeEmailPersonalPostFailed({
+        accountId: account.id,
+        postId,
+        topic: topic.trim() || 'Video',
+        error: `ContentStudio schedule failed: ${scheduleError}`,
+        includeSaveLink: true,
+      });
+    } catch (e) {
+      console.warn('[personal] failure email:', (e as Error).message);
+    }
+    // Still deliver the finished video when Schedule autopilot ran (CS failed, video exists).
+    if (args.fromScheduleAutopilot) {
+      try {
+        await maybeEmailPersonalVideoReady({
+          accountId: account.id,
+          postId,
+          videoUrl: stitched.videoUrl,
+          topic: topic.trim() || 'Video',
+          captionPreview: finalDirectorCaption,
+          force: true,
+        });
+      } catch (e) {
+        console.warn('[personal] video delivery email:', (e as Error).message);
+      }
+    }
   } else {
-    void maybeEmailPersonalVideoReady({
-      accountId: account.id,
-      postId,
-      videoUrl: stitched.videoUrl,
-      topic: topic.trim() || 'Video',
-      captionPreview: finalDirectorCaption,
-    }).catch((e) => console.warn('[personal] video delivery email:', (e as Error).message));
+    try {
+      await maybeEmailPersonalVideoReady({
+        accountId: account.id,
+        postId,
+        videoUrl: stitched.videoUrl,
+        topic: topic.trim() || 'Video',
+        captionPreview: finalDirectorCaption,
+        force: args.fromScheduleAutopilot === true,
+      });
+    } catch (e) {
+      console.warn('[personal] video delivery email:', (e as Error).message);
+    }
   }
 
   broadcast({
@@ -2119,21 +2143,44 @@ export async function finishDirectorFromPreStitchCheckpoint(
 
   const resumeTopic = (post.topic ?? '').trim() || 'Video';
   if (scheduleError) {
-    void maybeEmailPersonalPostFailed({
-      accountId: account.id,
-      postId,
-      topic: resumeTopic,
-      error: `ContentStudio schedule failed: ${scheduleError}`,
-      includeSaveLink: true,
-    }).catch((e) => console.warn('[personal] failure email:', (e as Error).message));
+    try {
+      await maybeEmailPersonalPostFailed({
+        accountId: account.id,
+        postId,
+        topic: resumeTopic,
+        error: `ContentStudio schedule failed: ${scheduleError}`,
+        includeSaveLink: true,
+      });
+    } catch (e) {
+      console.warn('[personal] failure email:', (e as Error).message);
+    }
+    if (genArgs.fromScheduleAutopilot) {
+      try {
+        await maybeEmailPersonalVideoReady({
+          accountId: account.id,
+          postId,
+          videoUrl: stitched.videoUrl,
+          topic: resumeTopic,
+          captionPreview: resumeDirectorCaption,
+          force: true,
+        });
+      } catch (e) {
+        console.warn('[personal] video delivery email:', (e as Error).message);
+      }
+    }
   } else {
-    void maybeEmailPersonalVideoReady({
-      accountId: account.id,
-      postId,
-      videoUrl: stitched.videoUrl,
-      topic: resumeTopic,
-      captionPreview: resumeDirectorCaption,
-    }).catch((e) => console.warn('[personal] video delivery email:', (e as Error).message));
+    try {
+      await maybeEmailPersonalVideoReady({
+        accountId: account.id,
+        postId,
+        videoUrl: stitched.videoUrl,
+        topic: resumeTopic,
+        captionPreview: resumeDirectorCaption,
+        force: genArgs.fromScheduleAutopilot === true,
+      });
+    } catch (e) {
+      console.warn('[personal] video delivery email:', (e as Error).message);
+    }
   }
 
   broadcast({

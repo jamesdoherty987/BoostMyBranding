@@ -66,6 +66,8 @@ async function loadPostForDelivery(accountId: string, postId: string) {
 
 /**
  * Auto-send after render. No-ops when the account toggle is off or email is unset.
+ * Pass `force: true` (schedule autopilot) to send whenever a delivery address is set,
+ * even if "Email when ready" is off.
  */
 export async function maybeEmailPersonalVideoReady(args: {
   accountId: string;
@@ -73,10 +75,16 @@ export async function maybeEmailPersonalVideoReady(args: {
   videoUrl: string | null | undefined;
   topic: string;
   captionPreview: string;
+  /** When true, ignore `emailVideoOnReady` and send if an address is configured. */
+  force?: boolean;
 }): Promise<void> {
   const result = await emailPersonalVideoReady({
-    ...args,
-    requireAutoToggle: true,
+    accountId: args.accountId,
+    postId: args.postId,
+    videoUrl: args.videoUrl,
+    topic: args.topic,
+    captionPreview: args.captionPreview,
+    requireAutoToggle: !args.force,
   });
   if (!result.ok && result.code === 'SEND_FAILED') {
     throw new Error(result.message);
@@ -204,9 +212,31 @@ export type EmailPersonalPostFailedResult =
   | { ok: true; to: string; resendId?: string }
   | {
       ok: false;
-      code: 'RESEND_OFF' | 'ACCOUNT_NOT_FOUND' | 'EMAIL_MISSING' | 'EMAIL_INVALID' | 'SEND_FAILED';
+      code:
+        | 'RESEND_OFF'
+        | 'ACCOUNT_NOT_FOUND'
+        | 'EMAIL_MISSING'
+        | 'EMAIL_INVALID'
+        | 'SEND_FAILED'
+        | 'DEDUPE';
       message: string;
     };
+
+/** Avoid double-sending the same failure from pipeline + scheduler safety net. */
+const recentFailureEmails = new Map<string, number>();
+const FAILURE_EMAIL_DEDUPE_MS = 10 * 60 * 1000;
+
+function rememberFailureEmail(postId: string, error: string): boolean {
+  const key = `${postId}::${error.slice(0, 240)}`;
+  const now = Date.now();
+  for (const [k, at] of recentFailureEmails) {
+    if (now - at > FAILURE_EMAIL_DEDUPE_MS) recentFailureEmails.delete(k);
+  }
+  const prev = recentFailureEmails.get(key);
+  if (prev != null && now - prev < FAILURE_EMAIL_DEDUPE_MS) return false;
+  recentFailureEmails.set(key, now);
+  return true;
+}
 
 /**
  * Always try to email on personal post failures when a delivery address is set.
@@ -271,6 +301,14 @@ export async function emailPersonalPostFailed(args: {
     };
   }
 
+  const errorText = (args.error || 'Unknown error').trim() || 'Unknown error';
+  if (!rememberFailureEmail(args.postId || args.accountId, errorText)) {
+    console.info('[personalPostFailedEmail] skipped: duplicate within dedupe window', {
+      postId: args.postId,
+    });
+    return { ok: false, code: 'DEDUPE', message: 'Duplicate failure email suppressed' };
+  }
+
   const post = await loadPostForDelivery(args.accountId, args.postId);
   const topic =
     titleFromScript(post?.script, post?.topic || args.topic || '') ||
@@ -285,7 +323,7 @@ export async function emailPersonalPostFailed(args: {
     accountName: row.accountName,
     topic,
     postId: args.postId,
-    error: args.error,
+    error: errorText,
     savePageUrl,
   });
 

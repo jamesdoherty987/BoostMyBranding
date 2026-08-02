@@ -114,6 +114,11 @@ export interface GenerateForAccountArgs {
    * boot recovery — not exposed on the public generate HTTP route.
    */
   resumeFromPostId?: string;
+  /**
+   * Set by Schedule autopilot cron. Forces delivery email when an address is
+   * configured, and prefers ContentStudio push when the account has it enabled.
+   */
+  fromScheduleAutopilot?: boolean;
 }
 
 export interface GenerateForAccountResult {
@@ -155,6 +160,7 @@ export async function generateForAccount(
       dryRun: args.dryRun,
       resumeFromPostId: args.resumeFromPostId,
       reservedPostId: args.reservedPostId,
+      fromScheduleAutopilot: args.fromScheduleAutopilot,
     });
   }
   return generateForAccountScript(args);
@@ -700,21 +706,44 @@ async function generateForAccountScript(
       .where(eq(personalAccounts.id, account.id));
 
     if (scheduleError) {
-      void maybeEmailPersonalPostFailed({
-        accountId: account.id,
-        postId,
-        topic,
-        error: `ContentStudio schedule failed: ${scheduleError}`,
-        includeSaveLink: true,
-      }).catch((e) => console.warn('[personal] failure email:', (e as Error).message));
+      try {
+        await maybeEmailPersonalPostFailed({
+          accountId: account.id,
+          postId,
+          topic,
+          error: `ContentStudio schedule failed: ${scheduleError}`,
+          includeSaveLink: true,
+        });
+      } catch (e) {
+        console.warn('[personal] failure email:', (e as Error).message);
+      }
+      if (args.fromScheduleAutopilot) {
+        try {
+          await maybeEmailPersonalVideoReady({
+            accountId: account.id,
+            postId,
+            videoUrl: rendered.videoUrl,
+            topic,
+            captionPreview: finalCaption,
+            force: true,
+          });
+        } catch (e) {
+          console.warn('[personal] video delivery email:', (e as Error).message);
+        }
+      }
     } else {
-      void maybeEmailPersonalVideoReady({
-        accountId: account.id,
-        postId,
-        videoUrl: rendered.videoUrl,
-        topic,
-        captionPreview: finalCaption,
-      }).catch((e) => console.warn('[personal] video delivery email:', (e as Error).message));
+      try {
+        await maybeEmailPersonalVideoReady({
+          accountId: account.id,
+          postId,
+          videoUrl: rendered.videoUrl,
+          topic,
+          captionPreview: finalCaption,
+          force: args.fromScheduleAutopilot === true,
+        });
+      } catch (e) {
+        console.warn('[personal] video delivery email:', (e as Error).message);
+      }
     }
 
     broadcastEvent(account.id, postId, 'done', { videoUrl: rendered.videoUrl });

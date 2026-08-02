@@ -11,7 +11,7 @@
  */
 
 import cron from 'node-cron';
-import { and, eq, isNull, isNotNull, lt, lte } from 'drizzle-orm';
+import { and, desc, eq, isNull, isNotNull, lt, lte } from 'drizzle-orm';
 import {
   getDb,
   isDbConfigured,
@@ -21,6 +21,7 @@ import {
   clients,
   contentBatches,
   personalAccounts,
+  personalPosts,
 } from '@boost/database';
 import { schedulePost } from './contentStudio.js';
 import { analyzeImage } from './claude.js';
@@ -40,6 +41,7 @@ import {
   personalDirectorResumeOnBootEnabled,
 } from './personalAccounts.js';
 import { scheduleReadyPersonalPosts } from './personalContentPosting.js';
+import { maybeEmailPersonalPostFailed } from './personalVideoDeliveryEmail.js';
 
 export function startScheduler() {
   if (!isDbConfigured()) {
@@ -308,115 +310,280 @@ export async function generateMonthlyBatches() {
 // and `next_run_at` in the past, generates one post each, then rolls `next_run_at`.
 // Accounts with scheduled generation off only run from Generate.
 //
-// One generation can take 30-120 seconds, so we process accounts in parallel
-// with a small cap so we don't stampede Remotion/Claude quotas.
+// Director long-form can take well over 5 minutes, so overlapping cron ticks must
+// not start a second pass (that stacks FFmpeg / fal jobs and looks like flaky
+// schedule). Soft failures that return `{ status: 'failed' }` without throwing
+// must also re-queue soon — otherwise a burned slot skips until the next spacing.
 // ---------------------------------------------------------------------------
+
+/** In-process guard: skip a tick while a previous personal autopilot pass is still running. */
+let personalAutopilotInFlight = false;
+
+const PERSONAL_AUTOPILOT_RETRY_MS = 60 * 60 * 1000;
+
+async function delayPersonalAutopilotRetry(accountId: string): Promise<void> {
+  if (!isDbConfigured()) return;
+  const db = getDb();
+  const delayed = new Date(Date.now() + PERSONAL_AUTOPILOT_RETRY_MS);
+  await db
+    .update(personalAccounts)
+    .set({ nextRunAt: delayed, updatedAt: new Date() })
+    .where(eq(personalAccounts.id, accountId));
+}
+
+function personalAutopilotProducedVideo(result: {
+  videoUrl: string | null;
+  status: string;
+}): boolean {
+  if (!result.videoUrl) return false;
+  if (result.status === 'failed' || result.status === 'skipped') return false;
+  return true;
+}
+
+/** Prefer the persisted post errorMessage so the email matches the dashboard. */
+async function resolvePersonalAutopilotFailure(args: {
+  accountId: string;
+  postId?: string;
+  fallback: string;
+}): Promise<{ postId: string; topic: string; error: string; includeSaveLink: boolean }> {
+  const fallback = args.fallback.trim() || 'Scheduled generation failed';
+  if (!isDbConfigured()) {
+    return {
+      postId: args.postId || args.accountId,
+      topic: 'Scheduled video',
+      error: fallback,
+      includeSaveLink: false,
+    };
+  }
+
+  try {
+    const db = getDb();
+    if (args.postId) {
+      const [byId] = await db
+        .select({
+          id: personalPosts.id,
+          topic: personalPosts.topic,
+          errorMessage: personalPosts.errorMessage,
+          videoUrl: personalPosts.videoUrl,
+        })
+        .from(personalPosts)
+        .where(and(eq(personalPosts.id, args.postId), eq(personalPosts.accountId, args.accountId)))
+        .limit(1);
+      if (byId) {
+        const fromDb = (byId.errorMessage ?? '').trim();
+        return {
+          postId: byId.id,
+          topic: (byId.topic ?? '').trim() || 'Scheduled video',
+          error: fromDb || fallback,
+          includeSaveLink: Boolean((byId.videoUrl ?? '').trim()),
+        };
+      }
+    }
+
+    // Thrown failures often leave a just-marked failed row without returning postId.
+    const recentCutoff = new Date(Date.now() - 30 * 60 * 1000);
+    const recentFailed = await db
+      .select({
+        id: personalPosts.id,
+        topic: personalPosts.topic,
+        errorMessage: personalPosts.errorMessage,
+        videoUrl: personalPosts.videoUrl,
+        updatedAt: personalPosts.updatedAt,
+      })
+      .from(personalPosts)
+      .where(and(eq(personalPosts.accountId, args.accountId), eq(personalPosts.status, 'failed')))
+      .orderBy(desc(personalPosts.updatedAt))
+      .limit(8);
+
+    const fresh = recentFailed.find(
+      (r) => r.updatedAt && r.updatedAt.getTime() >= recentCutoff.getTime(),
+    );
+    if (fresh) {
+      const fromDb = (fresh.errorMessage ?? '').trim();
+      return {
+        postId: fresh.id,
+        topic: (fresh.topic ?? '').trim() || 'Scheduled video',
+        error: fromDb || fallback,
+        includeSaveLink: Boolean((fresh.videoUrl ?? '').trim()),
+      };
+    }
+  } catch {
+    /* fall through to fallback */
+  }
+
+  return {
+    postId: args.postId || args.accountId,
+    topic: 'Scheduled video',
+    error: fallback,
+    includeSaveLink: false,
+  };
+}
+
+async function emailPersonalAutopilotFailure(args: {
+  accountId: string;
+  postId?: string;
+  fallback: string;
+}): Promise<void> {
+  const resolved = await resolvePersonalAutopilotFailure(args);
+  await maybeEmailPersonalPostFailed({
+    accountId: args.accountId,
+    postId: resolved.postId,
+    topic: resolved.topic,
+    error: resolved.error,
+    includeSaveLink: resolved.includeSaveLink,
+  });
+}
 
 export async function runDuePersonalAccounts(): Promise<{
   processed: number;
   results: Array<{ accountId: string; ok: boolean; postId?: string; error?: string }>;
 }> {
   if (!isDbConfigured()) return { processed: 0, results: [] };
-  const db = getDb();
-  const [run] = await db
-    .insert(cronRuns)
-    .values({ jobName: 'personal_generate', status: 'running' })
-    .returning();
-
-  const now = new Date();
-  const due = await db
-    .select()
-    .from(personalAccounts)
-    .where(
-      and(
-        eq(personalAccounts.status, 'active'),
-        eq(personalAccounts.autoGenerateOnSchedule, true),
-        isNotNull(personalAccounts.nextRunAt),
-        lte(personalAccounts.nextRunAt, now),
-      ),
-    )
-    .limit(8);
-
-  const results: Array<{
-    accountId: string;
-    ok: boolean;
-    postId?: string;
-    error?: string;
-    skipped?: boolean;
-  }> = [];
-
-  // Process one account at a time so heavy director pipelines (many fal jobs)
-  // do not stack on top of each other and trip fal.ai's concurrent-run cap.
-  const CONCURRENCY = 1;
-  for (let i = 0; i < due.length; i += CONCURRENCY) {
-    const batch = due.slice(i, i + CONCURRENCY);
-    const outs = await Promise.all(
-      batch.map(async (acc) => {
-        // Claim the slot first so overlapping cron ticks / replicas cannot
-        // enqueue duplicate generations while next_run_at is still due.
-        const claimedNext = rollNextRunAt(acc, new Date());
-        const [claimed] = await db
-          .update(personalAccounts)
-          .set({ nextRunAt: claimedNext, updatedAt: new Date() })
-          .where(
-            and(
-              eq(personalAccounts.id, acc.id),
-              eq(personalAccounts.status, 'active'),
-              eq(personalAccounts.autoGenerateOnSchedule, true),
-              isNotNull(personalAccounts.nextRunAt),
-              lte(personalAccounts.nextRunAt, now),
-            ),
-          )
-          .returning({ id: personalAccounts.id });
-        if (!claimed) {
-          return {
-            accountId: acc.id,
-            ok: true,
-            skipped: true,
-          };
-        }
-
-        try {
-          const result = await enqueuePersonalGenerateForAccount(acc.id, () =>
-            generateForAccount({ accountId: acc.id }),
-          );
-          return {
-            accountId: acc.id,
-            ok: true,
-            postId: result.postId,
-          };
-        } catch (e) {
-          // Delay by 1 hour so a broken account doesn't re-fire every 5 minutes.
-          const delayed = new Date(Date.now() + 60 * 60 * 1000);
-          await db
-            .update(personalAccounts)
-            .set({ nextRunAt: delayed, updatedAt: new Date() })
-            .where(eq(personalAccounts.id, acc.id));
-          const error = (e as Error).message;
-          console.error(`[cron personal] account ${acc.id} failed:`, error);
-          return {
-            accountId: acc.id,
-            ok: false,
-            error,
-          };
-        }
-      }),
+  if (personalAutopilotInFlight) {
+    console.warn(
+      '[cron personal] previous pass still running — skipping this tick to avoid stacking pipelines',
     );
-    results.push(...outs);
+    return { processed: 0, results: [] };
   }
+  personalAutopilotInFlight = true;
 
-  if (run) {
-    await db
-      .update(cronRuns)
-      .set({
-        finishedAt: new Date(),
-        status: 'ok',
-        details: { processed: results.length, results },
-      })
-      .where(eq(cronRuns.id, run.id));
+  try {
+    const db = getDb();
+    const [run] = await db
+      .insert(cronRuns)
+      .values({ jobName: 'personal_generate', status: 'running' })
+      .returning();
+
+    const now = new Date();
+    const due = await db
+      .select()
+      .from(personalAccounts)
+      .where(
+        and(
+          eq(personalAccounts.status, 'active'),
+          eq(personalAccounts.autoGenerateOnSchedule, true),
+          isNotNull(personalAccounts.nextRunAt),
+          lte(personalAccounts.nextRunAt, now),
+        ),
+      )
+      .limit(8);
+
+    const results: Array<{
+      accountId: string;
+      ok: boolean;
+      postId?: string;
+      error?: string;
+      skipped?: boolean;
+    }> = [];
+
+    // Process one account at a time so heavy director pipelines (many fal jobs)
+    // do not stack on top of each other and trip fal.ai's concurrent-run cap.
+    const CONCURRENCY = 1;
+    for (let i = 0; i < due.length; i += CONCURRENCY) {
+      const batch = due.slice(i, i + CONCURRENCY);
+      const outs = await Promise.all(
+        batch.map(async (acc) => {
+          // Claim the slot first so overlapping cron ticks / replicas cannot
+          // enqueue duplicate generations while next_run_at is still due.
+          const claimedNext = rollNextRunAt(acc, new Date());
+          const [claimed] = await db
+            .update(personalAccounts)
+            .set({ nextRunAt: claimedNext, updatedAt: new Date() })
+            .where(
+              and(
+                eq(personalAccounts.id, acc.id),
+                eq(personalAccounts.status, 'active'),
+                eq(personalAccounts.autoGenerateOnSchedule, true),
+                isNotNull(personalAccounts.nextRunAt),
+                lte(personalAccounts.nextRunAt, now),
+              ),
+            )
+            .returning({ id: personalAccounts.id });
+          if (!claimed) {
+            return {
+              accountId: acc.id,
+              ok: true,
+              skipped: true,
+            };
+          }
+
+          try {
+            const result = await enqueuePersonalGenerateForAccount(acc.id, () =>
+              generateForAccount({
+                accountId: acc.id,
+                fromScheduleAutopilot: true,
+                // Prefer account posting settings; also force CS when autoSchedule is on
+                // so a due Schedule run always attempts the send path it is configured for.
+                autoSchedule: acc.autoSchedule,
+                scheduleToContentStudio: acc.autoSchedule === true,
+              }),
+            );
+            if (!personalAutopilotProducedVideo(result)) {
+              // Pipeline often returns { status: 'failed', skipped: true } without
+              // throwing (blocked topic, insufficient shots, etc.). Claim already
+              // advanced next_run_at — pull it back so we retry in ~1h instead of
+              // burning the whole spacing / next-day window.
+              await delayPersonalAutopilotRetry(acc.id);
+              const error =
+                result.reason?.trim() ||
+                `generation ended with status="${result.status}" and no video`;
+              console.error(`[cron personal] account ${acc.id} soft-failed:`, error);
+              void emailPersonalAutopilotFailure({
+                accountId: acc.id,
+                postId: result.postId || undefined,
+                fallback: error,
+              }).catch((e) =>
+                console.warn('[cron personal] failure email:', (e as Error).message),
+              );
+              return {
+                accountId: acc.id,
+                ok: false,
+                postId: result.postId || undefined,
+                error,
+              };
+            }
+            return {
+              accountId: acc.id,
+              ok: true,
+              postId: result.postId,
+            };
+          } catch (e) {
+            // Delay by 1 hour so a broken account doesn't re-fire every 5 minutes.
+            await delayPersonalAutopilotRetry(acc.id);
+            const error = (e as Error).message;
+            console.error(`[cron personal] account ${acc.id} failed:`, error);
+            void emailPersonalAutopilotFailure({
+              accountId: acc.id,
+              fallback: error,
+            }).catch((err) =>
+              console.warn('[cron personal] failure email:', (err as Error).message),
+            );
+            return {
+              accountId: acc.id,
+              ok: false,
+              error,
+            };
+          }
+        }),
+      );
+      results.push(...outs);
+    }
+
+    if (run) {
+      await db
+        .update(cronRuns)
+        .set({
+          finishedAt: new Date(),
+          status: 'ok',
+          details: { processed: results.length, results },
+        })
+        .where(eq(cronRuns.id, run.id));
+    }
+
+    return { processed: results.length, results };
+  } finally {
+    personalAutopilotInFlight = false;
   }
-
-  return { processed: results.length, results };
 }
 
 /**

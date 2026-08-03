@@ -336,14 +336,50 @@ function buildFallbackCaption(
   title: string,
   topic: string,
 ): string {
+  const headline = (title || topic || '').trim();
+  const hookLine = (hook ?? '').trim();
+  const cta = (outro ?? '').trim();
+  const lead =
+    hookLine ||
+    (headline
+      ? `${headline.replace(/\?+$/, '')} — here’s the short version.`
+      : 'Worth the watch.');
   const parts = [
-    (hook ?? '').trim(),
-    (title || topic || '').trim()
-      ? `This video covers ${(title || topic).trim().replace(/\?+$/, '')}.`
+    lead.slice(0, 220),
+    headline && hookLine && !hookLine.toLowerCase().includes(headline.toLowerCase().slice(0, 24))
+      ? `Packed into one watch: ${headline.replace(/\?+$/, '')}.`
       : '',
-    (outro ?? '').trim(),
+    cta ? cta.slice(0, 120) : 'Like + subscribe if you want more like this.',
   ].filter(Boolean);
-  return parts.join('\n\n').slice(0, 2000) || (topic || title || 'New video').trim();
+  return normalizeYoutubeCaption(parts.join('\n\n'), { longform: false });
+}
+
+/**
+ * Keep YouTube/feed descriptions short, front-loaded, and scannable.
+ * Search + the “more” fold reward a tight first line — not essay paste.
+ */
+export function normalizeYoutubeCaption(
+  raw: string,
+  opts?: { longform?: boolean },
+): string {
+  let t = (raw ?? '').replace(/\r\n/g, '\n').trim();
+  if (!t) return '';
+  t = t
+    .replace(/^(in this video co(?:mes|vers?|ntains?)|in this video we(?:'ll| will)|today we(?:'ll| will)|welcome back[^.\n]*[.!]?)\s*/gi, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  const max = opts?.longform ? 900 : 420;
+  if (t.length <= max) return t;
+  const cut = t.slice(0, max);
+  const atPara = cut.lastIndexOf('\n\n');
+  const atSent = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('! '), cut.lastIndexOf('? '));
+  const at =
+    atPara >= Math.floor(max * 0.45)
+      ? atPara
+      : atSent >= Math.floor(max * 0.45)
+        ? atSent + 1
+        : max;
+  return cut.slice(0, at).trim();
 }
 
 export async function planStoryboard(args: DirectArgs): Promise<Storyboard> {
@@ -425,7 +461,11 @@ export async function planStoryboard(args: DirectArgs): Promise<Storyboard> {
     title: storyboardTitle,
     hook: raw.hook ?? '',
     outro: raw.outro ?? '',
-    caption: (raw.caption ?? '').trim() || buildFallbackCaption(raw.hook, raw.outro, storyboardTitle, args.topic),
+    caption: normalizeYoutubeCaption(
+      (raw.caption ?? '').trim() ||
+        buildFallbackCaption(raw.hook, raw.outro, storyboardTitle, args.topic),
+      { longform: args.longform?.enabled === true },
+    ),
     hashtags: raw.hashtags ?? args.theme.defaultHashtags ?? [],
     acts: normaliseActs(raw.acts, args.theme, normOpts),
     editPlan: {
@@ -1872,7 +1912,20 @@ function buildDirectorPrompt(args: DirectArgs): string {
 
   const narrationQualityRule =
     '- **Narration quality:** Hook and every \`voiceover\` line must **earn** the listen — concrete **nouns, verbs, and facts** (who, where, what changed, how much). Ban vague hype ("insane", "you won\'t believe", "crazy", "wild") unless the style bible demands that register. Avoid filler stacks ("this thing", "that stuff", "something about"). **Vary** how adjacent lines **start**; do not chain many lines that all open with "So…", "And…", or "But…". Prefer active voice; cut throat-clearing ("ok so basically", "here\'s the thing") unless the account voice is explicitly casual that way.\n' +
-    '- **Outro + caption:** \`outro\` = one decisive CTA line (no ramble). \`caption\` is the **YouTube / feed description** viewers see under the video — complete sentences, no hashtag stuffing inside the prose; keep \`hashtags\` short and on-topic in the separate array.\n';
+    '- **Outro + caption:** \`outro\` = one decisive CTA line (no ramble). \`caption\` is the **YouTube description** under the video — **short**, scannable, and built to help get clicks/views (see caption rules below). No hashtag stuffing in the prose; keep \`hashtags\` short and on-topic in the separate array.\n';
+
+  const youtubeCaptionRules = longform
+    ? `\n\nTOP-LEVEL JSON "caption" (YouTube description — required for long-form):\n` +
+      `- Keep it **tight**: **2 short paragraphs** (~280–700 characters of prose). Prefer shorter over longer.\n` +
+      `- **Line 1 (above the fold):** curiosity + value in plain language — what the viewer gets / the surprising angle. Front-load keywords that match the title/topic (YouTube search + the truncated preview).\n` +
+      `- **Line 2:** 2–4 concrete takeaways or beats (specific nouns/numbers) — not a full transcript summary.\n` +
+      `- End with one soft CTA (subscribe / comment a take / watch next) in the account voice.\n` +
+      `- Write for **clicks and retention framing**, not an essay: no "In this video we will…", no filler, no emoji spam (≤2 total if any).\n` +
+      `- **Do not** put hashtags in the caption prose — use the \`hashtags\` array only.\n`
+    : `\n\nTOP-LEVEL JSON "caption" (YouTube / Shorts description):\n` +
+      `- **1–2 short sentences** (~120–320 characters). First sentence must stand alone as a hook that makes someone click or keep watching.\n` +
+      `- Front-load the topic keywords; add one concrete detail or payoff teaser; optional soft CTA.\n` +
+      `- No essay, no "In this video…", ≤2 emoji, no hashtags in the prose (use \`hashtags\` array).\n`;
 
   const locked = args.lockedVideoTitle?.trim();
   const exampleTitleCount = (args.styleBible?.exampleVideoTitles ?? []).filter(Boolean).length;
@@ -1930,13 +1983,13 @@ extreme_wide, wide, medium_wide, medium, medium_close, close_up, extreme_close_u
 SHOTS GRAMMAR (transition out):
 hard_cut (default), match_cut, whip_pan, dip_to_black, cross_dissolve, flash_cut, jump_cut, none.
 ${longform && !locked ? `\n\nTOP-LEVEL JSON "title" (no saved example titles — operator must still get a **feed-shaped** headline):\n- One short line (~55–75 characters): curiosity question ("How…?", "What…?") or one blunt claim — same energy as short educational YouTube.\n- **Do not** use two-part "Label: subtitle" / episode / podcast season packaging (e.g. "Winter Cache: How…") — that reads like TV seasons, not this product's title style.\n` : ''}
-${longform ? `\n\nTOP-LEVEL JSON "caption" (YouTube description — required for long-form):\n- Write a real **YouTube description**, not a social one-liner: **2–4 short paragraphs** (~600–1,800 characters of prose).\n- Paragraph 1: hook the topic in plain language (what this video answers).\n- Middle: 2–5 concrete takeaways or beats from the storyboard (specific nouns — no filler).\n- Last line: one soft CTA (subscribe / watch next / comment) matching the account voice.\n- **Do not** put hashtags in the caption prose — use the \`hashtags\` array only.\n- No "In this video we will…" essay openings; no emoji spam (≤3 total if any).\n` : ''}
+${youtubeCaptionRules}
 OUTPUT contract — return ONLY JSON:
 {
 ${titleJsonLine}
   "hook": "<opening line ≤3s: one sharp claim or curiosity; concrete nouns; no stacked clichés>",
   "outro": "<closing CTA, one sentence>",
-  "caption": "${longform ? '<YouTube description: 2–4 short paragraphs as specified above>' : '<post caption / description, 1–3 sentences, ≤3 emoji>'}",
+  "caption": "${longform ? '<YouTube description: 2 short paragraphs, ~280–700 chars, hook first + takeaways + soft CTA>' : '<YouTube/Shorts description: 1–2 sentences, ~120–320 chars, keyword-front hook>'}",
   "hashtags": ["tag", ...],
   "editPlan": {
     "pacing": "slow|medium|fast",

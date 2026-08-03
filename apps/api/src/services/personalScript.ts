@@ -26,6 +26,7 @@ import {
 } from './personalContentHints.js';
 import { resolveLockedChannelVideoTitle } from './personalChannelTitle.js';
 import { clampLongformTargetSeconds } from './personalLongform.js';
+import { normalizeYoutubeCaption } from './personalDirector.js';
 
 export interface PersonalScript {
   title: string;
@@ -156,6 +157,17 @@ export async function generateScript(
 
   if (script.beats.length === 0) {
     throw new Error('Script came back with no beats');
+  }
+
+  script.caption = normalizeYoutubeCaption((script.caption ?? '').trim(), {
+    longform: args.longform === true,
+  });
+  if (!script.caption) {
+    script.caption = normalizeYoutubeCaption(
+      [(script.hook ?? '').trim(), (script.outro ?? '').trim()].filter(Boolean).join('\n\n') ||
+        (script.title || args.topic),
+      { longform: args.longform === true },
+    );
   }
 
   return script;
@@ -292,7 +304,7 @@ OUTPUT CONTRACT:
    - \`durationSeconds\` — ${args.longform === true ? 'usually 3–10s per beat; vary pacing.' : 'usually 2-5s.'}
    - \`eyebrow\` — optional 1-3 word label.
 3. **Outro** — 1 sentence CTA in the theme's voice. Conversational, not salesy.
-4. **Caption** — 1-3 sentences, 0-3 emoji. Not a summary of the video; a hook for readers.
+4. **Caption** — YouTube/Shorts description: 1–2 short sentences (~120–320 chars). Front-load topic keywords, tease one concrete payoff, optional soft CTA. Not a full summary; built to help get clicks/views. 0–2 emoji. No hashtags in the prose.
 5. **Hashtags** — 5-10 hashtags.
 6. **musicMoodOverride** — only when a specific mood suits this topic better than the theme default.
 
@@ -309,7 +321,7 @@ ${titleJsonLine}
     { "order": 0, "voiceover": "...", "onScreen": "...", "imageQuery": "...", "eyebrow": "...", "durationSeconds": 3 }
   ],
   "outro": "<final CTA>",
-  "caption": "<post caption>",
+  "caption": "<YouTube description: 1–2 short sentences, keyword-front hook>",
   "hashtags": ["tag1", "tag2"],
   "musicMoodOverride": "<optional>"
 }

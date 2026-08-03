@@ -167,9 +167,20 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
   // Multer — size limits, wrong field names, etc.
   if (err instanceof multer.MulterError) {
     console.warn('[api] upload:', err.code, err.message);
+    const multerMessages: Record<string, string> = {
+      LIMIT_FILE_COUNT:
+        'Too many files in one upload. Personal media allows up to 10 files at a time — upload in batches.',
+      LIMIT_FILE_SIZE:
+        'A file is too large. Personal media allows up to 50MB per file.',
+      LIMIT_UNEXPECTED_FILE:
+        'Unexpected upload field. Refresh the page and try again.',
+      LIMIT_PART_COUNT: 'Upload has too many parts. Try fewer files.',
+      LIMIT_FIELD_COUNT: 'Upload has too many fields. Refresh and try again.',
+      LIMIT_FIELD_VALUE: 'An upload field value is too large.',
+    };
     return res.status(400).json({
       error: {
-        message: err.message || 'Upload rejected',
+        message: multerMessages[err.code] ?? err.message ?? 'Upload rejected',
         code: err.code,
       },
     });

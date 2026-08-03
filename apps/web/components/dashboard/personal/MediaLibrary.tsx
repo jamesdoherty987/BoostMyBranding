@@ -50,7 +50,12 @@ import type {
   PersonalCharacter,
   PersonalMediaRole,
 } from '@boost/api-client';
+import { ApiError } from '@boost/api-client';
 import { api } from '@/lib/dashboard/api';
+
+/** Must match `mediaUpload.array('files', 10)` / multer `limits.files` on the API. */
+const MAX_FILES_PER_UPLOAD = 10;
+const MAX_FILE_MB = 50;
 
 const ROLES: Array<{ value: PersonalMediaRole; label: string; hint: string }> = [
   { value: 'style_reference', label: 'Style reference', hint: 'This is the vibe — palette, lighting, composition.' },
@@ -163,11 +168,40 @@ function UploadDropzone({
   const fileInput = useRef<HTMLInputElement>(null);
 
   function addFiles(files: FileList | File[]) {
-    setPending((prev) => [...prev, ...Array.from(files).slice(0, 10)]);
+    const incoming = Array.from(files);
+    if (incoming.length === 0) return;
+    setPending((prev) => {
+      const room = MAX_FILES_PER_UPLOAD - prev.length;
+      if (room <= 0) {
+        queueMicrotask(() =>
+          toast.error(
+            'Too many files',
+            `Max ${MAX_FILES_PER_UPLOAD} files per upload. Remove some from the queue or upload first.`,
+          ),
+        );
+        return prev;
+      }
+      if (incoming.length > room) {
+        queueMicrotask(() =>
+          toast.error(
+            'Too many files',
+            `Max ${MAX_FILES_PER_UPLOAD} files per upload. Added ${room}, skipped ${incoming.length - room}.`,
+          ),
+        );
+      }
+      return [...prev, ...incoming.slice(0, room)];
+    });
   }
 
   async function submit() {
     if (pending.length === 0) return;
+    if (pending.length > MAX_FILES_PER_UPLOAD) {
+      toast.error(
+        'Too many files',
+        `Max ${MAX_FILES_PER_UPLOAD} files per upload. Remove some, then try again.`,
+      );
+      return;
+    }
     setBusy(true);
     try {
       const { uploaded, skipped } = await api.uploadPersonalMedia(
@@ -212,7 +246,15 @@ function UploadDropzone({
       }
       setProgress(0);
     } catch (e) {
-      toast.error('Upload failed', (e as Error).message);
+      const err = e as ApiError;
+      const detail =
+        err.code === 'LIMIT_FILE_COUNT'
+          ? `Max ${MAX_FILES_PER_UPLOAD} files per upload. Remove some from the queue or upload in batches.`
+          : err.code === 'LIMIT_FILE_SIZE'
+            ? `Each file must be ${MAX_FILE_MB}MB or smaller.`
+            : err.message || 'Upload failed';
+      toast.error('Upload failed', detail);
+      setProgress(0);
     } finally {
       setBusy(false);
     }
@@ -305,7 +347,8 @@ function UploadDropzone({
               browse
             </button>
             <span className="ml-2 block text-slate-400 sm:mt-0 sm:inline">
-              (jpg, png, webp, mp4, mov, webm, mp3, wav — max 50MB each)
+              (jpg, png, webp, mp4, mov, webm, mp3, wav — max {MAX_FILE_MB}MB each,{' '}
+              {MAX_FILES_PER_UPLOAD} files per upload)
             </span>
           </div>
           <label className="flex shrink-0 items-center gap-1 text-xs text-slate-600">

@@ -73,9 +73,9 @@ export default function PersonalDashboardPage() {
   const [creating, setCreating] = useState(false);
 
   useEffect(() => {
-    if (!selectedId && accounts && accounts.length > 0) {
-      setSelectedId(accounts[0]!.id);
-    }
+    if (!accounts) return;
+    if (selectedId && accounts.some((a) => a.id === selectedId)) return;
+    setSelectedId(accounts[0]?.id ?? null);
   }, [accounts, selectedId]);
 
   const selected = accounts?.find((a) => a.id === selectedId) ?? null;
@@ -232,6 +232,10 @@ export default function PersonalDashboardPage() {
                 themes={themes ?? []}
                 features={features}
                 onChanged={refetchAccounts}
+                onDeleted={() => {
+                  setSelectedId(null);
+                  void refetchAccounts();
+                }}
               />
             ) : accountsError ? (
               <Card>
@@ -529,12 +533,38 @@ function AccountDetail({
   themes,
   features,
   onChanged,
+  onDeleted,
 }: {
   account: PersonalAccount;
   themes: PersonalThemeSummary[];
   features: Awaited<ReturnType<typeof api.personalFeatures>> | undefined;
   onChanged: () => void;
+  onDeleted: () => void;
 }) {
+  const [deletingChannel, setDeletingChannel] = useState(false);
+
+  async function deleteChannel() {
+    if (
+      !(await confirmDialog({
+        title: 'Delete this channel?',
+        description: 'This removes the channel and all of its posts permanently. This cannot be undone.',
+        confirmLabel: 'Delete channel',
+        danger: true,
+      }))
+    ) {
+      return;
+    }
+    setDeletingChannel(true);
+    try {
+      await api.deletePersonalAccount(account.id);
+      toast.success('Channel deleted');
+      onDeleted();
+    } catch (e) {
+      toast.error('Could not delete', (e as Error).message);
+    } finally {
+      setDeletingChannel(false);
+    }
+  }
   const theme = themes.find((t) => t.id === account.themeId);
   const {
     data: posts,
@@ -683,9 +713,21 @@ function AccountDetail({
                 </p>
               </div>
             </div>
-            <Badge className="shrink-0 self-start sm:self-auto" tone={account.status === 'active' ? 'success' : 'default'}>
-              {account.status}
-            </Badge>
+            <div className="flex shrink-0 flex-wrap items-center gap-2 self-start sm:self-auto">
+              <Badge tone={account.status === 'active' ? 'success' : 'default'}>
+                {account.status}
+              </Badge>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-rose-600 hover:bg-rose-50 hover:text-rose-700"
+                onClick={() => void deleteChannel()}
+                disabled={deletingChannel}
+              >
+                {deletingChannel ? <Spinner className="h-4 w-4" /> : <Trash2 className="h-4 w-4" />}
+                Delete channel
+              </Button>
+            </div>
           </div>
 
           {/* ── Generate panel ──────────────────────────────── */}
@@ -818,7 +860,12 @@ function AccountDetail({
               </div>
             </CardContent>
           </Card>
-          <ScheduleCard account={account} onChanged={onChanged} onOpenPostingTab={() => setTab('posting')} />
+          <ScheduleCard
+            account={account}
+            onChanged={onChanged}
+            onDeleted={onDeleted}
+            onOpenPostingTab={() => setTab('posting')}
+          />
           <TopicsCard account={account} onChanged={onChanged} theme={theme} />
           <PostsGrid
             accountId={account.id}
@@ -1334,10 +1381,12 @@ function TabButton({
 function ScheduleCard({
   account,
   onChanged,
+  onDeleted,
   onOpenPostingTab,
 }: {
   account: PersonalAccount;
   onChanged: () => void;
+  onDeleted: () => void;
   onOpenPostingTab: () => void;
 }) {
   const [postsPerDay, setPostsPerDay] = useState(account.postsPerDay);
@@ -1422,7 +1471,7 @@ function ScheduleCard({
     try {
       await api.deletePersonalAccount(account.id);
       toast.success('Channel deleted');
-      onChanged();
+      onDeleted();
     } catch (e) {
       toast.error('Could not delete', (e as Error).message);
     } finally {
@@ -1469,8 +1518,15 @@ function ScheduleCard({
                 </>
               )}
             </Button>
-            <Button variant="ghost" size="sm" onClick={deleteAcc} disabled={busy}>
-              <Trash2 className="h-4 w-4 text-rose-500" />
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-rose-600 hover:bg-rose-50 hover:text-rose-700"
+              onClick={deleteAcc}
+              disabled={busy}
+            >
+              <Trash2 className="h-4 w-4" />
+              Delete channel
             </Button>
           </div>
         </div>

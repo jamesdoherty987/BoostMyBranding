@@ -128,6 +128,26 @@ export interface CreateAccountArgs {
   customAudioAttribution?: string | null;
 }
 
+/**
+ * Defaults applied when a new Personal channel is created (and not overridden
+ * in the create payload). Existing channels keep whatever is already stored.
+ */
+export const DEFAULT_PERSONAL_GENERATOR_CONFIG: PersonalGeneratorConfig = {
+  kenBurnsOnStills: false,
+  averageClipSeconds: 4,
+  ttsProvider: 'openai',
+  /** AI paints fact labels into stills — not FFmpeg keyword pops. */
+  allowSparseImageText: true,
+  keywordPopStyle: 'off',
+  namesNumbersTitleCard: false,
+};
+
+function withNewAccountGeneratorDefaults(
+  config: PersonalGeneratorConfig | null | undefined,
+): PersonalGeneratorConfig {
+  return { ...DEFAULT_PERSONAL_GENERATOR_CONFIG, ...(config ?? {}) };
+}
+
 export async function createAccount(args: CreateAccountArgs) {
   assertDb();
   const theme =
@@ -165,7 +185,7 @@ export async function createAccount(args: CreateAccountArgs) {
       watermarkHandle: args.watermarkHandle,
       characterId: args.characterId ?? null,
       styleBible: stripRemovedStyleBibleKeys(args.styleBible ?? null),
-      generatorConfig: args.generatorConfig,
+      generatorConfig: withNewAccountGeneratorDefaults(args.generatorConfig),
       formatKind: args.formatKind ?? theme.defaultFormat ?? 'video',
       customAudioUrl: args.customAudioUrl ?? null,
       customAudioAttribution: args.customAudioAttribution ?? null,

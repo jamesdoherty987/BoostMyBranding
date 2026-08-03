@@ -575,13 +575,35 @@ export async function directorPipelineFromResolvedStoryboard(
     const prevFs = timelineIndex > 0 ? flat[timelineIndex - 1] : undefined;
     const previousShotOneLiner = prevFs
       ? [
-          prevFs.shot.description?.replace(/\s+/g, ' ').trim().slice(0, 130),
+          prevFs.shot.description?.replace(/\s+/g, ' ').trim().slice(0, 160),
+          prevFs.shot.subjectAction?.trim()
+            ? `action: ${prevFs.shot.subjectAction.trim().replace(/\s+/g, ' ').slice(0, 80)}`
+            : undefined,
+          `cam=${prevFs.shot.camera}/${prevFs.shot.framing}`,
+          prevFs.shot.lighting?.trim()
+            ? `light: ${prevFs.shot.lighting.trim().replace(/\s+/g, ' ').slice(0, 60)}`
+            : undefined,
           prevFs.shot.imageCaption?.trim()
             ? `on-image: "${prevFs.shot.imageCaption.trim().replace(/"/g, "'")}"`
             : undefined,
         ]
           .filter(Boolean)
           .join(' — ')
+      : undefined;
+    const previousImagePromptBrief = prevFs
+      ? [
+          prevFs.shot.description,
+          prevFs.shot.subjectAction,
+          prevFs.shot.imageQuery,
+          prevFs.shot.framing,
+          prevFs.shot.camera,
+          prevFs.shot.lighting,
+        ]
+          .filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+          .join(' | ')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, 320)
       : undefined;
 
     const basePrompt = shotToPrompt({
@@ -604,6 +626,7 @@ export async function directorPipelineFromResolvedStoryboard(
           ? fs.shot.durationSeconds
           : undefined,
       previousShotOneLiner: previousShotOneLiner || undefined,
+      previousImagePromptBrief: previousImagePromptBrief || undefined,
       compositionUniquenessHint: compositionUniquenessHintForShot(fs.shot.id, timelineIndex),
     });
     const refNoCopy =
@@ -630,6 +653,8 @@ export async function directorPipelineFromResolvedStoryboard(
             'same poster layout or same hero prop as the last frame',
             'symmetrical stock-photo composition',
             'generic AI portrait framing repeated from prior cut',
+            'paraphrased remake of the previous image prompt',
+            'same subject stack with only adjective or lighting swaps',
           ]
         : []),
       ...(genConfig.allowSparseImageText === true &&

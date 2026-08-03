@@ -63,6 +63,7 @@ import {
 } from './personalContentPosting.js';
 import { generateImage } from './fal.js';
 import { broadcast } from './realtime.js';
+import { promptTokenJaccard } from './personalDirector.js';
 import {
   recentTopics,
   recentVideoTitles,
@@ -857,13 +858,22 @@ async function sourceMediaForBeats(
 
   const out: PersonalPostMediaAsset[] = [];
   let cursor = 0;
+  let previousImageQuery = '';
   for (const beat of script.beats) {
     let asset: PersonalPostMediaAsset | null = null;
+    let imageQuery = (beat.imageQuery ?? '').trim() || beat.voiceover?.slice(0, 80) || '';
+    if (
+      previousImageQuery &&
+      imageQuery &&
+      promptTokenJaccard(previousImageQuery, imageQuery) >= 0.4
+    ) {
+      imageQuery = `${imageQuery} alternate angle distinct composition`.slice(0, 160);
+    }
 
     const tryBeatAiVideo = async () => {
       if (!useAiVideo || !videoModelId || theme.requiresGroundedImages) return;
       try {
-        const prompt = buildAiPrompt(beat.imageQuery, stylePrefix, charPromptFragment);
+        const prompt = buildAiPrompt(imageQuery, stylePrefix, charPromptFragment);
         const videoAspect =
           genConfig.aspectRatio === '4:5' ? '9:16' : (genConfig.aspectRatio ?? '9:16');
         const cMin = genConfig.clipMinSeconds ?? 2;
@@ -907,7 +917,7 @@ async function sourceMediaForBeats(
     if (useScraped && !asset) {
       try {
         const { source, items } = await searchAssets({
-          query: beat.imageQuery,
+          query: imageQuery,
           sources: scrapeSources,
           count: 3,
           preferVideo: preferVideo && genConfig.mediaPreference !== 'stills_only',
@@ -956,7 +966,7 @@ async function sourceMediaForBeats(
       !theme.requiresGroundedImages
     ) {
       try {
-        const prompt = buildAiPrompt(beat.imageQuery, stylePrefix, charPromptFragment);
+        const prompt = buildAiPrompt(imageQuery, stylePrefix, charPromptFragment);
         // Prefer the reference-aware model route when we have refs.
         const refs = collectReferenceImages(
           useCharacter ? characterRefs : [],
@@ -990,7 +1000,7 @@ async function sourceMediaForBeats(
         try {
           if (features.fal) {
             const url = await generateImage(
-              buildAiPrompt(beat.imageQuery, stylePrefix, charPromptFragment),
+              buildAiPrompt(imageQuery, stylePrefix, charPromptFragment),
               genConfig.aspectRatio ?? '9:16',
             );
             asset = {
@@ -1010,6 +1020,7 @@ async function sourceMediaForBeats(
     if (asset) {
       out.push(asset);
       cursor += beat.durationSeconds;
+      if (imageQuery) previousImageQuery = imageQuery;
     }
   }
   return out;

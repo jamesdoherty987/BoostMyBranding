@@ -565,6 +565,9 @@ export async function planStoryboard(args: DirectArgs): Promise<Storyboard> {
     resyncImageCaptionsAfterVoiceEdits(allShots);
   }
 
+  // Force consecutive stills/clips away from near-duplicate image briefs before generation.
+  diversifyConsecutiveVisualShots(allShots);
+
   return out;
 }
 
@@ -1057,6 +1060,203 @@ function cheapStringHash(s: string): number {
 export function compositionUniquenessHintForShot(shotId: string, timelineIndex: number): string {
   const h = cheapStringHash(`${shotId}\0${timelineIndex}`);
   return COMPOSITION_VARIETY_HINTS[h % COMPOSITION_VARIETY_HINTS.length]!;
+}
+
+const PROMPT_SIMILARITY_STOPWORDS = new Set([
+  'the',
+  'a',
+  'an',
+  'and',
+  'or',
+  'of',
+  'in',
+  'on',
+  'to',
+  'with',
+  'for',
+  'from',
+  'at',
+  'by',
+  'is',
+  'as',
+  'into',
+  'over',
+  'under',
+  'this',
+  'that',
+  'its',
+  'their',
+  'his',
+  'her',
+  'are',
+  'was',
+  'were',
+  'be',
+  'been',
+  'being',
+  'shot',
+  'frame',
+  'scene',
+  'image',
+  'still',
+  'video',
+  'showing',
+  'shows',
+  'shown',
+  'about',
+  'across',
+  'through',
+  'while',
+  'where',
+  'when',
+  'then',
+  'than',
+  'very',
+  'just',
+  'also',
+  'only',
+  'same',
+  'like',
+  'near',
+  'using',
+  'used',
+  'make',
+  'made',
+  'look',
+  'looks',
+]);
+
+/** Significant tokens for comparing consecutive image briefs / prompts. */
+export function significantPromptTokens(text: string): Set<string> {
+  const out = new Set<string>();
+  for (const raw of text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/)) {
+    if (raw.length < 3) continue;
+    if (PROMPT_SIMILARITY_STOPWORDS.has(raw)) continue;
+    out.add(raw);
+  }
+  return out;
+}
+
+export function promptTokenJaccard(a: string, b: string): number {
+  const A = significantPromptTokens(a);
+  const B = significantPromptTokens(b);
+  if (A.size === 0 && B.size === 0) return 1;
+  let inter = 0;
+  for (const t of A) if (B.has(t)) inter++;
+  const union = A.size + B.size - inter;
+  return union === 0 ? 0 : inter / union;
+}
+
+function shotVisualBrief(s: DirectorShot): string {
+  return [s.description, s.subjectAction, s.imageQuery, s.lighting, s.palette, s.framing, s.camera]
+    .filter((x) => typeof x === 'string' && x.trim())
+    .join(' ');
+}
+
+const ALT_CAMERAS: ShotCameraMove[] = [
+  'slow_push_in',
+  'pan_left',
+  'tilt_up',
+  'orbit',
+  'handheld',
+  'dolly_out',
+  'crane_up',
+  'tracking',
+  'static',
+  'slow_pull_out',
+];
+
+const ALT_FRAMINGS: ShotFraming[] = [
+  'extreme_wide',
+  'wide',
+  'medium_wide',
+  'medium',
+  'medium_close',
+  'close_up',
+  'extreme_close_up',
+  'over_the_shoulder',
+];
+
+function pickDifferentCamera(prev: ShotCameraMove, seed: number): ShotCameraMove {
+  const opts = ALT_CAMERAS.filter((c) => c !== prev);
+  return opts[seed % opts.length] ?? 'slow_push_in';
+}
+
+function pickDifferentFraming(prev: ShotFraming, seed: number): ShotFraming {
+  const opts = ALT_FRAMINGS.filter((f) => f !== prev);
+  return opts[seed % opts.length] ?? 'wide';
+}
+
+/**
+ * After the director returns a storyboard, force consecutive AI/stock stills to
+ * differ in description/camera/framing when they are near-duplicates — so image
+ * generation prompts are not paraphrases of the previous cut.
+ *
+ * Important: do **not** append meta instructions ("Distinct from prior…") into
+ * `description` — that string is fed to the image model as the scene brief and
+ * would get painted / misread as subject matter. Diversity meta lives in
+ * `shotToPrompt` via previous-shot forbid clauses + composition hints.
+ */
+export function diversifyConsecutiveVisualShots(shots: DirectorShot[]): void {
+  for (let i = 1; i < shots.length; i++) {
+    const prev = shots[i - 1]!;
+    const cur = shots[i]!;
+    const visual = (k: ShotKind) =>
+      k === 'ai_image' || k === 'ai_video' || k === 'scraped_image' || k === 'scraped_video';
+    if (!visual(prev.kind) || !visual(cur.kind)) continue;
+
+    const sim = promptTokenJaccard(shotVisualBrief(prev), shotVisualBrief(cur));
+    const sameTriple =
+      prev.camera === cur.camera &&
+      prev.framing === cur.framing &&
+      (prev.lighting ?? '').toLowerCase().replace(/\s+/g, ' ').slice(0, 48) ===
+        (cur.lighting ?? '').toLowerCase().replace(/\s+/g, ' ').slice(0, 48);
+
+    if (sim < 0.36 && !sameTriple) continue;
+
+    const seed = cheapStringHash(`${cur.id}\0${i}`) >>> 0;
+    if (cur.camera === prev.camera || sameTriple) {
+      cur.camera = pickDifferentCamera(prev.camera, seed);
+    }
+    if (cur.framing === prev.framing || sameTriple) {
+      cur.framing = pickDifferentFraming(prev.framing, seed + 3);
+    }
+
+    if (sim < 0.36) continue;
+
+    const seedExtra = seed;
+    // Concrete visual nouns only — keep scraper queries short and non-meta.
+    if (cur.imageQuery?.trim() && prev.imageQuery?.trim()) {
+      const qSim = promptTokenJaccard(cur.imageQuery, prev.imageQuery);
+      if (qSim >= 0.45) {
+        const qExtra =
+          seedExtra % 3 === 0 ? 'wide establishing' : seedExtra % 3 === 1 ? 'detail closeup' : 'side angle';
+        cur.imageQuery = `${cur.imageQuery.trim()} ${qExtra}`.slice(0, 140);
+      }
+    }
+    if (cur.subjectAction?.trim() && promptTokenJaccard(cur.subjectAction, prev.subjectAction ?? '') >= 0.5) {
+      const actionExtra =
+        seedExtra % 3 === 0
+          ? 'from a different angle'
+          : seedExtra % 3 === 1
+            ? 'in a new location within the scene'
+            : 'at a different scale';
+      if (!cur.subjectAction.includes(actionExtra)) {
+        cur.subjectAction = `${cur.subjectAction.trim()}, ${actionExtra}`.slice(0, 220);
+      }
+    }
+    // Nudge lighting wording when briefs are near-clones so the prompt differs.
+    if ((cur.lighting ?? '').trim() && (prev.lighting ?? '').trim()) {
+      const lightSim = promptTokenJaccard(cur.lighting ?? '', prev.lighting ?? '');
+      if (lightSim >= 0.55) {
+        const lightExtra =
+          seedExtra % 2 === 0 ? 'cooler rim accent' : 'warmer key from the opposite side';
+        if (!(cur.lighting ?? '').includes(lightExtra)) {
+          cur.lighting = `${(cur.lighting ?? '').trim()}, ${lightExtra}`.slice(0, 180);
+        }
+      }
+    }
+  }
 }
 
 /**
@@ -1666,6 +1866,7 @@ function buildDirectorPrompt(args: DirectArgs): string {
     args.topic.replace(/\s+/g, ' ').replace(/"/g, '\\"').slice(0, 200) +
     '". Title, hook, every voiceover line, and every \`imageQuery\` must stay in that lane — never merge beats or B-roll from a different video idea.\n' +
     '- **Consecutive shots must differ:** back-to-back shots may not share the same "hero object + same framing + same room corner" — change at least **two** of: primary subject in frame, scale (e.g. wide → detail), camera move, setting zone, or time/mood beat. Avoid "same scene, tiny tweak" slideshows.\n' +
+    '- **Image-prompt uniqueness (hard):** consecutive \`ai_image\` / \`ai_video\` \`description\` (+ \`subjectAction\` / \`imageQuery\`) must **not** be near-paraphrases of each other. If two adjacent briefs could feed the same image model prompt, rewrite the later one with a new hero subject, location detail, or scale. Do not reuse the same noun stack with only adjective swaps.\n' +
     '- **Cinematography grid:** for consecutive \`ai_image\` / \`ai_video\` shots, **never** reuse the same \`camera\` + \`framing\` + \`lighting\` triple as the previous shot — change at least one field clearly (prefer two). Alternate wide vs close, static vs moving camera, and warm vs cool light when the story allows so the edit does not look like one repeated still.\n' +
     '- **On-image text:** default is **no painted type**. If you use \`imageCaption\`, it must be **unique** to that shot (never the same string twice) and a high-signal fact from **that** line (date/name/stat) — not filler text that could belong to any frame.\n';
 
@@ -1894,6 +2095,11 @@ export function shotToPrompt(args: {
    */
   previousShotOneLiner?: string;
   /**
+   * Compact planner brief for the previous shot (description / action / query / camera).
+   * Used to forbid near-paraphrase image prompts.
+   */
+  previousImagePromptBrief?: string;
+  /**
    * Deterministic compositional bias so consecutive AI stills are not near-clones.
    */
   compositionUniquenessHint?: string;
@@ -1917,6 +2123,7 @@ export function shotToPrompt(args: {
     episodeTitle,
     plannerHoldSeconds,
     previousShotOneLiner,
+    previousImagePromptBrief,
     compositionUniquenessHint,
   } = args;
 
@@ -2044,8 +2251,26 @@ export function shotToPrompt(args: {
     !thumbnailCoverMode &&
     previousShotOneLiner?.trim() &&
     (shot.kind === 'ai_image' || shot.kind === 'ai_video')
-      ? `CONSECUTIVE-CUT DISTINCTNESS — Previous shot: ${previousShotOneLiner.trim().replace(/"/g, "'").slice(0, 240)}. Invent a **new** hero idea, environment, and camera geometry — not the same room corner, same poster layout, or same single-prop hero as that frame. If this shot uses on-image text, it must be **different wording** from the prior shot's label (never duplicate the same line across consecutive stills).`
+      ? `CONSECUTIVE-CUT DISTINCTNESS — Previous shot: ${previousShotOneLiner.trim().replace(/"/g, "'").slice(0, 320)}. Invent a **new** hero idea, environment, and camera geometry — not the same room corner, same poster layout, or same single-prop hero as that frame. If this shot uses on-image text, it must be **different wording** from the prior shot's label (never duplicate the same line across consecutive stills).`
       : '';
+
+  const previousPromptForbidClause = (() => {
+    if (thumbnailCoverMode) return '';
+    if (shot.kind !== 'ai_image' && shot.kind !== 'ai_video') return '';
+    const prev = previousImagePromptBrief?.trim();
+    if (!prev) return '';
+    const curBrief = [shot.description, shot.subjectAction, shot.imageQuery, shot.framing, shot.camera]
+      .filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+      .join(' | ');
+    const similar = promptTokenJaccard(prev, curBrief) >= 0.32;
+    return (
+      `FORBIDDEN NEAR-PARAPHRASE OF PRIOR IMAGE PROMPT — Do not reuse or lightly reword this previous brief: «${prev.replace(/"/g, "'").slice(0, 280)}». ` +
+      `Your frame must change the **primary subject OR setting OR camera scale** enough that a viewer would never mistake it for a re-render of that prior still.` +
+      (similar
+        ? ` This shot's planner brief still overlaps the prior one — **override** with a clearly different composition now.`
+        : '')
+    );
+  })();
 
   const compositionVarietyClause =
     !thumbnailCoverMode &&
@@ -2085,6 +2310,7 @@ export function shotToPrompt(args: {
   let out = [
     topicAnchorClause,
     consecutiveDistinctClause,
+    previousPromptForbidClause,
     compositionVarietyClause,
     styleLock,
     imageCaptionScriptLock,

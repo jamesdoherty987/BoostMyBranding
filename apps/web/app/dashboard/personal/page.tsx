@@ -367,6 +367,15 @@ function CreateAccountForm({
         handle: handle.trim() || undefined,
         customDirection: direction.trim() || undefined,
         watermarkHandle: handle.trim() ? `@${handle.replace(/^@/, '').trim()}` : undefined,
+        // Match API new-channel defaults (also applied server-side if omitted).
+        generatorConfig: {
+          kenBurnsOnStills: false,
+          averageClipSeconds: 4,
+          ttsProvider: 'openai',
+          allowSparseImageText: true,
+          keywordPopStyle: 'off',
+          namesNumbersTitleCard: false,
+        },
       });
       toast.success('Channel created', 'Ready to generate.');
       onCreated(acc);
@@ -561,7 +570,6 @@ function AccountDetail({
       onDeleted();
     } catch (e) {
       toast.error('Could not delete', (e as Error).message);
-    } finally {
       setDeletingChannel(false);
     }
   }
@@ -1474,7 +1482,6 @@ function ScheduleCard({
       onDeleted();
     } catch (e) {
       toast.error('Could not delete', (e as Error).message);
-    } finally {
       setBusy(false);
     }
   }

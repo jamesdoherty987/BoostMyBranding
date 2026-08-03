@@ -1341,7 +1341,7 @@ export interface PersonalGeneratorConfig {
   filmGrain?: boolean;
   /**
    * When false, still images are encoded as static frames (no Ken Burns zoom/pan).
-   * Default true.
+   * New channels default to false; unset on older channels still means on (legacy).
    */
   kenBurnsOnStills?: boolean;
 

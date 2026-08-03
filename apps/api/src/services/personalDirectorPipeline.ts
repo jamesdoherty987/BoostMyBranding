@@ -44,6 +44,8 @@ import {
   recentVideoTitles,
   markPersonalPostQueuedFailedIfStillQueued,
   PERSONAL_POST_CANCELLED_MESSAGE,
+  withAbortWhenPersonalPostFailed,
+  trackPersonalPostInFlight,
 } from './personalAccounts.js';
 import { chooseTopic } from './personalScript.js';
 import { getCharacterUnsafe } from './personalCharacters.js';
@@ -123,7 +125,9 @@ async function resumeDirectorInto(
   const pre = parsePreStitchCheckpoint(post.script);
   if (pre && post.status === 'rendering') {
     try {
-      return await finishDirectorFromPreStitchCheckpoint(post, account, theme, args, pre);
+      return await trackPersonalPostInFlight(post.id, () =>
+        finishDirectorFromPreStitchCheckpoint(post, account, theme, args, pre),
+      );
     } catch (e) {
       const msg =
         e instanceof StitcherError
@@ -190,7 +194,8 @@ async function resumeDirectorInto(
     });
 
     try {
-      return await directorPipelineFromResolvedStoryboard({
+      return await trackPersonalPostInFlight(post.id, () =>
+        directorPipelineFromResolvedStoryboard({
         account,
         theme,
         genConfig,
@@ -209,7 +214,8 @@ async function resumeDirectorInto(
         resumedShotById,
         markFailed,
         pickImageModelForLongform,
-      });
+      }),
+      );
     } catch (e) {
       const msg =
         e instanceof StitcherError
@@ -437,6 +443,7 @@ export async function generateForAccountDirector(
     return { postId, videoUrl: null, status: 'ready', durationSeconds: 0, costCents: 0, skipped: true, reason: 'dry run' };
   }
 
+  return trackPersonalPostInFlight(postId, async () => {
   try {
     let totalCostCents = 0;
 
@@ -581,7 +588,9 @@ export async function generateForAccountDirector(
       if (stopped) return stopped;
     }
 
-    const channelTitlePass = await channelVideoTitleLikeIsolatedTest({
+    const channelTitlePass = await withAbortWhenPersonalPostFailed(
+      postId,
+      channelVideoTitleLikeIsolatedTest({
       account: {
         id: account.id,
         userId: account.userId,
@@ -591,7 +600,8 @@ export async function generateForAccountDirector(
         generatorConfig: account.generatorConfig,
       },
       topic,
-    });
+    }),
+    );
 
     if (channelTitlePass?.trim()) {
       const [row] = await db
@@ -646,7 +656,9 @@ export async function generateForAccountDirector(
       if (stopped) return stopped;
     }
 
-    const storyboard = await planStoryboard({
+    const storyboard = await withAbortWhenPersonalPostFailed(
+      postId,
+      planStoryboard({
       theme,
       topic,
       // Respect the format's sweet-spot duration when it's been picked
@@ -704,7 +716,8 @@ export async function generateForAccountDirector(
       scriptModel: genConfig.scriptModel,
       recentVideoTitles: usedVideoTitles,
       lockedVideoTitle: channelTitlePass ?? undefined,
-    });
+    }),
+    );
     totalCostCents += 3;
 
     {
@@ -814,6 +827,7 @@ export async function generateForAccountDirector(
     }
     throw e;
   }
+  });
 }
 
 /* ═══════════════════════════════════════════════════════════════════ */

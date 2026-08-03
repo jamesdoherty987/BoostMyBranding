@@ -175,6 +175,8 @@ export async function createAccount(args: CreateAccountArgs) {
               now: new Date(),
               postingHourUtc: args.postingHourUtc ?? 8,
               postingMinuteUtc: args.postingMinuteUtc ?? 0,
+              postsPerDay: args.postsPerDay ?? 1,
+              postSpacingMinutes: args.postSpacingMinutes ?? 60,
             })
           : null,
     })
@@ -328,6 +330,8 @@ export async function updateAccount(
       now: new Date(),
       postingHourUtc: patch.postingHourUtc ?? existing.postingHourUtc,
       postingMinuteUtc: patch.postingMinuteUtc ?? existing.postingMinuteUtc,
+      postsPerDay: patch.postsPerDay ?? existing.postsPerDay,
+      postSpacingMinutes: patch.postSpacingMinutes ?? existing.postSpacingMinutes,
     });
   }
 
@@ -879,6 +883,30 @@ export function isPersonalPostCancelledError(e: unknown): boolean {
 }
 
 /**
+ * Posts currently being generated in **this** process. Stale-sweep cron must not
+ * mark these failed — a multi-hour director `scripting` / long fal wait can look
+ * idle in `updated_at` until the next heartbeat, and killing the row mid-flight
+ * surfaces “Generation had no progress…” even though work is still running.
+ */
+const inFlightPersonalPostIds = new Set<string>();
+
+export function trackPersonalPostInFlight<T>(
+  postId: string,
+  work: () => Promise<T>,
+): Promise<T> {
+  const id = postId.trim();
+  if (!id) return work();
+  inFlightPersonalPostIds.add(id);
+  return work().finally(() => {
+    inFlightPersonalPostIds.delete(id);
+  });
+}
+
+export function isPersonalPostInFlightLocally(postId: string): boolean {
+  return inFlightPersonalPostIds.has(postId);
+}
+
+/**
  * Races `work` against a short poll of {@link personalPostIsFailed} so Stop,
  * cancel, or **deleting the post** can break out of long LLM/scraper/TTS waits and
  * let the per-account generate queue advance to the next job.
@@ -1199,6 +1227,12 @@ export async function failStaleRenderingPersonalPosts(): Promise<number> {
     .limit(80);
   let n = 0;
   for (const r of rows) {
+    if (isPersonalPostInFlightLocally(r.id)) {
+      console.warn(
+        `[personal] failStaleRenderingPersonalPosts: skipping in-flight post ${r.id.slice(0, 8)}… (still encoding in this process)`,
+      );
+      continue;
+    }
     await db
       .update(personalPosts)
       .set({
@@ -1239,6 +1273,7 @@ export async function failStaleRenderingPersonalPosts(): Promise<number> {
       )
       .limit(80);
     for (const r of rowsPreStitch) {
+      if (isPersonalPostInFlightLocally(r.id)) continue;
       await db
         .update(personalPosts)
         .set({
@@ -1299,6 +1334,12 @@ export async function failStaleEarlyPhasePersonalPosts(): Promise<number> {
     .limit(80);
   let n = 0;
   for (const r of rows) {
+    if (isPersonalPostInFlightLocally(r.id)) {
+      console.warn(
+        `[personal] failStaleEarlyPhasePersonalPosts: skipping in-flight post ${r.id.slice(0, 8)}… (still generating in this process)`,
+      );
+      continue;
+    }
     await db
       .update(personalPosts)
       .set({
@@ -1340,6 +1381,7 @@ export async function failStaleEarlyPhasePersonalPosts(): Promise<number> {
       .limit(80);
     const sourcingMsg = BOOT_DIRECTOR_SOURCING_NO_RESUME_MSG.slice(0, BOOT_ERR_DISPLAY_MAX);
     for (const r of rowsDirectorSourcing) {
+      if (isPersonalPostInFlightLocally(r.id)) continue;
       await db
         .update(personalPosts)
         .set({
@@ -1375,21 +1417,36 @@ function assertDb() {
 }
 
 /**
- * Computes the next UTC run time based on posting hour/minute. Always
- * returns a time in the future, rolling forward to the next day if the
- * window has already passed today.
+ * Next UTC run on the posts-per-day grid (first slot at posting hour/minute,
+ * then +spacing for each remaining daily post). Always returns a time strictly
+ * after `now`.
  */
 export function computeNextRunAt(args: {
   now: Date;
   postingHourUtc: number;
   postingMinuteUtc: number;
+  postsPerDay?: number;
+  postSpacingMinutes?: number;
 }): Date {
-  const next = new Date(args.now);
-  next.setUTCHours(args.postingHourUtc, args.postingMinuteUtc, 0, 0);
-  if (next.getTime() <= args.now.getTime()) {
-    next.setUTCDate(next.getUTCDate() + 1);
+  const postsPerDay = Math.max(1, Math.min(48, Math.floor(args.postsPerDay ?? 1)));
+  const spacingMs = Math.max(1, Math.floor(args.postSpacingMinutes ?? 60)) * 60 * 1000;
+  const anchor = new Date(args.now);
+  anchor.setUTCHours(args.postingHourUtc, args.postingMinuteUtc, 0, 0);
+
+  for (let dayOffset = 0; dayOffset < 14; dayOffset++) {
+    const dayFirst = new Date(anchor);
+    dayFirst.setUTCDate(anchor.getUTCDate() + dayOffset);
+    for (let i = 0; i < postsPerDay; i++) {
+      const slot = new Date(dayFirst.getTime() + i * spacingMs);
+      if (slot.getTime() > args.now.getTime()) {
+        return slot;
+      }
+    }
   }
-  return next;
+
+  const fallback = new Date(anchor);
+  fallback.setUTCDate(fallback.getUTCDate() + 1);
+  return fallback;
 }
 
 const REMOVED_STYLE_BIBLE_KEYS = ['motifs', 'copySamples', 'exampleScriptSnippets', 'bannedPhrases'] as const;

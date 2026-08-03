@@ -587,28 +587,18 @@ export async function runDuePersonalAccounts(): Promise<{
 }
 
 /**
- * Compute the next run time based on postsPerDay / postSpacingMinutes.
- * If we've already generated all daily posts, advance to tomorrow's
- * posting window.
+ * Next run after claiming a due slot: next grid time strictly after `now`
+ * (remaining slots today, else tomorrow's first).
  */
 function rollNextRunAt(
   acc: typeof personalAccounts.$inferSelect,
   now: Date,
 ): Date {
-  const spacing = acc.postSpacingMinutes * 60 * 1000;
-  const next = new Date(now.getTime() + spacing);
-  // Clamp to tomorrow's posting window if past today's final slot.
-  const todayFirstSlot = new Date(now);
-  todayFirstSlot.setUTCHours(acc.postingHourUtc, acc.postingMinuteUtc, 0, 0);
-  const todayLastSlot = new Date(
-    todayFirstSlot.getTime() + (acc.postsPerDay - 1) * spacing,
-  );
-  if (next.getTime() > todayLastSlot.getTime()) {
-    return computeNextRunAt({
-      now: new Date(todayLastSlot.getTime() + 24 * 60 * 60 * 1000),
-      postingHourUtc: acc.postingHourUtc,
-      postingMinuteUtc: acc.postingMinuteUtc,
-    });
-  }
-  return next;
+  return computeNextRunAt({
+    now,
+    postingHourUtc: acc.postingHourUtc,
+    postingMinuteUtc: acc.postingMinuteUtc,
+    postsPerDay: acc.postsPerDay,
+    postSpacingMinutes: acc.postSpacingMinutes,
+  });
 }

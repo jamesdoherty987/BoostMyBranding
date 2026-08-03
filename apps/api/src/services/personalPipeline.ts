@@ -70,6 +70,7 @@ import {
   withAbortWhenPersonalPostFailed,
   PERSONAL_POST_CANCELLED_MESSAGE,
   appendPersonalGenerationLog,
+  trackPersonalPostInFlight,
 } from './personalAccounts.js';
 import { features } from '../env.js';
 import {
@@ -290,6 +291,7 @@ async function generateForAccountScript(
     };
   }
 
+  return trackPersonalPostInFlight(postId, async () => {
   try {
     let totalCostCents = 0;
 
@@ -778,6 +780,7 @@ async function generateForAccountScript(
     }
     throw e;
   }
+  });
 }
 
 /* ═══════════════════════════════════════════════════════════════════ */

@@ -1732,10 +1732,17 @@ export async function directorPipelineFromResolvedStoryboard(
             ? {
                 youtubeTitle:
                   storyboard.title?.trim().slice(0, 100) || topic.trim().slice(0, 100) || undefined,
+                youtubeDescription: finalDirectorCaption,
                 youtubeLongForm: true,
                 ...(thumbnailUrl ? { youtubeThumbnailUrl: thumbnailUrl } : {}),
               }
-            : {}),
+            : isYoutube
+              ? {
+                  youtubeTitle:
+                    storyboard.title?.trim().slice(0, 100) || topic.trim().slice(0, 100) || undefined,
+                  youtubeDescription: finalDirectorCaption,
+                }
+              : {}),
         },
         { label: `personal:schedule:${postId}` },
       );
@@ -2055,14 +2062,19 @@ export async function finishDirectorFromPreStitchCheckpoint(
           scheduledAt: when,
           workspaceId: account.contentStudioWorkspaceId ?? undefined,
           contentStudioAccountIds: contentStudioAccountIdsOverride(account),
-          ...(pre.extractYoutubeThumbnail === true && isYoutubeAccount(account.platform)
+          ...(isYoutubeAccount(account.platform)
             ? {
                 youtubeTitle:
                   storyboard.title?.trim().slice(0, 100) ||
                   post.topic.trim().slice(0, 100) ||
                   undefined,
-                youtubeLongForm: true,
-                ...(thumbnailUrl ? { youtubeThumbnailUrl: thumbnailUrl } : {}),
+                youtubeDescription: resumeDirectorCaption,
+                ...(pre.extractYoutubeThumbnail === true || longformResume
+                  ? {
+                      youtubeLongForm: true as const,
+                      ...(thumbnailUrl ? { youtubeThumbnailUrl: thumbnailUrl } : {}),
+                    }
+                  : {}),
               }
             : {}),
         },

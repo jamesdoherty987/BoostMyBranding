@@ -148,6 +148,8 @@ export function personalVideoReadyEmail(args: {
   /** One-tap save page (copy title / save video / save thumbnail). */
   savePageUrl: string;
   copyTitleUrl: string;
+  /** Opens delivery hub and copies the YouTube/feed description. */
+  copyDescriptionUrl?: string | null;
   saveVideoUrl: string;
   previewUrl: string;
   saveThumbnailUrl?: string | null;
@@ -155,6 +157,8 @@ export function personalVideoReadyEmail(args: {
   const title = (args.title || args.topic || 'Video').trim() || 'Video';
   const safeTitle = escapeHtml(title);
   const copyUrl = escapeHtml(args.copyTitleUrl);
+  const copyDescRaw = (args.copyDescriptionUrl ?? '').trim();
+  const copyDescUrl = copyDescRaw ? escapeHtml(copyDescRaw) : '';
   const videoSaveUrl = escapeHtml(args.saveVideoUrl);
   const previewUrl = escapeHtml(args.previewUrl);
   const pageUrl = escapeHtml(args.savePageUrl);
@@ -165,6 +169,14 @@ export function personalVideoReadyEmail(args: {
     ? `<p style="margin:10px 0 0 0;">
           <a href="${safeThumb}" style="display:block;background:#0f172a;color:#f8fafc;padding:14px 18px;border-radius:12px;text-decoration:none;font-weight:650;text-align:center;">
             Save thumbnail
+          </a>
+        </p>`
+    : '';
+
+  const copyDescButton = copyDescUrl
+    ? `<p style="margin:10px 0 0 0;">
+          <a href="${copyDescUrl}" style="display:block;background:#f1f5f9;color:#0f172a;padding:14px 18px;border-radius:12px;text-decoration:none;font-weight:650;text-align:center;">
+            Copy description
           </a>
         </p>`
     : '';
@@ -180,6 +192,7 @@ export function personalVideoReadyEmail(args: {
             Copy title
           </a>
         </p>
+        ${copyDescButton}
         <p style="margin:10px 0 0 0;">
           <a href="${previewUrl}" style="display:block;background:#e2e8f0;color:#0f172a;padding:14px 18px;border-radius:12px;text-decoration:none;font-weight:650;text-align:center;">
             Preview video
@@ -200,6 +213,7 @@ export function personalVideoReadyEmail(args: {
       title,
       '',
       `Copy title: ${args.copyTitleUrl}`,
+      copyDescRaw ? `Copy description: ${copyDescRaw}` : '',
       `Preview: ${args.previewUrl}`,
       `Save video: ${args.saveVideoUrl}`,
       thumbSaveUrl ? `Save thumbnail: ${thumbSaveUrl}` : '',

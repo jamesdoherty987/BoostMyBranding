@@ -53,6 +53,8 @@ export interface SchedulePostArgs {
   firstComment?: string;
   /** Optional YouTube-specific title — YouTube Shorts still want a title. */
   youtubeTitle?: string;
+  /** Optional YouTube description (long-form / Shorts). Falls back to caption when omitted. */
+  youtubeDescription?: string;
   /** When true with a video + YouTube, use long-form `video` post type instead of `shorts`. */
   youtubeLongForm?: boolean;
   /** Custom thumbnail URL (JPEG/PNG) for YouTube long-form when the API accepts it. */
@@ -222,15 +224,21 @@ export async function schedulePost(args: SchedulePostArgs): Promise<{ id: string
   }
   if (platforms.includes('youtube') && hasVideo) {
     const ytTitle = args.youtubeTitle?.trim();
+    const ytDescription = (args.youtubeDescription ?? args.caption)?.trim();
     if (ytTitle) {
       body.post_video_title = ytTitle;
-      body.youtube = { title: ytTitle, privacy: 'public' };
+      body.youtube = {
+        title: ytTitle,
+        privacy: 'public',
+        ...(ytDescription ? { description: ytDescription.slice(0, 5000) } : {}),
+      };
     }
-    if (ytTitle || args.youtubeThumbnailUrl || args.youtubeLongForm) {
+    if (ytTitle || args.youtubeThumbnailUrl || args.youtubeLongForm || ytDescription) {
       body.youtube_options = {
         privacy_status: 'public',
         made_for_kids: false,
         ...(ytTitle ? { title: ytTitle } : {}),
+        ...(ytDescription ? { description: ytDescription.slice(0, 5000) } : {}),
         ...(args.youtubeThumbnailUrl ? { thumbnail_url: args.youtubeThumbnailUrl } : {}),
       };
     }

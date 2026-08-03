@@ -136,6 +136,7 @@ personalRouter.get('/delivery/:token', async (req, res, next) => {
     const actionRaw = String(req.query.a ?? '').trim().toLowerCase();
     const action =
       actionRaw === 'copy' ||
+      actionRaw === 'copydesc' ||
       actionRaw === 'video' ||
       actionRaw === 'thumb' ||
       actionRaw === 'preview'
@@ -149,6 +150,7 @@ personalRouter.get('/delivery/:token', async (req, res, next) => {
       .send(
         personalDeliverySavePageHtml({
           title: asset.title,
+          description: asset.description,
           videoDownloadUrl: `${base}/video`,
           thumbnailDownloadUrl: asset.thumbnailUrl ? `${base}/thumbnail` : null,
           previewUrl: `${base}/preview`,

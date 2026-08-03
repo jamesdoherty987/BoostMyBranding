@@ -59,6 +59,7 @@ function section(name: string) {
   const urls = personalDeliveryUrls(accountId, postId);
   const html = personalDeliverySavePageHtml({
     title: 'Test "Title" <b>x</b>',
+    description: 'A full YouTube description with takeaways.',
     videoDownloadUrl: urls.videoUrl,
     thumbnailDownloadUrl: urls.thumbnailUrl,
     previewUrl: urls.previewStreamUrl,
@@ -67,13 +68,15 @@ function section(name: string) {
     action: 'preview',
   });
   assert.match(html, /id="btnCopy"/);
+  assert.match(html, /id="btnCopyDesc"/);
   assert.match(html, /id="btnPreview"/);
   assert.match(html, /id="btnVideo"/);
   assert.match(html, /id="btnThumb"/);
   assert.match(html, /download="clip\.mp4"/);
   assert.match(html, /isIos/);
   assert.match(html, /navigator\.share/);
-  assert.match(html, /armSecondTap|pendingShare|Share — then Save Video/);
+  assert.match(html, /pendingShare|Share to save video|Preparing/);
+  assert.match(html, /A full YouTube description with takeaways/);
   assert.match(html, /preview-wrap on/);
   assert.match(html, /<h1>Test &quot;Title&quot; &lt;b&gt;x&lt;\/b&gt;<\/h1>/);
   assert.match(PERSONAL_DELIVERY_PAGE_CSP, /unsafe-inline/);
@@ -89,18 +92,21 @@ function section(name: string) {
     postId,
     savePageUrl: urls.pageUrl,
     copyTitleUrl: urls.copyUrl,
+    copyDescriptionUrl: urls.copyDescriptionUrl,
     saveVideoUrl: urls.saveVideoUrl,
     previewUrl: urls.previewUrl,
     saveThumbnailUrl: urls.saveThumbUrl,
   });
   assert.equal(mail.subject, 'My Episode');
   assert.match(mail.html, /Copy title/);
+  assert.match(mail.html, /Copy description/);
   assert.match(mail.html, /Preview video/);
   assert.match(mail.html, /Save video/);
   assert.match(mail.html, /Save thumbnail/);
   assert.match(mail.html, /a=preview/);
   assert.match(mail.html, /a=video/);
   assert.match(mail.html, /a=thumb/);
+  assert.match(mail.html, /a=copydesc/);
   assert.doesNotMatch(mail.html, /camera roll \(phone\)/i);
   section('email template is short + has all CTAs');
 }
@@ -121,12 +127,14 @@ function section(name: string) {
       .send(
         personalDeliverySavePageHtml({
           title: 'HTTP Title',
+          description: 'HTTP description body',
           videoDownloadUrl: `/api/v1/personal/delivery/${enc}/video`,
           thumbnailDownloadUrl: `/api/v1/personal/delivery/${enc}/thumbnail`,
           previewUrl: `/api/v1/personal/delivery/${enc}/preview`,
           videoFilename: 'v.mp4',
           thumbnailFilename: 't.jpg',
-          action: action === 'preview' || action === 'copy' ? action : null,
+          action:
+            action === 'preview' || action === 'copy' || action === 'copydesc' ? action : null,
         }),
       );
   });

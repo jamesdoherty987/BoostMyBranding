@@ -76,6 +76,8 @@ export function personalDeliveryUrls(accountId: string, postId: string) {
     token,
     pageUrl: base,
     copyUrl: `${base}?a=copy`,
+    /** Opens hub and copies the YouTube/feed description (caption). */
+    copyDescriptionUrl: `${base}?a=copydesc`,
     /** Opens the hub page with the in-page player (keeps other buttons available). */
     previewUrl: `${base}?a=preview`,
     /** Raw MP4 stream for `<video src>` / direct playback. */
@@ -104,6 +106,8 @@ export type PersonalDeliveryAsset = {
   accountId: string;
   postId: string;
   title: string;
+  /** YouTube / feed description (post caption + hashtags when stored). */
+  description: string;
   videoUrl: string;
   thumbnailUrl: string | null;
   videoFilename: string;
@@ -122,6 +126,7 @@ export async function resolvePersonalDeliveryAsset(
       accountId: personalPosts.accountId,
       topic: personalPosts.topic,
       script: personalPosts.script,
+      caption: personalPosts.caption,
       videoUrl: personalPosts.videoUrl,
       thumbnailUrl: personalPosts.thumbnailUrl,
     })
@@ -136,11 +141,18 @@ export async function resolvePersonalDeliveryAsset(
       ? String((row.script as { title: string }).title).trim()
       : '';
   const title = scriptTitle || (row.topic ?? '').trim() || 'Video';
+  const fromCaption = (row.caption ?? '').trim();
+  const scriptCaption =
+    row.script && typeof row.script === 'object' && typeof (row.script as { caption?: unknown }).caption === 'string'
+      ? String((row.script as { caption: string }).caption).trim()
+      : '';
+  const description = fromCaption || scriptCaption || title;
   const thumb = (row.thumbnailUrl ?? '').trim();
   return {
     accountId: row.accountId,
     postId: row.id,
     title,
+    description,
     videoUrl,
     thumbnailUrl: thumb && /^https?:\/\//i.test(thumb) ? thumb : null,
     videoFilename: filenameFromTitle(title, 'mp4'),
@@ -166,14 +178,16 @@ export const PERSONAL_DELIVERY_PAGE_CSP = [
  */
 export function personalDeliverySavePageHtml(args: {
   title: string;
+  description: string;
   videoDownloadUrl: string;
   thumbnailDownloadUrl: string | null;
   previewUrl: string;
   videoFilename: string;
   thumbnailFilename: string;
-  action: 'copy' | 'video' | 'thumb' | 'preview' | null;
+  action: 'copy' | 'copydesc' | 'video' | 'thumb' | 'preview' | null;
 }): string {
   const titleJson = JSON.stringify(args.title);
+  const descriptionJson = JSON.stringify(args.description || args.title);
   const videoUrlJson = JSON.stringify(args.videoDownloadUrl);
   const thumbUrlJson = JSON.stringify(args.thumbnailDownloadUrl);
   const previewUrlJson = JSON.stringify(args.previewUrl);
@@ -185,6 +199,10 @@ export function personalDeliverySavePageHtml(args: {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+  const safeDescription = (args.description || args.title)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
   const safeVideoHref = escapeAttr(args.videoDownloadUrl);
   const safePreviewHref = escapeAttr(args.previewUrl);
   const safeThumbHref = args.thumbnailDownloadUrl ? escapeAttr(args.thumbnailDownloadUrl) : '';
@@ -217,9 +235,15 @@ export function personalDeliverySavePageHtml(args: {
     }
     h1 { font-size: 22px; line-height: 1.25; margin: 0 0 8px; letter-spacing: -0.02em; word-break: break-word; }
     p.hint { margin: 0 0 16px; color: #64748b; font-size: 14px; line-height: 1.4; }
+    .label { margin: 0 0 6px; color: #64748b; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
     .title-box {
       width: 100%; border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px 14px; font-size: 15px;
-      background: #f8fafc; color: #0f172a; margin: 0 0 16px;
+      background: #f8fafc; color: #0f172a; margin: 0 0 12px;
+    }
+    .desc-box {
+      width: 100%; border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px 14px; font-size: 14px;
+      background: #f8fafc; color: #0f172a; margin: 0 0 16px; min-height: 96px; max-height: 180px;
+      resize: vertical; line-height: 1.45; font-family: inherit;
     }
     .stack { display: flex; flex-direction: column; gap: 10px; }
     .btn, button.btn, a.btn {
@@ -246,12 +270,16 @@ export function personalDeliverySavePageHtml(args: {
   <main>
     <h1>${safeTitle}</h1>
     <p class="hint" id="hint">Tap a button below.</p>
+    <p class="label">Title</p>
     <input class="title-box" id="titleInput" type="text" readonly value="${safeTitle}" aria-label="Video title" />
+    <p class="label">Description</p>
+    <textarea class="desc-box" id="descInput" readonly aria-label="Video description">${safeDescription}</textarea>
     <div class="preview-wrap${previewOn}" id="previewWrap">
       <video id="player" controls playsinline webkit-playsinline preload="auto" src="${safePreviewHref}"></video>
     </div>
     <div class="stack" id="stack">
       <button type="button" class="btn ghost" id="btnCopy">Copy title</button>
+      <button type="button" class="btn ghost" id="btnCopyDesc">Copy description</button>
       <a class="btn secondary" id="btnPreview" href="${safePreviewHref}">Preview video</a>
       <a class="btn primary" id="btnVideo" href="${safeVideoHref}" download="${safeVideoName}">Save video to Photos</a>
       ${thumbLink}
@@ -261,6 +289,7 @@ export function personalDeliverySavePageHtml(args: {
   <script>
     (function () {
       var TITLE = ${titleJson};
+      var DESCRIPTION = ${descriptionJson};
       var VIDEO_URL = ${videoUrlJson};
       var THUMB_URL = ${thumbUrlJson};
       var PREVIEW_URL = ${previewUrlJson};
@@ -275,11 +304,11 @@ export function personalDeliverySavePageHtml(args: {
       var btnThumb = document.getElementById('btnThumb');
       var btnPreview = document.getElementById('btnPreview');
       var btnCopy = document.getElementById('btnCopy');
+      var btnCopyDesc = document.getElementById('btnCopyDesc');
 
       function isIos() {
         var ua = navigator.userAgent || '';
         if (/iPhone|iPad|iPod/i.test(ua)) return true;
-        // iPadOS 13+ reports as Mac with touch
         if (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) return true;
         return false;
       }
@@ -294,8 +323,7 @@ export function personalDeliverySavePageHtml(args: {
         if (hintEl) hintEl.textContent = msg;
       }
 
-      // Prepared File for the second iOS tap (share must run in the same gesture as the tap).
-      var pendingShare = null; // { file, kind, btn, labelReady, labelShare }
+      var pendingShare = null;
       var preparing = false;
 
       if (IOS) {
@@ -308,29 +336,38 @@ export function personalDeliverySavePageHtml(args: {
         if (btnThumb) btnThumb.textContent = 'Download thumbnail';
       }
 
-      function copyTitle() {
-        var input = document.getElementById('titleInput');
+      function copyText(text, input, okMsg, failMsg) {
         try {
           if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(TITLE).then(function () {
-              setStatus('Title copied');
-            }).catch(function () { fallbackCopy(input); });
+            navigator.clipboard.writeText(text).then(function () {
+              setStatus(okMsg);
+            }).catch(function () { fallbackCopy(input, okMsg, failMsg); });
             return;
           }
         } catch (e) {}
-        fallbackCopy(input);
+        fallbackCopy(input, okMsg, failMsg);
       }
-      function fallbackCopy(input) {
+      function copyTitle() {
+        copyText(TITLE, document.getElementById('titleInput'), 'Title copied', 'Select the title above and copy');
+      }
+      function copyDescription() {
+        copyText(DESCRIPTION, document.getElementById('descInput'), 'Description copied', 'Select the description above and copy');
+      }
+      function fallbackCopy(input, okMsg, failMsg) {
         try {
           if (input) {
             input.focus();
-            input.select();
-            input.setSelectionRange(0, input.value.length);
+            if (typeof input.select === 'function') {
+              input.select();
+              if (typeof input.setSelectionRange === 'function') {
+                input.setSelectionRange(0, (input.value || '').length);
+              }
+            }
           }
           var ok = document.execCommand('copy');
-          setStatus(ok ? 'Title copied' : 'Select the title above and copy', !ok);
+          setStatus(ok ? okMsg : failMsg, !ok);
         } catch (e) {
-          setStatus('Select the title above and copy', true);
+          setStatus(failMsg, true);
         }
       }
 
@@ -367,11 +404,10 @@ export function personalDeliverySavePageHtml(args: {
       }
 
       /** Must run synchronously inside a click handler (iOS WebKit gesture). */
-      function sharePreparedNow(prepared) {
-        if (!navigator.share) {
-          iosShareFallback(prepared.kind);
-          return;
-        }
+      function sharePrepared() {
+        if (!pendingShare || !pendingShare.file) return;
+        var prepared = pendingShare;
+        clearPendingShare();
         var sharePromise;
         try {
           sharePromise = navigator.share({ files: [prepared.file], title: TITLE });
@@ -379,118 +415,102 @@ export function personalDeliverySavePageHtml(args: {
           iosShareFallback(prepared.kind);
           return;
         }
-        if (!sharePromise || typeof sharePromise.then !== 'function') {
-          iosShareFallback(prepared.kind);
+        if (sharePromise && typeof sharePromise.then === 'function') {
+          sharePromise.then(function () {
+            setStatus(prepared.kind === 'video' ? 'Shared — choose Save Video' : 'Shared — choose Save Image');
+          }).catch(function () {
+            iosShareFallback(prepared.kind);
+          });
+        }
+      }
+
+      function prepareThenShare(url, filename, mime, kind, btn) {
+        if (!url) return;
+        if (pendingShare && pendingShare.kind === kind && pendingShare.file) {
+          sharePrepared();
           return;
         }
-        sharePromise.then(function () {
-          setStatus(prepared.kind === 'video' ? 'In Share, tap Save Video' : 'In Share, tap Save Image');
-          clearPendingShare();
-        }).catch(function (err) {
-          if (err && err.name === 'AbortError') {
-            setStatus('Cancelled');
-            return;
+        if (preparing) return;
+        preparing = true;
+        clearPendingShare();
+        var labelReady = btn ? btn.textContent : '';
+        if (btn) {
+          btn.textContent = 'Preparing…';
+          btn.classList.add('pulse');
+        }
+        setStatus('Preparing…');
+        fetch(url, { credentials: 'omit' }).then(function (res) {
+          if (!res.ok) throw new Error('fetch ' + res.status);
+          return res.blob();
+        }).then(function (blob) {
+          preparing = false;
+          var file;
+          try {
+            file = new File([blob], filename, { type: mime || blob.type || 'application/octet-stream' });
+          } catch (e) {
+            file = blob;
           }
-          iosShareFallback(prepared.kind);
+          pendingShare = {
+            file: file,
+            kind: kind,
+            btn: btn,
+            labelReady: labelReady,
+            labelShare: kind === 'video' ? 'Share to save video' : 'Share to save image',
+          };
+          if (btn) {
+            btn.textContent = pendingShare.labelShare;
+            btn.classList.add('pulse');
+          }
+          setStatus('Ready — tap again to Share');
+        }).catch(function (err) {
+          preparing = false;
+          clearPendingShare();
+          if (btn) btn.textContent = labelReady;
+          console.warn('[delivery] prepare failed', err && err.message ? err.message : err);
+          iosShareFallback(kind);
         });
       }
 
-      function armSecondTap(btn, file, kind, labelReady, labelShare) {
-        pendingShare = { file: file, kind: kind, btn: btn, labelReady: labelReady, labelShare: labelShare };
-        if (btn) {
-          btn.textContent = labelShare;
-          btn.classList.add('pulse');
-        }
-        setStatus(kind === 'video'
-          ? 'Ready — tap Share, then Save Video'
-          : 'Ready — tap Share, then Save Image');
-      }
-
       function saveMedia(url, filename, mime, kind, btn) {
-        var labelReady = kind === 'video' ? 'Save video to Photos' : 'Save thumbnail to Photos';
-        var labelShare = kind === 'video' ? 'Share — then Save Video' : 'Share — then Save Image';
-
-        // Second tap: share immediately while the gesture is still valid.
-        if (IOS && pendingShare && pendingShare.kind === kind && pendingShare.file) {
-          sharePreparedNow(pendingShare);
+        if (!url) return;
+        if (IOS && navigator.canShare) {
+          prepareThenShare(url, filename, mime, kind, btn);
           return;
         }
-
-        if (preparing) return;
-        clearPendingShare();
-
-        if (!IOS) {
-          setStatus('Preparing download…');
-          fetch(url, { credentials: 'omit', cache: 'no-store' })
-            .then(function (res) {
-              if (!res.ok) throw new Error('fail');
-              return res.blob();
-            })
-            .then(function (blob) {
-              downloadBlob(blob, filename);
-            })
-            .catch(function () {
-              window.location.href = url;
-            });
-          return;
-        }
-
-        // iPhone: fetch on tap 1, share on tap 2 (required — share after await loses the gesture).
-        var fetchUrl = (kind === 'video' && PREVIEW_URL) ? PREVIEW_URL : url;
-        preparing = true;
-        setStatus('Preparing for Photos…');
-        fetch(fetchUrl, { credentials: 'omit', cache: 'no-store' })
-          .then(function (res) {
-            if (!res.ok) throw new Error('HTTP ' + res.status);
-            return res.blob();
-          })
-          .then(function (blob) {
-            preparing = false;
-            if (!blob || blob.size < 32) throw new Error('empty');
-            var type = mime || blob.type || (kind === 'video' ? 'video/mp4' : 'image/jpeg');
-            // Prefer an explicit media MIME — some iOS builds reject octet-stream for Photos.
-            if (kind === 'video' && !/^video\\//i.test(type)) type = 'video/mp4';
-            if (kind !== 'video' && !/^image\\//i.test(type)) type = 'image/jpeg';
-            var file = new File([blob], filename, { type: type });
-            if (!navigator.share) {
-              iosShareFallback(kind);
-              return;
-            }
-            // Do not require canShare here — it often returns false for larger videos even when share works.
-            armSecondTap(btn, file, kind, labelReady, labelShare);
-          })
-          .catch(function (err) {
-            preparing = false;
-            console.warn('[delivery] prepare failed', err && err.message ? err.message : err);
-            iosShareFallback(kind);
-          });
+        fetch(url, { credentials: 'omit' }).then(function (res) {
+          if (!res.ok) throw new Error('fetch ' + res.status);
+          return res.blob();
+        }).then(function (blob) {
+          downloadBlob(blob, filename);
+        }).catch(function () {
+          window.location.href = url;
+        });
       }
 
       function showPreview() {
         if (previewWrap) previewWrap.classList.add('on');
-        if (!player) {
-          setStatus('Preview unavailable', true);
-          return;
-        }
-        if (!player.getAttribute('src') && PREVIEW_URL) {
-          player.setAttribute('src', PREVIEW_URL);
-        }
-        try { player.load(); } catch (e) {}
-        var playPromise = player.play();
-        if (playPromise && typeof playPromise.then === 'function') {
-          playPromise.then(function () {
-            setStatus('Playing preview');
-          }).catch(function () {
+        if (player) {
+          try { player.src = PREVIEW_URL; } catch (e) {}
+          var playPromise = player.play && player.play();
+          if (playPromise && typeof playPromise.then === 'function') {
+            playPromise.then(function () {
+              setStatus('Playing preview');
+            }).catch(function () {
+              setStatus('Tap play on the video');
+            });
+          } else {
             setStatus('Tap play on the video');
-          });
-        } else {
-          setStatus('Tap play on the video');
+          }
         }
       }
 
       if (btnCopy) btnCopy.addEventListener('click', function (e) {
         e.preventDefault();
         copyTitle();
+      });
+      if (btnCopyDesc) btnCopyDesc.addEventListener('click', function (e) {
+        e.preventDefault();
+        copyDescription();
       });
       if (btnPreview) btnPreview.addEventListener('click', function (e) {
         e.preventDefault();
@@ -506,6 +526,7 @@ export function personalDeliverySavePageHtml(args: {
       });
 
       if (ACTION === 'copy') copyTitle();
+      if (ACTION === 'copydesc') copyDescription();
       if (ACTION === 'preview') showPreview();
       if (ACTION === 'video') {
         if (IOS) {

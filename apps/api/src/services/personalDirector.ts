@@ -329,6 +329,23 @@ export interface DirectArgs {
   lockedVideoTitle?: string;
 }
 
+/** When Claude omits caption, still produce a usable YouTube/feed description. */
+function buildFallbackCaption(
+  hook: string | undefined,
+  outro: string | undefined,
+  title: string,
+  topic: string,
+): string {
+  const parts = [
+    (hook ?? '').trim(),
+    (title || topic || '').trim()
+      ? `This video covers ${(title || topic).trim().replace(/\?+$/, '')}.`
+      : '',
+    (outro ?? '').trim(),
+  ].filter(Boolean);
+  return parts.join('\n\n').slice(0, 2000) || (topic || title || 'New video').trim();
+}
+
 export async function planStoryboard(args: DirectArgs): Promise<Storyboard> {
   const exampleTitles = (args.styleBible?.exampleVideoTitles ?? []).map((t) => t.trim()).filter(Boolean);
 
@@ -408,7 +425,7 @@ export async function planStoryboard(args: DirectArgs): Promise<Storyboard> {
     title: storyboardTitle,
     hook: raw.hook ?? '',
     outro: raw.outro ?? '',
-    caption: raw.caption ?? '',
+    caption: (raw.caption ?? '').trim() || buildFallbackCaption(raw.hook, raw.outro, storyboardTitle, args.topic),
     hashtags: raw.hashtags ?? args.theme.defaultHashtags ?? [],
     acts: normaliseActs(raw.acts, args.theme, normOpts),
     editPlan: {
@@ -1654,7 +1671,7 @@ function buildDirectorPrompt(args: DirectArgs): string {
 
   const narrationQualityRule =
     '- **Narration quality:** Hook and every \`voiceover\` line must **earn** the listen — concrete **nouns, verbs, and facts** (who, where, what changed, how much). Ban vague hype ("insane", "you won\'t believe", "crazy", "wild") unless the style bible demands that register. Avoid filler stacks ("this thing", "that stuff", "something about"). **Vary** how adjacent lines **start**; do not chain many lines that all open with "So…", "And…", or "But…". Prefer active voice; cut throat-clearing ("ok so basically", "here\'s the thing") unless the account voice is explicitly casual that way.\n' +
-    '- **Outro + caption:** \`outro\` = one decisive CTA line (no ramble). \`caption\` reads like a human editor wrote it — complete sentences, no hashtag stuffing inside the prose; keep \`hashtags\` short and on-topic.\n';
+    '- **Outro + caption:** \`outro\` = one decisive CTA line (no ramble). \`caption\` is the **YouTube / feed description** viewers see under the video — complete sentences, no hashtag stuffing inside the prose; keep \`hashtags\` short and on-topic in the separate array.\n';
 
   const locked = args.lockedVideoTitle?.trim();
   const exampleTitleCount = (args.styleBible?.exampleVideoTitles ?? []).filter(Boolean).length;
@@ -1712,12 +1729,13 @@ extreme_wide, wide, medium_wide, medium, medium_close, close_up, extreme_close_u
 SHOTS GRAMMAR (transition out):
 hard_cut (default), match_cut, whip_pan, dip_to_black, cross_dissolve, flash_cut, jump_cut, none.
 ${longform && !locked ? `\n\nTOP-LEVEL JSON "title" (no saved example titles — operator must still get a **feed-shaped** headline):\n- One short line (~55–75 characters): curiosity question ("How…?", "What…?") or one blunt claim — same energy as short educational YouTube.\n- **Do not** use two-part "Label: subtitle" / episode / podcast season packaging (e.g. "Winter Cache: How…") — that reads like TV seasons, not this product's title style.\n` : ''}
+${longform ? `\n\nTOP-LEVEL JSON "caption" (YouTube description — required for long-form):\n- Write a real **YouTube description**, not a social one-liner: **2–4 short paragraphs** (~600–1,800 characters of prose).\n- Paragraph 1: hook the topic in plain language (what this video answers).\n- Middle: 2–5 concrete takeaways or beats from the storyboard (specific nouns — no filler).\n- Last line: one soft CTA (subscribe / watch next / comment) matching the account voice.\n- **Do not** put hashtags in the caption prose — use the \`hashtags\` array only.\n- No "In this video we will…" essay openings; no emoji spam (≤3 total if any).\n` : ''}
 OUTPUT contract — return ONLY JSON:
 {
 ${titleJsonLine}
   "hook": "<opening line ≤3s: one sharp claim or curiosity; concrete nouns; no stacked clichés>",
   "outro": "<closing CTA, one sentence>",
-  "caption": "<post caption, 1-3 sentences, ≤3 emoji>",
+  "caption": "${longform ? '<YouTube description: 2–4 short paragraphs as specified above>' : '<post caption / description, 1–3 sentences, ≤3 emoji>'}",
   "hashtags": ["tag", ...],
   "editPlan": {
     "pacing": "slow|medium|fast",

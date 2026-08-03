@@ -182,6 +182,7 @@ export async function emailPersonalVideoReady(args: {
     postId: args.postId,
     savePageUrl: links.pageUrl,
     copyTitleUrl: links.copyUrl,
+    copyDescriptionUrl: links.copyDescriptionUrl,
     saveVideoUrl: links.saveVideoUrl,
     previewUrl: links.previewUrl,
     saveThumbnailUrl: hasThumb ? links.saveThumbUrl : null,

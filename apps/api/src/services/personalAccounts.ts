@@ -910,6 +910,30 @@ export function isPersonalPostCancelledError(e: unknown): boolean {
  */
 const inFlightPersonalPostIds = new Set<string>();
 
+/** ~45s — keep `updated_at` fresh for the whole generate (multi-replica + stale cron). */
+const IN_FLIGHT_HEARTBEAT_MS = 45_000;
+
+async function resolvePersonalPostAccountId(postId: string): Promise<string | null> {
+  if (!isDbConfigured()) return null;
+  const db = getDb();
+  const [row] = await db
+    .select({ accountId: personalPosts.accountId })
+    .from(personalPosts)
+    .where(eq(personalPosts.id, postId))
+    .limit(1);
+  return row?.accountId ?? null;
+}
+
+/** Keep reserved `queued` siblings alive while this account’s active job runs. */
+async function touchPersonalAccountQueuedHeartbeats(accountId: string): Promise<void> {
+  if (!isDbConfigured()) return;
+  const db = getDb();
+  await db
+    .update(personalPosts)
+    .set({ updatedAt: new Date() })
+    .where(and(eq(personalPosts.accountId, accountId), eq(personalPosts.status, 'queued')));
+}
+
 export function trackPersonalPostInFlight<T>(
   postId: string,
   work: () => Promise<T>,
@@ -917,7 +941,27 @@ export function trackPersonalPostInFlight<T>(
   const id = postId.trim();
   if (!id) return work();
   inFlightPersonalPostIds.add(id);
+  // Heartbeat for the **entire** pipeline — not only steps wrapped in
+  // withAbortWhenPersonalPostFailed. Also refresh other `queued` posts for the
+  // same account so they are not stale-failed while waiting on the per-account queue.
+  let accountIdCache: string | null | undefined;
+  const beat = async () => {
+    await touchPersonalPostHeartbeat(id);
+    if (accountIdCache === undefined) {
+      accountIdCache = await resolvePersonalPostAccountId(id);
+    }
+    if (accountIdCache) {
+      await touchPersonalAccountQueuedHeartbeats(accountIdCache);
+    }
+  };
+  void beat().catch(() => {});
+  const heartbeat = setInterval(() => {
+    void beat().catch(() => {});
+  }, IN_FLIGHT_HEARTBEAT_MS);
+  // Don't keep the event loop alive solely for heartbeats if everything else exits.
+  heartbeat.unref?.();
   return work().finally(() => {
+    clearInterval(heartbeat);
     inFlightPersonalPostIds.delete(id);
   });
 }
@@ -935,8 +979,8 @@ export function isPersonalPostInFlightLocally(postId: string): boolean {
 const PERSONAL_HEARTBEAT_TICKS = 40;
 
 /**
- * Bumps `updated_at` while a post is still in-flight. Generation logs intentionally
- * skip `updated_at`; this heartbeat keeps multi-hour director runs from looking “stale”.
+ * Bumps `updated_at` while a post is still in-flight. Used by
+ * {@link trackPersonalPostInFlight} (continuous) and {@link withAbortWhenPersonalPostFailed}.
  */
 async function touchPersonalPostHeartbeat(postId: string): Promise<void> {
   if (!isDbConfigured()) return;
@@ -988,8 +1032,8 @@ const MAX_GENERATION_ACTIVITY_LOG = 220;
 
 /**
  * Appends one line to `render_activity_log` for dashboard debugging (sourcing,
- * stitch, etc.). Does **not** update `updated_at` (see {@link withAbortWhenPersonalPostFailed}
- * heartbeat for stale-job protection during long steps).
+ * stitch, etc.). Also bumps `updated_at` so stale-job cron treats log progress
+ * as live generation (heartbeats cover the rest).
  */
 export async function appendPersonalGenerationLog(postId: string, message: string): Promise<void> {
   if (!isDbConfigured()) return;
@@ -1008,7 +1052,7 @@ export async function appendPersonalGenerationLog(postId: string, message: strin
   const next = [...prev, entry].slice(-MAX_GENERATION_ACTIVITY_LOG);
   await db
     .update(personalPosts)
-    .set({ renderActivityLog: next })
+    .set({ renderActivityLog: next, updatedAt: new Date() })
     .where(eq(personalPosts.id, postId));
 }
 
@@ -1016,6 +1060,10 @@ export async function appendPersonalGenerationLog(postId: string, message: strin
  * How long an in-flight personal post may sit without finishing before cron
  * marks it failed. Override with `PERSONAL_STALE_PIPELINE_MS` (milliseconds, min 60000).
  * Default: 3h in production, 45m in non-production (laptop sleep / hung jobs recover sooner).
+ *
+ * Early phases (`queued` / `scripting` / `sourcing_media`) use
+ * {@link stalePersonalEarlyPhaseMs} (longer) so a multi-hour storyboard or fal
+ * backlog is not killed while heartbeats are catching up after a deploy.
  */
 export function stalePersonalPipelineMs(): number {
   const raw = process.env.PERSONAL_STALE_PIPELINE_MS?.trim();
@@ -1026,6 +1074,46 @@ export function stalePersonalPipelineMs(): number {
   return process.env.NODE_ENV === 'production'
     ? 3 * 60 * 60 * 1000
     : 45 * 60 * 1000;
+}
+
+/**
+ * Early-phase stale window (scripting / sourcing). Override with
+ * `PERSONAL_STALE_EARLY_PHASE_MS`. Default: 12h prod / 2h non-prod — longer than
+ * encode stale because title+storyboard+AI media can legitimately run many hours.
+ */
+export function stalePersonalEarlyPhaseMs(): number {
+  const raw = process.env.PERSONAL_STALE_EARLY_PHASE_MS?.trim();
+  if (raw && /^\d+$/.test(raw)) {
+    const n = parseInt(raw, 10);
+    if (n >= 60_000) return n;
+  }
+  return process.env.NODE_ENV === 'production'
+    ? 12 * 60 * 60 * 1000
+    : 2 * 60 * 60 * 1000;
+}
+
+function latestRenderActivityAt(
+  log: PersonalPostRenderActivityEntry[] | null | undefined,
+): Date | null {
+  if (!Array.isArray(log) || log.length === 0) return null;
+  let best = 0;
+  for (const e of log) {
+    const t = Date.parse(String(e?.at ?? ''));
+    if (Number.isFinite(t) && t > best) best = t;
+  }
+  return best > 0 ? new Date(best) : null;
+}
+
+/** True when updated_at **or** the newest generation-log line is still within the window. */
+function personalPostProgressIsFresh(
+  updatedAt: Date | string | null | undefined,
+  log: PersonalPostRenderActivityEntry[] | null | undefined,
+  cutoff: Date,
+): boolean {
+  const u = updatedAt instanceof Date ? updatedAt : updatedAt ? new Date(updatedAt) : null;
+  if (u && !Number.isNaN(u.getTime()) && u >= cutoff) return true;
+  const activity = latestRenderActivityAt(log);
+  return Boolean(activity && activity >= cutoff);
 }
 
 /** Shown when boot sweep fails a post that was `rendering` from a prior process. */
@@ -1232,6 +1320,8 @@ export async function failStaleRenderingPersonalPosts(): Promise<number> {
       id: personalPosts.id,
       accountId: personalPosts.accountId,
       topic: personalPosts.topic,
+      updatedAt: personalPosts.updatedAt,
+      renderActivityLog: personalPosts.renderActivityLog,
     })
     .from(personalPosts)
     .where(
@@ -1251,6 +1341,11 @@ export async function failStaleRenderingPersonalPosts(): Promise<number> {
       console.warn(
         `[personal] failStaleRenderingPersonalPosts: skipping in-flight post ${r.id.slice(0, 8)}… (still encoding in this process)`,
       );
+      continue;
+    }
+    if (personalPostProgressIsFresh(r.updatedAt, r.renderActivityLog, cutoff)) {
+      // Activity log is newer than updated_at (legacy rows) — keep alive + heal timestamp.
+      void touchPersonalPostHeartbeat(r.id).catch(() => {});
       continue;
     }
     await db
@@ -1281,6 +1376,8 @@ export async function failStaleRenderingPersonalPosts(): Promise<number> {
         id: personalPosts.id,
         accountId: personalPosts.accountId,
         topic: personalPosts.topic,
+        updatedAt: personalPosts.updatedAt,
+        renderActivityLog: personalPosts.renderActivityLog,
       })
       .from(personalPosts)
       .where(
@@ -1292,8 +1389,13 @@ export async function failStaleRenderingPersonalPosts(): Promise<number> {
         ),
       )
       .limit(80);
+    let nPreStitchFailed = 0;
     for (const r of rowsPreStitch) {
       if (isPersonalPostInFlightLocally(r.id)) continue;
+      if (personalPostProgressIsFresh(r.updatedAt, r.renderActivityLog, cutoff)) {
+        void touchPersonalPostHeartbeat(r.id).catch(() => {});
+        continue;
+      }
       await db
         .update(personalPosts)
         .set({
@@ -1312,10 +1414,11 @@ export async function failStaleRenderingPersonalPosts(): Promise<number> {
         includeSaveLink: false,
       }).catch((err) => console.warn('[personal] failure email:', (err as Error).message));
       n++;
+      nPreStitchFailed++;
     }
-    if (rowsPreStitch.length > 0) {
+    if (nPreStitchFailed > 0) {
       console.warn(
-        `[personal] failStaleRenderingPersonalPosts: marked ${rowsPreStitch.length} stale director pre_stitch row(s) as failed (resume on boot is off)`,
+        `[personal] failStaleRenderingPersonalPosts: marked ${nPreStitchFailed} stale director pre_stitch row(s) as failed (resume on boot is off)`,
       );
     }
   }
@@ -1330,14 +1433,16 @@ export async function failStaleRenderingPersonalPosts(): Promise<number> {
 export async function failStaleEarlyPhasePersonalPosts(): Promise<number> {
   if (!isDbConfigured()) return 0;
   const db = getDb();
-  const cutoff = new Date(Date.now() - stalePersonalPipelineMs());
+  const cutoff = new Date(Date.now() - stalePersonalEarlyPhaseMs());
   const staleEarlyMsg =
-    'Generation had no progress for many hours (stalled AI, sleep, or overload). Try generating again.';
+    'Generation stopped after a long idle period (API restart, deploy, or a hung AI step). Press Generate again — live runs now keep a continuous heartbeat so this should be rare.';
   const rows = await db
     .select({
       id: personalPosts.id,
       accountId: personalPosts.accountId,
       topic: personalPosts.topic,
+      updatedAt: personalPosts.updatedAt,
+      renderActivityLog: personalPosts.renderActivityLog,
     })
     .from(personalPosts)
     .where(
@@ -1358,6 +1463,12 @@ export async function failStaleEarlyPhasePersonalPosts(): Promise<number> {
       console.warn(
         `[personal] failStaleEarlyPhasePersonalPosts: skipping in-flight post ${r.id.slice(0, 8)}… (still generating in this process)`,
       );
+      // Heal timestamp so multi-replica cron also sees progress.
+      void touchPersonalPostHeartbeat(r.id).catch(() => {});
+      continue;
+    }
+    if (personalPostProgressIsFresh(r.updatedAt, r.renderActivityLog, cutoff)) {
+      void touchPersonalPostHeartbeat(r.id).catch(() => {});
       continue;
     }
     await db
@@ -1388,6 +1499,8 @@ export async function failStaleEarlyPhasePersonalPosts(): Promise<number> {
         id: personalPosts.id,
         accountId: personalPosts.accountId,
         topic: personalPosts.topic,
+        updatedAt: personalPosts.updatedAt,
+        renderActivityLog: personalPosts.renderActivityLog,
       })
       .from(personalPosts)
       .where(
@@ -1400,8 +1513,16 @@ export async function failStaleEarlyPhasePersonalPosts(): Promise<number> {
       )
       .limit(80);
     const sourcingMsg = BOOT_DIRECTOR_SOURCING_NO_RESUME_MSG.slice(0, BOOT_ERR_DISPLAY_MAX);
+    let nSourcingFailed = 0;
     for (const r of rowsDirectorSourcing) {
-      if (isPersonalPostInFlightLocally(r.id)) continue;
+      if (isPersonalPostInFlightLocally(r.id)) {
+        void touchPersonalPostHeartbeat(r.id).catch(() => {});
+        continue;
+      }
+      if (personalPostProgressIsFresh(r.updatedAt, r.renderActivityLog, cutoff)) {
+        void touchPersonalPostHeartbeat(r.id).catch(() => {});
+        continue;
+      }
       await db
         .update(personalPosts)
         .set({
@@ -1420,10 +1541,11 @@ export async function failStaleEarlyPhasePersonalPosts(): Promise<number> {
         includeSaveLink: false,
       }).catch((err) => console.warn('[personal] failure email:', (err as Error).message));
       n++;
+      nSourcingFailed++;
     }
-    if (rowsDirectorSourcing.length > 0) {
+    if (nSourcingFailed > 0) {
       console.warn(
-        `[personal] failStaleEarlyPhasePersonalPosts: marked ${rowsDirectorSourcing.length} stale director sourcing row(s) as failed (resume on boot is off)`,
+        `[personal] failStaleEarlyPhasePersonalPosts: marked ${nSourcingFailed} stale director sourcing row(s) as failed (resume on boot is off)`,
       );
     }
   }

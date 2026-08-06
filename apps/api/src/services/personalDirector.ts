@@ -2051,34 +2051,102 @@ If the topic is unsafe (medical advice, legal counsel, weapons, CSAM, explicit v
 /* Prompt builder for individual shots                                  */
 /* ═══════════════════════════════════════════════════════════════════ */
 
+/** YouTube-style cover recipes — hashed from variationKey so each regen is unique. */
+const THUMBNAIL_COVER_RECIPES: readonly {
+  framing: ShotFraming;
+  lighting: string;
+  lensHint: string;
+  composition: string;
+}[] = [
+  {
+    framing: 'medium_close',
+    lighting: 'hard key from camera-left, deep shadow falloff, subject pops at phone size',
+    lensHint: '85mm portrait shallow depth — subject razor-sharp, background soft bokeh',
+    composition: 'Hero fills left two-thirds; clean negative space on the right for type',
+  },
+  {
+    framing: 'close_up',
+    lighting: 'bright rim + soft fill; high-contrast face or object edge against dark ground',
+    lensHint: '50mm close — intimate detail, zero clutter behind the subject',
+    composition: 'Tight single-subject punch; eyes or focal prop dead-readable at thumbnail scale',
+  },
+  {
+    framing: 'low_angle',
+    lighting: 'uplight + sky or bright ceiling backlight; heroic silhouette energy',
+    lensHint: '35mm low angle — monumental subject, clear sky/negative space above',
+    composition: 'Subject rises into frame; bold graphic shape, not a flat eyeline selfie',
+  },
+  {
+    framing: 'medium',
+    lighting: 'clean three-quarter key, saturated accent colour in mid-ground only',
+    lensHint: '40mm — environment readable but subject still dominates',
+    composition: 'Rule-of-thirds hero; one prop telling the topic story, no busy collage',
+  },
+  {
+    framing: 'high_angle',
+    lighting: 'overhead soft box look — even, bright, product/scene clarity',
+    lensHint: 'top-down 28mm — organised tabletop or scene layout',
+    composition: 'Bird’s-eye story beat; shapes and colour blocks read as icons at small size',
+  },
+  {
+    framing: 'wide',
+    lighting: 'golden-hour sidelight or strong single practical; cinematic contrast',
+    lensHint: '24mm wide — one clear silhouette against a simple background',
+    composition: 'Graphic wide: subject as a bold shape; empty sky/wall for short title type',
+  },
+  {
+    framing: 'extreme_close_up',
+    lighting: 'specular highlights on texture; macro clarity',
+    lensHint: 'macro / 100mm — tactile detail (hands, tool, fabric, screen glow)',
+    composition: 'One texture or gesture carries the hook — no competing elements',
+  },
+  {
+    framing: 'medium_close',
+    lighting: 'neon or coloured practicals vs cool ambient — pop colour vs neutrals',
+    lensHint: 'anamorphic hint, slight flare, subject locked sharp',
+    composition: 'Asymmetrical; coloured light streaks leave a clean type zone',
+  },
+];
+
+export function thumbnailCoverRecipeForVariation(variationKey: string): (typeof THUMBNAIL_COVER_RECIPES)[number] {
+  const h = cheapStringHash((variationKey || 'cover').replace(/[^a-z0-9-]/gi, '').slice(0, 24) || 'cover');
+  return THUMBNAIL_COVER_RECIPES[h % THUMBNAIL_COVER_RECIPES.length]!;
+}
+
 /**
  * Synthetic still used only for cover/thumbnail generation — same schema as
  * in-video {@link DirectorShot} so {@link shotToPrompt} matches shot sourcing.
  */
 export function personalThumbnailCoverShot(args: {
   topic: string;
-  /** Short line only — rendered as large simple type when set. */
+  /** Short line only — rendered as large simple type when set (1–3 words). */
   coverText?: string | undefined;
+  /** Regenerates hash into a distinct composition recipe. */
+  variationKey?: string | undefined;
 }): DirectorShot {
-  const topicTrim = args.topic.replace(/\s+/g, ' ').trim().slice(0, 240) || 'the video subject';
+  const topicTrim = args.topic.replace(/\s+/g, ' ').trim().slice(0, 180) || 'the video subject';
+  const recipe = thumbnailCoverRecipeForVariation(args.variationKey ?? randomUUID());
+  const cover = args.coverText?.replace(/\s+/g, ' ').trim().slice(0, 20).replace(/"/g, "'");
   return {
     id: `thumb_${randomUUID()}`,
     role: 'thumbnail_cover',
-    description: `Single hero still for the video cover — same world and look as the other shots in this edit, not generic stock. Summarises: ${topicTrim}.`,
+    description:
+      `Premium click-worthy cover still — ONE clear hero subject about «${topicTrim}», same world as the edit, never generic stock. ` +
+      `${recipe.composition}. Ultra-sharp primary focus; background simplified so the image reads in under a second at phone size.`,
     onScreen: '',
     voiceover: '',
     durationSeconds: 3,
     camera: 'static',
-    framing: 'wide',
-    lighting: 'dramatic but clean key light; readable at small preview size',
-    palette: 'cohesive with reference stills',
-    subjectAction: topicTrim,
-    lensHint: 'cinematic shallow depth of field',
+    framing: recipe.framing,
+    lighting: recipe.lighting,
+    palette: 'bold, high-contrast, cohesive with reference stills — subject separates cleanly from background',
+    subjectAction: `Iconic single moment that sells the topic: ${topicTrim}`,
+    lensHint: recipe.lensHint,
     speedRamp: 'none',
     transitionOut: 'hard_cut',
     referenceIndices: [],
     kind: 'ai_image',
-    imageCaption: args.coverText?.trim().slice(0, 28) || undefined,
+    imageCaption: cover && cover.length >= 2 ? cover : undefined,
   };
 }
 
@@ -2196,15 +2264,19 @@ export function shotToPrompt(args: {
 
   const image =
     shot.kind === 'ai_image'
-      ? `Still frame: ${shot.description} Framing: ${framingToEnglish(shot.framing)}. Lighting: ${shot.lighting}. Palette: ${shot.palette}.${shot.lensHint ? ` Lens: ${shot.lensHint}.` : ''} One decisive readable moment tied to the script — avoid generic catalogue / stock-poster compositions unless the line is literally about that.`
+      ? thumbnailCoverMode
+        ? `COVER STILL: ${shot.description} Framing: ${framingToEnglish(shot.framing)}. Lighting: ${shot.lighting}. Palette: ${shot.palette}.${shot.lensHint ? ` Lens: ${shot.lensHint}.` : ''} Single decisive hero moment — crystal clear at thumbnail size, not a busy mid-roll frame.`
+        : `Still frame: ${shot.description} Framing: ${framingToEnglish(shot.framing)}. Lighting: ${shot.lighting}. Palette: ${shot.palette}.${shot.lensHint ? ` Lens: ${shot.lensHint}.` : ''} One decisive readable moment tied to the script — avoid generic catalogue / stock-poster compositions unless the line is literally about that.`
       : `Shot: ${shot.description}. Framing: ${framingToEnglish(shot.framing)}. Lighting: ${shot.lighting}. Palette: ${shot.palette}.${shot.lensHint ? ` Lens: ${shot.lensHint}.` : ''}`;
 
   const imageQualityClause =
-    !thumbnailCoverMode && shot.kind === 'ai_image'
-      ? 'STILL QUALITY BAR: crisp focus on the hero subject, coherent single light direction, physically plausible anatomy for people, clean edges — **no** watermarks, stock-site UI, random logos, duplicated faces in crowds, mangled hands or extra limbs, or meaningless clutter unrelated to the narration.' +
-        (shot.imageCaption?.trim()
-          ? ''
-          : ' Absolutely **no** readable text, letters, numbers, or typography anywhere in the frame.')
+    shot.kind === 'ai_image'
+      ? thumbnailCoverMode
+        ? 'THUMBNAIL QUALITY BAR: photoreal or brand-true illustration at poster resolution — razor-sharp hero subject, clean edges, coherent single light direction, physically plausible anatomy, rich detail without noise. **No** watermarks, stock UI, random logos, duplicated faces, mangled hands, extra limbs, busy collage, or muddy low-contrast mush. Background must stay simple so the subject reads instantly at phone size.'
+        : 'STILL QUALITY BAR: crisp focus on the hero subject, coherent single light direction, physically plausible anatomy for people, clean edges — **no** watermarks, stock-site UI, random logos, duplicated faces in crowds, mangled hands or extra limbs, or meaningless clutter unrelated to the narration.' +
+          (shot.imageCaption?.trim()
+            ? ''
+            : ' Absolutely **no** readable text, letters, numbers, or typography anywhere in the frame.')
       : '';
 
   // 3. MOTION — camera + subject motion.
@@ -2223,18 +2295,68 @@ export function shotToPrompt(args: {
     .join(' ');
 
   if (thumbnailCoverMode) {
+    // Cover typography + uniqueness must lead the prompt — fal clamps
+    // recraft@1000 / ideogram@2000 from the *start*, and a late COVER TEXT
+    // clause was getting chopped off.
+    let coverTextClause = '';
     if (shot.kind === 'ai_image' && shot.imageCaption?.trim()) {
-      const cap = shot.imageCaption.trim();
+      const cap = shot.imageCaption.trim().slice(0, 20).replace(/"/g, "'");
       if (inspirationStyleHint?.trim()) {
-        styleStr += ` Cover title: paint the exact phrase "${cap}" (2–6 words) as bold hero type — **match the lettering family, weight, case, and colour treatment from the account inspiration references** when they show typography; do not substitute a generic geometric sans if the refs use serif, condensed, handwritten, or display faces. Extreme legibility; centre or lower third; no extra subtitles.`;
+        coverTextClause =
+          `COVER TEXT (mandatory, short): paint ONLY the exact phrase "${cap}" — **1 to 3 words max**, huge bold hero type (~15–25% of frame). Match lettering from account inspiration refs when they show type. Extreme contrast; centre or lower third; never collide with the subject. Forbidden: any other words, subtitles, hashtags, URLs, or fine print.`;
       } else {
-        styleStr += ` Include very large bold simple title text reading "${cap}" — 2-6 words max, geometric sans-serif, extreme legibility, high contrast; centre or lower third. No extra small type, subtitles, or paragraphs.`;
+        coverTextClause =
+          `COVER TEXT (mandatory, short): paint ONLY "${cap}" — **1 to 3 words**, massive bold geometric sans, thick strokes, extreme contrast; centre or lower third; letters fully inside frame. Forbidden: any other text, subtitles, watermarks, logos, or fine print.`;
       }
     } else {
-      styleStr +=
-        ' THUMBNAIL / COVER ROLE: single poster frame for the same video — visual language must match the other AI stills in this project. No words, numbers, watermarks, or logos on the image.';
+      coverTextClause =
+        'THUMBNAIL / COVER ROLE: single premium poster frame — match project stills. Zero words, numbers, watermarks, or logos on the image.';
     }
-  } else if (shot.kind === 'ai_image' && shot.imageCaption?.trim()) {
+
+    const v =
+      (thumbnailVariationKey ?? '').replace(/[^a-z0-9-]/gi, '').slice(0, 12) || 'cover';
+    const recipe = thumbnailCoverRecipeForVariation(thumbnailVariationKey ?? v);
+    const uniqueClause =
+      `UNIQUE COVER ${v}: ${recipe.composition}. Lighting: ${recipe.lighting}. ` +
+      `Visually distinct from other regenerates (angle/crop/colour) while on-brand. One hero idea, zero clutter, legible at phone size.`;
+
+    // Keep brand locks but cap length so short-limit models still see the cover brief.
+    const styleLockThumb = [
+      animationStyleHint
+        ? `BRAND MEDIUM: ${animationStyleHint}`
+        : '',
+      inspirationStyleHint
+        ? `BRAND VISUAL LANGUAGE: ${inspirationStyleHint}`
+        : '',
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .trim()
+      .slice(0, 420);
+    const themeThumb = [
+      themeVisualStyle?.trim().slice(0, 180),
+      styleBibleVibe?.trim().slice(0, 120),
+      globalColourGrade ? `Colour grade: ${globalColourGrade}.` : '',
+      shotBrandHints ? `Brand: ${shotBrandHints.slice(0, 160)}` : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+
+    return [
+      coverTextClause,
+      uniqueClause,
+      imageQualityClause,
+      identity,
+      image,
+      motion,
+      styleLockThumb,
+      themeThumb,
+    ]
+      .filter((s) => s && s.trim().length > 0)
+      .join(' ');
+  }
+
+  if (shot.kind === 'ai_image' && shot.imageCaption?.trim()) {
     const extra = factLabelImagePromptExtra?.trim();
     const typoLock = inspirationStyleHint?.trim()
       ? `Lettering must **echo inspiration references** (serif vs sans, weight, case, colour) when those stills show type — avoid a default "tech sans" look unless the refs use it.`
@@ -2380,11 +2502,7 @@ export function shotToPrompt(args: {
     .filter((s) => s && s.trim().length > 0)
     .join(' ');
 
-  if (thumbnailCoverMode) {
-    const v =
-      (thumbnailVariationKey ?? '').replace(/[^a-z0-9-]/gi, '').slice(0, 12) || 'cover';
-    out += ` Cover-frame variation ${v}: same size and aspect as other shots — slightly more graphic and legible at small preview size than a mid-roll frame, still on-brand with reference stills.`;
-  } else if (
+  if (
     (shot.kind === 'ai_image' || shot.kind === 'ai_video') &&
     timelineShotIndex != null &&
     timelineShotTotal != null &&

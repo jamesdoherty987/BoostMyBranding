@@ -60,16 +60,126 @@ async function runFfmpeg(ffmpegBin: string, args: string[]): Promise<void> {
   });
 }
 
-/** One short line for optional on-image title (same cap as cover shot). */
+const OVERLAY_STOPWORDS = new Set([
+  'a',
+  'an',
+  'the',
+  'and',
+  'or',
+  'of',
+  'in',
+  'on',
+  'to',
+  'for',
+  'with',
+  'from',
+  'at',
+  'by',
+  'is',
+  'are',
+  'was',
+  'were',
+  'be',
+  'this',
+  'that',
+  'how',
+  'why',
+  'what',
+  'when',
+  'where',
+  'your',
+  'you',
+  'my',
+  'our',
+  'its',
+  'vs',
+  'vs.',
+  'into',
+  'about',
+  'over',
+  'under',
+  'video',
+  'episode',
+  'part',
+  'guide',
+  'ultimate',
+  'needs',
+  'need',
+  'make',
+  'makes',
+  'get',
+  'gets',
+  'using',
+  'use',
+  'used',
+  'really',
+  'just',
+  'also',
+  'right',
+  'now',
+  'today',
+  'tried',
+  'try',
+  'i',
+]);
+
+/**
+ * Punchy 1–3 word cover hook for on-image type — short enough to read at
+ * thumbnail size. Prefer title; fall back to topic. Never dumps a full sentence.
+ */
 export function shortThumbnailOverlayLine(title: string, topic: string): string {
-  const t = (title || '').replace(/\s+/g, ' ').trim();
-  if (t.length >= 3 && t.length <= 40) return t.slice(0, 40);
-  const u = (topic || '').replace(/\s+/g, ' ').trim();
-  const raw = (t || u || 'Video').trim();
-  if (raw.length <= 36) return raw;
-  const cut = raw.slice(0, 34);
-  const sp = cut.lastIndexOf(' ');
-  return `${(sp > 12 ? cut.slice(0, sp) : cut).trim()}…`;
+  const raw = ((title || '').trim() || (topic || '').trim() || 'Watch')
+    .replace(/\s+/g, ' ')
+    .replace(/["""''`]/g, '')
+    .replace(/[:|;•·]+/g, ' ')
+    .trim();
+
+  const words = raw
+    .split(/\s+/)
+    .map((w) => w.replace(/^[^A-Za-z0-9$%]+|[^A-Za-z0-9$%!?.]+$/g, ''))
+    .filter((w) => w.length > 0);
+
+  if (words.length === 0) return 'Watch';
+
+  const meaningful = words.filter((w) => !OVERLAY_STOPWORDS.has(w.toLowerCase()));
+  const pool = meaningful.length > 0 ? meaningful : words;
+
+  // Prefer a number + noun when present (e.g. "10 Tips", "$100 Steak").
+  // Skip bare years — they make weak hooks ("2024 Routine").
+  const numIdx = pool.findIndex(
+    (w) => (/^\d/.test(w) || /^\$/.test(w)) && !/^(19|20)\d{2}$/.test(w),
+  );
+  let candidate: string[];
+  if (numIdx >= 0) {
+    const num = pool[numIdx]!;
+    const noun = pool[numIdx + 1] ?? pool[numIdx - 1] ?? pool.find((w, i) => i !== numIdx);
+    candidate = noun ? [num, noun] : [num];
+  } else if (pool.length <= 3) {
+    candidate = pool.filter((w) => !/^(19|20)\d{2}$/.test(w));
+    if (candidate.length === 0) candidate = pool;
+  } else {
+    // Trailing nouns are usually the topic ("…Better Thumbnails", "…Morning Routine").
+    candidate = pool.filter((w) => !/^(19|20)\d{2}$/.test(w)).slice(-2);
+    if (candidate.length === 0) candidate = pool.slice(-2);
+  }
+
+  const maxChars = 20;
+  let line = candidate.join(' ');
+  while (candidate.length > 1 && line.length > maxChars) {
+    candidate = candidate.slice(1);
+    line = candidate.join(' ');
+  }
+  if (line.length > maxChars) line = line.slice(0, maxChars).trim();
+  if (!line) line = raw.slice(0, Math.min(16, raw.length)).trim() || 'Watch';
+
+  return line
+    .split(/\s+/)
+    .map((w) => {
+      if (/^[A-Z0-9$%!.?-]+$/.test(w) && /[A-Z]/.test(w)) return w;
+      if (/^\d/.test(w) || /^\$/.test(w)) return w;
+      return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+    })
+    .join(' ');
 }
 
 export type PersonalThumbnailAlign = {
@@ -208,22 +318,15 @@ async function generatePersonalAiThumbnailToR2(args: {
     return null;
   }
 
-  const tier = args.shotAlign.qualityTier ?? 'balanced';
-  const preferredId = args.shotAlign.imageModelId?.trim();
-  const preferred = preferredId ? getAiModel(preferredId) : undefined;
-  const modelId =
-    preferred?.available && preferred.kind === 'image'
-      ? preferred.id
-      : pickDefaultModel('image', tier === 'max' ? 'max' : tier === 'budget' ? 'budget' : 'balanced')?.id;
-  if (!modelId) return null;
-
   const topicLine = args.topic.trim() || 'Video';
-  const line = args.overlayLine.replace(/\s+/g, ' ').trim();
-  const useCoverText = line.length >= 2 && line.length <= 28;
+  const line = args.overlayLine.replace(/\s+/g, ' ').trim().slice(0, 20);
+  // Short punchy hooks only — skip cover text if somehow still long.
+  const useCoverText = line.length >= 2 && line.length <= 20 && line.split(/\s+/).length <= 3;
 
   const shot = personalThumbnailCoverShot({
     topic: topicLine,
-    coverText: useCoverText ? line.slice(0, 28) : undefined,
+    coverText: useCoverText ? line : undefined,
+    variationKey: args.variationKey,
   });
 
   const sb = args.shotAlign.styleBible;
@@ -241,11 +344,49 @@ async function generatePersonalAiThumbnailToR2(args: {
   });
 
   const negativePrompt = [
+    'blurry',
+    'low resolution',
+    'pixelated',
+    'noisy',
+    'jpeg artifacts',
+    'watermark',
+    'stock photo watermark',
+    'logo spam',
+    'busy collage',
+    'multiple competing subjects',
+    'cluttered background',
+    'wall of text',
+    'paragraphs of text',
+    'subtitles',
+    'tiny unreadable text',
+    'hashtags',
+    'url',
+    'extra slogans',
+    'deformed hands',
+    'extra fingers',
+    'duplicate faces',
+    'mangled anatomy',
     ...(sb?.donts ?? []),
     ...(args.shotAlign.characterNegative ? [args.shotAlign.characterNegative] : []),
   ]
     .filter(Boolean)
     .join(', ');
+
+  // Prefer the account image model; otherwise bias thumbnails toward max quality.
+  const tier = args.shotAlign.qualityTier ?? 'balanced';
+  const preferredId = args.shotAlign.imageModelId?.trim();
+  const preferred = preferredId ? getAiModel(preferredId) : undefined;
+  const thumbTier: 'max' | 'balanced' | 'budget' =
+    preferred?.available && preferred.kind === 'image'
+      ? tier
+      : tier === 'budget'
+        ? 'balanced'
+        : 'max';
+  const modelId =
+    preferred?.available && preferred.kind === 'image'
+      ? preferred.id
+      : pickDefaultModel('image', thumbTier)?.id;
+  if (!modelId) return null;
 
   let bgUrl: string;
   let costCents: number;
@@ -297,7 +438,7 @@ async function generatePersonalAiThumbnailToR2(args: {
       '-frames:v',
       '1',
       '-q:v',
-      '2',
+      '1',
       outPath,
     ]);
 

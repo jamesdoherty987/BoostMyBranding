@@ -295,7 +295,7 @@ export function listAiModels(): AiModel[] {
       kind: 'image',
       qualityTier: 'balanced',
       supportsReference: true,
-      maxReferenceImages: 1,
+      maxReferenceImages: 4,
       supportedAspectRatios: ['9:16', '1:1', '16:9'],
       pricePerUnitCents: 3,
       available: hasFal(),
@@ -701,14 +701,31 @@ async function generateFalImage(
   /** Models that need a dedicated edit endpoint + `image_urls` for refs. */
   const editEndpointMap: Record<string, string> = {
     'flux-2-klein-9b': 'fal-ai/flux-2/klein/9b/edit',
+    'seedream-v4': 'fal-ai/bytedance/seedream/v4/edit',
   };
-  /** Models that take `image_size` instead of `aspect_ratio`. */
-  const usesImageSize = new Set(['flux-2-klein-9b']);
+  /**
+   * Models whose text-to-image endpoint takes style refs as `image_urls`
+   * (not `image_url`). Ideogram ignores `image_url` on fal-ai/ideogram/v3.
+   */
+  const styleRefsAsImageUrls = new Set(['ideogram-v3']);
+  /**
+   * Models that take `image_size` ({width,height} or enum) instead of
+   * `aspect_ratio`. Sending aspect_ratio is ignored / wrong for these.
+   */
+  const usesImageSize = new Set([
+    'flux-2-klein-9b',
+    'flux-dev',
+    'ideogram-v3',
+    'seedream-v4',
+    'recraft-v3',
+  ]);
+  /** Edit / style schemas that reject `negative_prompt`. */
+  const omitNegativePrompt = new Set(['flux-2-klein-9b', 'seedream-v4', 'recraft-v3']);
 
   let endpoint = endpointMap[model.id];
   if (!endpoint) throw new Error(`No fal endpoint for ${model.id}`);
 
-  // Reference-image-capable fluxes route through the edit endpoint.
+  // Reference-image-capable models route through edit (or style-ref) paths.
   const useRef =
     model.supportsReference &&
     args.referenceImageUrls &&
@@ -735,15 +752,16 @@ async function generateFalImage(
   }
   if (useRef) {
     const refs = args.referenceImageUrls!.slice(0, model.maxReferenceImages);
-    if (editEndpointMap[model.id]) {
+    if (editEndpointMap[model.id] || styleRefsAsImageUrls.has(model.id)) {
+      // Klein/Seedream edit + Ideogram style refs all want `image_urls`.
       input.image_urls = refs;
     } else {
       input.image_url = refs[0];
     }
   }
   const neg = clampFalImageText(model.id, args.negativePrompt);
-  // Klein edit schema does not accept negative_prompt — omit on edit path.
-  if (neg && !(useRef && editEndpointMap[model.id])) {
+  // Skip negative_prompt on schemas that don't accept it (esp. edit paths).
+  if (neg && !omitNegativePrompt.has(model.id)) {
     input.negative_prompt = neg;
   }
 

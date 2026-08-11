@@ -89,6 +89,8 @@ import {
   generateAiImage,
   generateAiVideo,
   pickDefaultModel,
+  pickImageReferenceUrls,
+  reshapePromptForImageModel,
 } from './personalAiModels.js';
 
 export interface GenerateForAccountArgs {
@@ -973,12 +975,20 @@ async function sourceMediaForBeats(
       !theme.requiresGroundedImages
     ) {
       try {
-        const prompt = buildAiPrompt(imageQuery, stylePrefix, charPromptFragment);
-        // Prefer the reference-aware model route when we have refs.
-        const refs = collectReferenceImages(
-          useCharacter ? characterRefs : [],
-          styleRefs,
+        const prompt = reshapePromptForImageModel(
+          imageModelId,
+          buildAiPrompt(imageQuery, stylePrefix, charPromptFragment),
         );
+        // Prefer the reference-aware model route when we have refs.
+        const refs = pickImageReferenceUrls({
+          modelId: imageModelId,
+          styleUrls: styleRefs
+            .map((r) => r.fileUrl)
+            .filter((u): u is string => typeof u === 'string' && u.length > 0),
+          characterUrls: (useCharacter ? characterRefs : [])
+            .map((r) => r.fileUrl)
+            .filter((u): u is string => typeof u === 'string' && u.length > 0),
+        });
         const image = await withRetry(
           () =>
             generateAiImage({

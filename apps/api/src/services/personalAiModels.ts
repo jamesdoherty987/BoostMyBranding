@@ -299,7 +299,8 @@ export function listAiModels(): AiModel[] {
       supportedAspectRatios: ['9:16', '1:1', '16:9'],
       pricePerUnitCents: 3,
       available: hasFal(),
-      notes: 'Excellent in-image text rendering and typographic layouts.',
+      notes:
+        'Style refs + Quality render; MagicPrompt off; we strip on-image captions (Ideogram invents bad type). Prefer Nano Banana / Flux when you need painted labels.',
     },
     {
       id: 'seedream-v4',
@@ -494,6 +495,82 @@ export function getAiModel(id: string): AiModel | undefined {
 }
 
 /**
+ * Pick reference URLs for a given image model.
+ * Ideogram's `image_urls` are **style** refs — character faces there poison style matching.
+ */
+export function pickImageReferenceUrls(args: {
+  modelId: string | undefined;
+  styleUrls: string[];
+  characterUrls: string[];
+  longform?: boolean;
+}): string[] {
+  const modelId = args.modelId?.trim();
+  if (!modelId) return [];
+  const model = getAiModel(modelId);
+  if (!model?.supportsReference) return [];
+  const max = Math.max(0, model.maxReferenceImages);
+  if (max === 0) return [];
+
+  if (modelId === 'ideogram-v3') {
+    // Style refs first (up to max). Skip character anchors — Ideogram treats them as style.
+    return args.styleUrls.filter(Boolean).slice(0, max);
+  }
+
+  if (args.longform) {
+    return [...args.characterUrls.slice(0, 3), ...args.styleUrls.slice(0, 3)]
+      .filter(Boolean)
+      .slice(0, Math.min(6, max));
+  }
+  return [...args.characterUrls.slice(0, 2), ...args.styleUrls.slice(0, 4)]
+    .filter(Boolean)
+    .slice(0, Math.min(6, max));
+}
+
+/**
+ * Ideogram invents typography from long prompts + MagicPrompt. Front-load hard
+ * text/style/script rules (prompt is clamped from the start) and hoist the
+ * concrete scene sentence so it survives the 2k char clamp.
+ */
+export function reshapePromptForImageModel(
+  modelId: string,
+  prompt: string,
+): string {
+  if (modelId !== 'ideogram-v3') return prompt;
+  const lead = [
+    'TEXT RULE (hard): ZERO text in the image — no letters, numbers, words, captions, titles, subtitles, watermarks, logos, posters with readable type, street signs, phone UI, or book pages. Pure visual scene only.',
+    'STYLE RULE: When style reference images are attached, match their palette, lighting, grain, lens, finish, and medium. Invent a NEW composition for this beat — never copy a reference layout.',
+    'SCRIPT RULE: Depict concrete props/setting/action that match THIS shot\'s narration — not a repetitive stock mood or the same scene recycled across cuts.',
+  ].join(' ');
+  const sceneMatch = prompt.match(
+    /(?:Still frame|Shot|COVER STILL):\s*[\s\S]{8,420}?(?=\s+(?:Camera:|Subject:|Subject action:|NARRATIVE ROLE:|STILL QUALITY|THUMBNAIL QUALITY|BRAND |REFERENCE CONTRACT:|Colour grade:)|$)/i,
+  );
+  const matched = sceneMatch?.[0];
+  const scene = matched?.replace(/\s+/g, ' ').trim();
+  const rest = matched
+    ? prompt.replace(matched, ' ').replace(/\s+/g, ' ').trim()
+    : prompt;
+  return `${lead}${scene ? ` SCENE: ${scene}` : ''} ${rest}`.trim();
+}
+
+/**
+ * Ideogram cannot be trusted with painted labels (wrong / unreadable / too much).
+ * Strip captions when routing stills through Ideogram.
+ */
+export function shouldStripOnImageCaptionForModel(modelId: string | undefined): boolean {
+  return modelId === 'ideogram-v3';
+}
+
+/** Stable FNV-1a-ish seed so consecutive Ideogram stills do not share one RNG path. */
+export function hashImageSeed(key: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < key.length; i++) {
+    h ^= key.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+/**
  * Pick a default model for a tier when the user hasn't specified one.
  * Respects availability — if the "max" tier isn't configured, falls
  * down to balanced → budget before throwing.
@@ -586,6 +663,11 @@ export interface GenerateImageArgs {
   negativePrompt?: string;
   aspectRatio?: '9:16' | '1:1' | '16:9' | '4:5';
   referenceImageUrls?: string[];
+  /**
+   * Optional seed for models that support it (Ideogram). Use a per-shot hash so
+   * consecutive stills do not collapse into the same composition.
+   */
+  seed?: number;
   /** Storage scope for the generated asset. */
   scopePath: string;
 }
@@ -682,6 +764,25 @@ function falImageSizeForAspect(
   }
 }
 
+/**
+ * Ideogram's native size enums render sharper than our low custom 720×1280.
+ * `portrait_16_9` is the tall 9:16 preset (fal naming).
+ */
+function ideogramImageSizeForAspect(
+  ratio: '9:16' | '1:1' | '16:9' | '4:5',
+): string {
+  switch (ratio) {
+    case '9:16':
+      return 'portrait_16_9';
+    case '16:9':
+      return 'landscape_16_9';
+    case '4:5':
+      return 'portrait_4_3';
+    default:
+      return 'square_hd';
+  }
+}
+
 async function generateFalImage(
   model: AiModel,
   args: GenerateImageArgs,
@@ -746,7 +847,10 @@ async function generateFalImage(
 
   const input: Record<string, unknown> = { prompt };
   if (usesImageSize.has(model.id)) {
-    input.image_size = falImageSizeForAspect(falAspect);
+    input.image_size =
+      model.id === 'ideogram-v3'
+        ? ideogramImageSizeForAspect(falAspect)
+        : falImageSizeForAspect(falAspect);
   } else {
     input.aspect_ratio = falAspect;
   }
@@ -759,9 +863,33 @@ async function generateFalImage(
       input.image_url = refs[0];
     }
   }
+  // Ideogram defaults expand_prompt=true (MagicPrompt) which invents junk typography.
+  // When style refs are present, omit `style` so refs drive the look (not AUTO).
+  if (model.id === 'ideogram-v3') {
+    input.expand_prompt = false;
+    input.rendering_speed = 'QUALITY';
+    if (!useRef) input.style = 'AUTO';
+    if (typeof args.seed === 'number' && Number.isFinite(args.seed)) {
+      input.seed = Math.abs(Math.trunc(args.seed)) % 2_147_483_647;
+    }
+  }
   const neg = clampFalImageText(model.id, args.negativePrompt);
   // Skip negative_prompt on schemas that don't accept it (esp. edit paths).
-  if (neg && !omitNegativePrompt.has(model.id)) {
+  if (model.id === 'ideogram-v3') {
+    // Hard bans first so a long account negative cannot push them past the clamp.
+    input.negative_prompt =
+      clampFalImageText(
+        model.id,
+        [
+          'text, letters, words, numbers, typography, captions, titles, subtitles',
+          'watermarks, logos, readable signage, UI overlays, posters with readable type',
+          'same generic stock scene, repetitive composition',
+          neg,
+        ]
+          .filter(Boolean)
+          .join(', '),
+      ) ?? '';
+  } else if (neg && !omitNegativePrompt.has(model.id)) {
     input.negative_prompt = neg;
   }
 

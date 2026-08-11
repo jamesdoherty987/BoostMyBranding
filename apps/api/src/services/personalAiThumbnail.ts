@@ -27,6 +27,9 @@ import {
   getAiModel,
   pickDefaultModel,
   pickImageModelForLongform,
+  pickImageReferenceUrls,
+  reshapePromptForImageModel,
+  shouldStripOnImageCaptionForModel,
 } from './personalAiModels.js';
 import { uploadFile } from './r2.js';
 import { resolveFfmpegBin } from '../lib/ffmpegBin.js';
@@ -192,7 +195,10 @@ export type PersonalThumbnailAlign = {
   inspirationStyleHintForShots?: string | null;
   animationStyleHint?: string | null;
   shotBrandHints?: string | null;
+  /** Resolved refs for the intended image model (may be re-picked if model falls back). */
   referenceImageUrls: string[];
+  styleReferenceUrls: string[];
+  characterReferenceUrls: string[];
   longformEnabled: boolean;
   themeRequiresGroundedImages: boolean;
   /** Same rule as director `defaultImageModel`. */
@@ -251,13 +257,16 @@ export async function buildPersonalThumbnailShotAlign(args: {
     : undefined;
   const shotBrandHints = buildVisualBrandHintsForShots(args.styleBible ?? undefined);
 
-  const refs = longformEnabled
-    ? [...characterAnchors.slice(0, 3), ...resolvedStyleRefImageUrls.slice(0, 3)].slice(0, 6)
-    : [...characterAnchors.slice(0, 2), ...resolvedStyleRefImageUrls.slice(0, 4)];
-
   const imageModelId =
     args.genCfg.imageModelId?.trim() ||
     pickImageModelForLongform(longformAnimationStyle, args.genCfg.qualityTier ?? 'balanced');
+
+  const refs = pickImageReferenceUrls({
+    modelId: imageModelId,
+    styleUrls: resolvedStyleRefImageUrls,
+    characterUrls: characterAnchors,
+    longform: longformEnabled,
+  });
 
   return {
     themeVisualStyle: args.theme.visualStyle,
@@ -269,6 +278,8 @@ export async function buildPersonalThumbnailShotAlign(args: {
     animationStyleHint,
     shotBrandHints,
     referenceImageUrls: refs,
+    styleReferenceUrls: resolvedStyleRefImageUrls,
+    characterReferenceUrls: characterAnchors,
     longformEnabled,
     themeRequiresGroundedImages: args.theme.requiresGroundedImages === true,
     imageModelId,
@@ -333,19 +344,51 @@ async function generatePersonalAiThumbnailToR2(args: {
     variationKey: args.variationKey,
   });
 
-  const sb = args.shotAlign.styleBible;
-  const prompt = shotToPrompt({
-    shot,
-    themeVisualStyle: args.shotAlign.themeVisualStyle,
-    styleBibleVibe: sb?.vibe ?? undefined,
-    characterFragment: args.shotAlign.characterFragment ?? undefined,
-    globalColourGrade: args.shotAlign.globalColourGrade ?? undefined,
-    inspirationStyleHint: args.shotAlign.inspirationStyleHintForShots ?? undefined,
-    animationStyleHint: args.shotAlign.animationStyleHint ?? undefined,
-    shotBrandHints: args.shotAlign.shotBrandHints ?? undefined,
-    thumbnailCoverMode: true,
-    thumbnailVariationKey: args.variationKey,
+  // Prefer the account image model; otherwise use tier default (Gemini over Fal when set).
+  const tier = args.shotAlign.qualityTier ?? 'balanced';
+  const preferredId = args.shotAlign.imageModelId?.trim();
+  const preferred = preferredId ? getAiModel(preferredId) : undefined;
+  // Don't force "max" (Flux on Fal) when Gemini is available — stills work without Fal credits.
+  const thumbTier: 'max' | 'balanced' | 'budget' =
+    preferred?.available && preferred.kind === 'image'
+      ? tier
+      : tier === 'budget'
+        ? 'balanced'
+        : tier;
+  const modelId =
+    preferred?.available && preferred.kind === 'image'
+      ? preferred.id
+      : pickDefaultModel('image', thumbTier)?.id;
+  if (!modelId) return null;
+
+  // Re-pick refs for the *actual* model (align may have been built for an unavailable id).
+  const referenceImageUrls = pickImageReferenceUrls({
+    modelId,
+    styleUrls: args.shotAlign.styleReferenceUrls,
+    characterUrls: args.shotAlign.characterReferenceUrls,
+    longform: args.shotAlign.longformEnabled,
   });
+
+  const shotForPrompt = shouldStripOnImageCaptionForModel(modelId)
+    ? { ...shot, imageCaption: undefined }
+    : shot;
+
+  const sb = args.shotAlign.styleBible;
+  const prompt = reshapePromptForImageModel(
+    modelId,
+    shotToPrompt({
+      shot: shotForPrompt,
+      themeVisualStyle: args.shotAlign.themeVisualStyle,
+      styleBibleVibe: sb?.vibe ?? undefined,
+      characterFragment: args.shotAlign.characterFragment ?? undefined,
+      globalColourGrade: args.shotAlign.globalColourGrade ?? undefined,
+      inspirationStyleHint: args.shotAlign.inspirationStyleHintForShots ?? undefined,
+      animationStyleHint: args.shotAlign.animationStyleHint ?? undefined,
+      shotBrandHints: args.shotAlign.shotBrandHints ?? undefined,
+      thumbnailCoverMode: true,
+      thumbnailVariationKey: args.variationKey,
+    }),
+  );
 
   const negativePrompt = [
     'blurry',
@@ -370,28 +413,14 @@ async function generatePersonalAiThumbnailToR2(args: {
     'extra fingers',
     'duplicate faces',
     'mangled anatomy',
+    ...(modelId === 'ideogram-v3'
+      ? ['any readable typography', 'ignoring style reference palette and lighting']
+      : []),
     ...(sb?.donts ?? []),
     ...(args.shotAlign.characterNegative ? [args.shotAlign.characterNegative] : []),
   ]
     .filter(Boolean)
     .join(', ');
-
-  // Prefer the account image model; otherwise use tier default (Gemini over Fal when set).
-  const tier = args.shotAlign.qualityTier ?? 'balanced';
-  const preferredId = args.shotAlign.imageModelId?.trim();
-  const preferred = preferredId ? getAiModel(preferredId) : undefined;
-  // Don't force "max" (Flux on Fal) when Gemini is available — stills work without Fal credits.
-  const thumbTier: 'max' | 'balanced' | 'budget' =
-    preferred?.available && preferred.kind === 'image'
-      ? tier
-      : tier === 'budget'
-        ? 'balanced'
-        : tier;
-  const modelId =
-    preferred?.available && preferred.kind === 'image'
-      ? preferred.id
-      : pickDefaultModel('image', thumbTier)?.id;
-  if (!modelId) return null;
 
   let bgUrl: string;
   let costCents: number;
@@ -401,8 +430,7 @@ async function generatePersonalAiThumbnailToR2(args: {
       prompt,
       negativePrompt: negativePrompt || undefined,
       aspectRatio: args.aspectRatio,
-      referenceImageUrls:
-        args.shotAlign.referenceImageUrls.length > 0 ? args.shotAlign.referenceImageUrls : undefined,
+      referenceImageUrls: referenceImageUrls.length > 0 ? referenceImageUrls : undefined,
       scopePath: `personal/${args.accountId}/thumbnails`,
     });
     bgUrl = gen.url;

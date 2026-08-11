@@ -70,9 +70,13 @@ import {
   generateAiImage,
   generateAiVideo,
   getAiModel,
+  hashImageSeed,
   isFalFatalAccountError,
   pickDefaultModel,
   pickImageModelForLongform,
+  pickImageReferenceUrls,
+  reshapePromptForImageModel,
+  shouldStripOnImageCaptionForModel,
 } from './personalAiModels.js';
 import { buildDirectorGenerationInfo } from './personalGenerationMeta.js';
 import { resolveMusicDuckUnderVoice, resolveMusicSoloVolume } from './personalMusicMix.js';
@@ -556,12 +560,25 @@ export async function directorPipelineFromResolvedStoryboard(
       };
     }
 
-    const refs = longformEnabled
-      ? [...characterAnchors.slice(0, 3), ...resolvedStyleRefImageUrls.slice(0, 3)].slice(0, 6)
-      : [...characterAnchors.slice(0, 2), ...resolvedStyleRefImageUrls.slice(0, 4)];
+    const imageRefs = pickImageReferenceUrls({
+      modelId: defaultImageModel,
+      styleUrls: resolvedStyleRefImageUrls,
+      characterUrls: characterAnchors,
+      longform: longformEnabled,
+    });
+    const videoRefs = pickImageReferenceUrls({
+      modelId: defaultVideoModel,
+      styleUrls: resolvedStyleRefImageUrls,
+      characterUrls: characterAnchors,
+      longform: longformEnabled,
+    });
+
+    const shotForPrompt = shouldStripOnImageCaptionForModel(defaultImageModel)
+      ? { ...fs.shot, imageCaption: undefined }
+      : fs.shot;
 
     const factLabelImagePromptExtra =
-      genConfig.allowSparseImageText === true
+      genConfig.allowSparseImageText === true && shotForPrompt.imageCaption?.trim()
         ? [
             'The on-image words are narration-locked in the prompt — never replace them with scene-description titles or "what the photo shows".',
             'If the locked string contains numbers, render them crisply with correct % or currency symbols — no invented digits or alternate phrasing.',
@@ -617,7 +634,7 @@ export async function directorPipelineFromResolvedStoryboard(
       : undefined;
 
     const basePrompt = shotToPrompt({
-      shot: fs.shot,
+      shot: shotForPrompt,
       themeVisualStyle: theme.visualStyle,
       styleBibleVibe: styleBible.vibe ?? undefined,
       characterFragment: character?.promptFragment ?? undefined,
@@ -641,7 +658,9 @@ export async function directorPipelineFromResolvedStoryboard(
     });
     const refNoCopy =
       (fs.shot.kind === 'ai_image' || fs.shot.kind === 'ai_video') &&
-      (refs.length > 0 || Boolean(character?.promptFragment?.trim()))
+      (imageRefs.length > 0 ||
+        videoRefs.length > 0 ||
+        Boolean(character?.promptFragment?.trim()))
         ? ' REFERENCE CONTRACT: use reference images / character sheet only for identity, wardrobe, palette, and lens character — invent a **new** composition, pose, and framing that **advances this shot\'s narration** (new prop, angle, location detail, or story beat); never recreate or near-duplicate a reference frame (no copy-paste layouts).'
         : '';
     const prompt = `${basePrompt}${refNoCopy}`;
@@ -649,12 +668,20 @@ export async function directorPipelineFromResolvedStoryboard(
     const negativePrompt = [
       'blurry, out of focus, jpeg artifacts, watermark, Getty/Shutterstock frame marks',
       'mangled hands, extra fingers, duplicated faces in crowds, melted anatomy',
-      ...(fs.shot.kind === 'ai_image' && !fs.shot.imageCaption?.trim()
+      ...(shotForPrompt.kind === 'ai_image' && !shotForPrompt.imageCaption?.trim()
         ? [
             'text, letters, words, numbers, typography, captions, titles, subtitles',
             'watermarks, logos, readable signage, UI overlays, posters with readable type',
           ]
         : ['illegible micro-text unless script-locked above']),
+      ...(defaultImageModel === 'ideogram-v3'
+        ? [
+            'any readable typography',
+            'same scene repeated across shots',
+            'generic stock composition',
+            'ignoring style reference palette and lighting',
+          ]
+        : []),
       ...(styleBible.donts ?? []),
       ...(character?.negativePrompt ? [character.negativePrompt] : []),
       ...(timelineIndex > 0 && (fs.shot.kind === 'ai_image' || fs.shot.kind === 'ai_video')
@@ -669,7 +696,8 @@ export async function directorPipelineFromResolvedStoryboard(
         : []),
       ...(genConfig.allowSparseImageText === true &&
       timelineIndex > 0 &&
-      flat[timelineIndex - 1]?.shot.imageCaption?.trim()
+      flat[timelineIndex - 1]?.shot.imageCaption?.trim() &&
+      !shouldStripOnImageCaptionForModel(defaultImageModel)
         ? ['reusing the same on-image phrase as the previous shot']
         : []),
       ...(fs.shot.kind === 'ai_image'
@@ -678,7 +706,9 @@ export async function directorPipelineFromResolvedStoryboard(
             'identical posterised colour wash across the whole frame',
           ]
         : []),
-      ...(genConfig.allowSparseImageText === true && fs.shot.imageCaption?.trim()
+      ...(genConfig.allowSparseImageText === true &&
+      shotForPrompt.imageCaption?.trim() &&
+      !shouldStripOnImageCaptionForModel(defaultImageModel)
         ? [
             'wrong or paraphrased text versus the requested label',
             'scene-description captions or picture titles instead of the given narration snippet',
@@ -703,13 +733,15 @@ export async function directorPipelineFromResolvedStoryboard(
               (fs.shot.kind === 'ai_image' || fs.shot.kind === 'scraped_image')
             ? 'scraped_video'
             : fs.shot.kind;
+      const refCount =
+        effectiveKind === 'ai_video' ? videoRefs.length : imageRefs.length;
       logSourcingConsole(
         postId,
-        `→ ${fs.shot.id} ${fs.shot.kind}→${effectiveKind} refs=${refs.length}`,
+        `→ ${fs.shot.id} ${fs.shot.kind}→${effectiveKind} refs=${refCount}`,
       );
       void appendPersonalGenerationLog(
         postId,
-        `Shot ${fs.shot.id}: generating (${String(fs.shot.kind)} → ${effectiveKind}, ${refs.length} ref URL(s)).`,
+        `Shot ${fs.shot.id}: generating (${String(fs.shot.kind)} → ${effectiveKind}, ${refCount} ref URL(s)).`,
       ).catch(() => {});
       if (effectiveKind === 'user_media') {
         const libIdx = (fs.shot.referenceIndices ?? []).find(
@@ -750,7 +782,7 @@ export async function directorPipelineFromResolvedStoryboard(
                       const clipHi = Math.max(cMin, cMax);
                       return Math.min(clipHi, Math.max(clipLo, fs.shot.durationSeconds));
                     })(),
-                    referenceImageUrls: refs,
+                    referenceImageUrls: videoRefs,
                     scopePath: `personal/${account.id}/ai-video`,
                   }),
                 { label: `director_video:${account.id}:${fs.shot.id}`, attempts: 1 },
@@ -818,10 +850,17 @@ export async function directorPipelineFromResolvedStoryboard(
               () =>
                 generateAiImage({
                   modelId: defaultImageModel,
-                  prompt,
+                  prompt: reshapePromptForImageModel(
+                    defaultImageModel ?? '',
+                    prompt,
+                  ),
                   negativePrompt: negativePrompt || undefined,
                   aspectRatio: aspectRatio,
-                  referenceImageUrls: refs,
+                  referenceImageUrls: imageRefs,
+                  seed:
+                    defaultImageModel === 'ideogram-v3'
+                      ? hashImageSeed(`${fs.shot.id}:${timelineIndex}:${topic}`)
+                      : undefined,
                   scopePath: `personal/${account.id}/ai-image`,
                 }),
               { label: `director_image:${account.id}:${fs.shot.id}`, attempts: 1 },

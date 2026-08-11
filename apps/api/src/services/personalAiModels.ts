@@ -713,8 +713,9 @@ async function generateFalImage(
     model.supportsReference &&
     args.referenceImageUrls &&
     args.referenceImageUrls.length > 0;
-  if (useRef && editEndpointMap[model.id]) {
-    endpoint = editEndpointMap[model.id];
+  if (useRef) {
+    const editEndpoint = editEndpointMap[model.id];
+    if (editEndpoint) endpoint = editEndpoint;
   }
   // Some fal image schemas omit 4:5; only remap when this model does not
   // advertise 4:5 (ideogram, recraft, etc.).

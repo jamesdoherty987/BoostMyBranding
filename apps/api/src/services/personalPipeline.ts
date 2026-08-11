@@ -83,6 +83,7 @@ import { checkScriptRules } from './personalQuality.js';
 import { assertPersonalVideoExampleTitlesOrThrow } from './personalTitlePolicy.js';
 import { getCharacterUnsafe } from './personalCharacters.js';
 import { internalListForPipeline } from './personalAccountMedia.js';
+import { ensurePersonalStyleProfile } from './personalStyleProfile.js';
 import { researchTopic, researchToPromptBlock } from './personalResearch.js';
 import {
   generateAiImage,
@@ -827,6 +828,14 @@ async function sourceMediaForBeats(
   const useCharacter =
     (genConfig.useCharacter ?? true) && Boolean(character);
 
+  const styleProfile = await ensurePersonalStyleProfile(accountId);
+  const stylePrefix = [
+    theme.visualStyle,
+    styleBible.vibe,
+    styleProfile.hint,
+  ]
+    .filter(Boolean)
+    .join('. ');
   const imageModelId =
     genConfig.imageModelId ??
     pickDefaultModel('image', genConfig.qualityTier ?? 'balanced')?.id;
@@ -834,9 +843,7 @@ async function sourceMediaForBeats(
     genConfig.videoModelId ??
     pickDefaultModel('video', genConfig.qualityTier ?? 'balanced')?.id;
 
-  // Build a "style prefix" that gets appended to every AI generation so
-  // the whole reel feels coherent.
-  const stylePrefix = [theme.visualStyle, styleBible.vibe].filter(Boolean).join('. ');
+  // stylePrefix already includes theme + vibe + cached AI style profile.
 
   const negativePrompt = [
     ...(styleBible.donts ?? []),

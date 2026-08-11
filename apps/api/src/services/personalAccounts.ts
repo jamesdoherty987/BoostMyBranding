@@ -317,9 +317,16 @@ export async function updateAccount(
   }
 
   if (patch.styleBible !== undefined) {
+    const incoming = { ...patch.styleBible } as PersonalAccountStyleBible & {
+      aiStyleProfile?: unknown;
+    };
+    // AI cache is server-owned — never let the dashboard overwrite it.
+    delete incoming.aiStyleProfile;
     updates.styleBible = stripRemovedStyleBibleKeys({
       ...(existing.styleBible ?? {}),
-      ...patch.styleBible,
+      ...incoming,
+      // Preserve cached profile across bible edits.
+      aiStyleProfile: (existing.styleBible as PersonalAccountStyleBible | null)?.aiStyleProfile,
     } as PersonalAccountStyleBible);
   }
   if (patch.generatorConfig !== undefined) {

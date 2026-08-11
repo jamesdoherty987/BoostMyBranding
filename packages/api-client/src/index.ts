@@ -2542,6 +2542,15 @@ export interface PersonalAiModel {
 
 /* ─── Extended account payload ───────────────────────────── */
 
+/** Cached visual language from inspiration media (once per account). */
+export interface PersonalAiStyleProfile {
+  text: string;
+  block?: string;
+  sourceHash: string;
+  generatedAt: string;
+  modelId?: string;
+}
+
 export interface PersonalAccountStyleBible {
   vibe?: string;
   dos?: string[];
@@ -2553,6 +2562,8 @@ export interface PersonalAccountStyleBible {
   videoTitleGuidance?: string;
   /** Full scripts to learn structure / pacing from — never copy verbatim. */
   referenceFullScripts?: string[];
+  /** AI-distilled look from inspiration media — regenerated when refs change. */
+  aiStyleProfile?: PersonalAiStyleProfile;
 }
 
 export interface PersonalGeneratorConfig {

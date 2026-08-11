@@ -19,6 +19,7 @@ import {
 } from '@boost/database';
 import { uploadFile } from './r2.js';
 import { analyzeImage } from './claude.js';
+import { invalidatePersonalStyleProfile } from './personalStyleProfile.js';
 
 export type MediaRole =
   | 'style_reference'
@@ -112,6 +113,12 @@ export async function uploadAccountMedia(
     .returning();
   if (!row) throw new Error('Failed to persist media');
 
+  if (args.role === 'inspiration' || args.role === 'style_reference') {
+    void invalidatePersonalStyleProfile(args.accountId).catch((e) =>
+      console.warn('[media] style-profile invalidate failed:', (e as Error).message),
+    );
+  }
+
   // Kick off a Claude Vision description in the background (images only).
   // It's best-effort — we don't await it so the upload returns fast.
   if (kind === 'image') {
@@ -126,6 +133,9 @@ export async function uploadAccountMedia(
             .update(personalAccountMedia)
             .set({ aiDescription: desc, updatedAt: new Date() })
             .where(eq(personalAccountMedia.id, row.id));
+          if (args.role === 'inspiration' || args.role === 'style_reference') {
+            void invalidatePersonalStyleProfile(args.accountId).catch(() => {});
+          }
         }
       })
       .catch((e) => console.warn('[media] ai-describe failed:', (e as Error).message));
@@ -215,6 +225,23 @@ export async function updateAccountMedia(
     .set(updates as any)
     .where(eq(personalAccountMedia.id, mediaId))
     .returning();
+
+  const nextRole = (patch.role ?? existing.role) as MediaRole;
+  const touchesStyle =
+    existing.role === 'inspiration' ||
+    existing.role === 'style_reference' ||
+    nextRole === 'inspiration' ||
+    nextRole === 'style_reference';
+  const styleFieldsChanged =
+    patch.role !== undefined ||
+    patch.description !== undefined ||
+    patch.isArchived !== undefined;
+  if (touchesStyle && styleFieldsChanged) {
+    void invalidatePersonalStyleProfile(existing.accountId).catch((e) =>
+      console.warn('[media] style-profile invalidate failed:', (e as Error).message),
+    );
+  }
+
   return row ? toPayload(row) : null;
 }
 
@@ -226,6 +253,11 @@ export async function deleteAccountMedia(userId: string, mediaId: string) {
   await db
     .delete(personalAccountMedia)
     .where(eq(personalAccountMedia.id, mediaId));
+  if (existing.role === 'inspiration' || existing.role === 'style_reference') {
+    void invalidatePersonalStyleProfile(existing.accountId).catch((e) =>
+      console.warn('[media] style-profile invalidate failed:', (e as Error).message),
+    );
+  }
   return true;
 }
 

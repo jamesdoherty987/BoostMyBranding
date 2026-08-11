@@ -46,10 +46,12 @@ import {
   PERSONAL_POST_CANCELLED_MESSAGE,
   withAbortWhenPersonalPostFailed,
   trackPersonalPostInFlight,
+  appendPersonalGenerationLog,
 } from './personalAccounts.js';
 import { chooseTopic } from './personalScript.js';
 import { getCharacterUnsafe } from './personalCharacters.js';
 import { internalListForPipeline } from './personalAccountMedia.js';
+import { ensurePersonalStyleProfile } from './personalStyleProfile.js';
 import { researchTopic, researchToPromptBlock } from './personalResearch.js';
 import { pickImageModelForLongform } from './personalAiModels.js';
 import { StitcherError } from './personalStitcher.js';
@@ -498,38 +500,46 @@ export async function generateForAccountDirector(
     const inspirationItems = accountMedia.filter(
       (m) => m.role === 'inspiration' || m.role === 'style_reference',
     );
-    const inspirationStyleBlock = inspirationItems.length
-      ? inspirationItems
-          .slice(0, 8)
-          .map((m, i) => {
-            const desc =
-              m.description ??
-              m.aiDescription ??
-              (m.tags && m.tags.length > 0 ? m.tags.join(', ') : 'reference still or clip');
-            const mime = (m.mimeType ?? '').toLowerCase();
-            const kind =
-              mime.startsWith('video/') || /\.(mp4|webm|mov|mkv|m4v)(\?|#|$)/i.test(m.fileUrl ?? '')
-                ? 'video'
-                : mime.startsWith('image/') ||
-                    /\.(jpg|jpeg|png|webp|gif)(\?|#|$)/i.test(m.fileUrl ?? '')
-                  ? 'image'
-                  : 'media';
-            return `[${i + 1}] (${kind}) ${desc}`;
-          })
-          .join('\n')
-      : undefined;
-    // Short one-line version for per-shot prompts. We compress every
-    // ref down to whatever descriptive text the user or Claude wrote
-    // and cap the whole thing so shots stay inside the model's token
-    // budget.
-    const inspirationStyleHint = inspirationItems.length
-      ? inspirationItems
-          .slice(0, 4)
-          .map((m) => m.description ?? m.aiDescription ?? '')
-          .filter((s) => s && s.length > 0)
-          .join('; ')
-          .slice(0, 400)
-      : undefined;
+    const styleProfile = await ensurePersonalStyleProfile(account.id);
+    if (styleProfile.rebuilt) {
+      void appendPersonalGenerationLog(
+        postId,
+        `Built account style profile from ${inspirationItems.length} inspiration item(s) (${styleProfile.profile?.modelId ?? 'cache'}).`,
+      ).catch(() => {});
+    }
+    const inspirationStyleBlock =
+      styleProfile.block ??
+      (inspirationItems.length
+        ? inspirationItems
+            .slice(0, 8)
+            .map((m, i) => {
+              const desc =
+                m.description ??
+                m.aiDescription ??
+                (m.tags && m.tags.length > 0 ? m.tags.join(', ') : 'reference still or clip');
+              const mime = (m.mimeType ?? '').toLowerCase();
+              const kind =
+                mime.startsWith('video/') || /\.(mp4|webm|mov|mkv|m4v)(\?|#|$)/i.test(m.fileUrl ?? '')
+                  ? 'video'
+                  : mime.startsWith('image/') ||
+                      /\.(jpg|jpeg|png|webp|gif)(\?|#|$)/i.test(m.fileUrl ?? '')
+                    ? 'image'
+                    : 'media';
+              return `[${i + 1}] (${kind}) ${desc}`;
+            })
+            .join('\n')
+        : undefined);
+    // Short one-line version for per-shot prompts — prefer the cached AI style profile.
+    const inspirationStyleHint =
+      styleProfile.hint ??
+      (inspirationItems.length
+        ? inspirationItems
+            .slice(0, 4)
+            .map((m) => m.description ?? m.aiDescription ?? '')
+            .filter((s) => s && s.length > 0)
+            .join('; ')
+            .slice(0, 400)
+        : undefined);
 
     const isAnimatedTheme = theme.template === 'animated-explainer';
     const longformEnabled = genConfig.longformEnabled === true || isAnimatedTheme;

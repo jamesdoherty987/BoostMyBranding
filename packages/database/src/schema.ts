@@ -1141,6 +1141,23 @@ export const personalCharacters = pgTable(
  * Style bible + generator config type shapes. Stored on personal_accounts
  * as JSONB so schema evolves without migrations.
  */
+/**
+ * Cached visual language distilled from inspiration / style_reference media.
+ * Generated once per account (rebuilt when the inspiration set changes).
+ */
+export interface PersonalAiStyleProfile {
+  /** Short style lock for per-shot image prompts. */
+  text: string;
+  /** Longer multi-line brief for the director planner. */
+  block?: string;
+  /** Hash of inspiration/style_reference sources used to build this profile. */
+  sourceHash: string;
+  /** ISO timestamp when this profile was generated. */
+  generatedAt: string;
+  /** Vision model used (e.g. gemini-3.5-flash-lite). */
+  modelId?: string;
+}
+
 export interface PersonalAccountStyleBible {
   /** Written description of the "vibe" — pasted verbatim into prompts. */
   vibe?: string;
@@ -1164,6 +1181,11 @@ export interface PersonalAccountStyleBible {
    * pacing, and tone — the model must not copy wording or claims verbatim.
    */
   referenceFullScripts?: string[];
+  /**
+   * AI-distilled visual style from inspiration media (look only).
+   * Not user-edited — regenerated when inspiration uploads change.
+   */
+  aiStyleProfile?: PersonalAiStyleProfile;
 }
 
 export interface PersonalGeneratorConfig {

@@ -12,6 +12,7 @@ import path from 'node:path';
 import type { PersonalAccountStyleBible, PersonalGeneratorConfig } from '@boost/database';
 import type { PersonalTheme } from './personalThemes.js';
 import { internalListForPipeline } from './personalAccountMedia.js';
+import { ensurePersonalStyleProfile } from './personalStyleProfile.js';
 import { getCharacterAnchorImages, getCharacterUnsafe } from './personalCharacters.js';
 import { resolvePersonalInspirationImageUrls } from './personalInspirationRefs.js';
 import { buildVisualBrandHintsForShots } from './personalContentHints.js';
@@ -213,14 +214,17 @@ export async function buildPersonalThumbnailShotAlign(args: {
 }): Promise<PersonalThumbnailAlign> {
   const rows = await internalListForPipeline(args.accountId);
   const inspirationItems = rows.filter((m) => m.role === 'inspiration' || m.role === 'style_reference');
-  const inspirationStyleHint = inspirationItems.length
-    ? inspirationItems
-        .slice(0, 4)
-        .map((m) => m.description ?? m.aiDescription ?? '')
-        .filter((s) => s && s.length > 0)
-        .join('; ')
-        .slice(0, 400)
-    : undefined;
+  const styleProfile = await ensurePersonalStyleProfile(args.accountId);
+  const inspirationStyleHint =
+    styleProfile.hint ??
+    (inspirationItems.length
+      ? inspirationItems
+          .slice(0, 4)
+          .map((m) => m.description ?? m.aiDescription ?? '')
+          .filter((s) => s && s.length > 0)
+          .join('; ')
+          .slice(0, 400)
+      : undefined);
 
   const resolvedStyleRefImageUrls = await resolvePersonalInspirationImageUrls(
     args.accountId,
@@ -237,7 +241,7 @@ export async function buildPersonalThumbnailShotAlign(args: {
   const inspirationStyleHintForShots = [inspirationStyleHint, inspirationPixelContract]
     .filter((s) => s && s.length > 0)
     .join(' ')
-    .slice(0, 520);
+    .slice(0, 900);
 
   const longformEnabled =
     args.genCfg.longformEnabled === true || args.theme.template === 'animated-explainer';

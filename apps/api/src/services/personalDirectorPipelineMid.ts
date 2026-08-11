@@ -58,6 +58,7 @@ import {
 import { withRetry, withTimeout } from './retry.js';
 import { getCharacterAnchorImages, getCharacterUnsafe } from './personalCharacters.js';
 import { internalListForPipeline } from './personalAccountMedia.js';
+import { ensurePersonalStyleProfile } from './personalStyleProfile.js';
 import {
   personalPostIsFailed,
   withAbortWhenPersonalPostFailed,
@@ -250,14 +251,23 @@ export async function directorPipelineFromResolvedStoryboard(
   const inspirationItems = accountMedia.filter(
     (m) => m.role === 'inspiration' || m.role === 'style_reference',
   );
-  const inspirationStyleHint = inspirationItems.length
-    ? inspirationItems
-        .slice(0, 4)
-        .map((m) => m.description ?? m.aiDescription ?? '')
-        .filter((s) => s && s.length > 0)
-        .join('; ')
-        .slice(0, 400)
-    : undefined;
+  const styleProfile = await ensurePersonalStyleProfile(account.id);
+  const inspirationStyleHint =
+    styleProfile.hint ??
+    (inspirationItems.length
+      ? inspirationItems
+          .slice(0, 4)
+          .map((m) => m.description ?? m.aiDescription ?? '')
+          .filter((s) => s && s.length > 0)
+          .join('; ')
+          .slice(0, 400)
+      : undefined);
+  if (styleProfile.rebuilt) {
+    void appendPersonalGenerationLog(
+      postId,
+      `Style profile ready (${styleProfile.profile?.modelId ?? 'distill'}) — applying to all AI stills.`,
+    ).catch(() => {});
+  }
 
   broadcast({ type: 'personal:progress', payload: { accountId: account.id, postId, phase: 'sourcing_media' } });
   void appendPersonalGenerationLog(postId, 'Resolving character anchors & style-reference stills…').catch(() => {});
@@ -282,7 +292,7 @@ export async function directorPipelineFromResolvedStoryboard(
   const inspirationStyleHintForShots = [inspirationStyleHint, inspirationPixelContract]
     .filter((s) => s && s.length > 0)
     .join(' ')
-    .slice(0, 560);
+    .slice(0, 900);
 
   /**
    * Intended flow (fresh runs only — resume keeps checkpoint shot ids):

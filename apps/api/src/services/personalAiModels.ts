@@ -742,7 +742,10 @@ async function generateFalImage(
     }
   }
   const neg = clampFalImageText(model.id, args.negativePrompt);
-  if (neg) input.negative_prompt = neg;
+  // Klein edit schema does not accept negative_prompt — omit on edit path.
+  if (neg && !(useRef && editEndpointMap[model.id])) {
+    input.negative_prompt = neg;
+  }
 
   const result = await falSubscribe(endpoint, { input, logs: false });
   const url = (result.data as any)?.images?.[0]?.url as string | undefined;

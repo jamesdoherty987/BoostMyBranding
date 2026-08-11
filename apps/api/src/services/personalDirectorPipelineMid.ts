@@ -873,10 +873,14 @@ export async function directorPipelineFromResolvedStoryboard(
       if (result.error && isFalFatalAccountError(result.error)) {
         sourcingState.stopped = true;
         const detail = result.error.slice(0, 480);
+        const geminiHint = getAiModel('nano-banana')?.available
+          ? `Stills can keep going via Gemini (Nano Banana) if configured; Fal AI video still needs an unlocked Fal account.`
+          : `For stills without Fal: set image model to "Nano Banana" (nano-banana) when GEMINI_API_KEY is set.`;
         const msg =
-          `Fal.ai rejected generation (billing or account lock): ${detail}. ` +
-          `Top up at https://fal.ai/dashboard/billing . ` +
-          `Still images can use Google Gemini instead: set image model to "Nano Banana" (nano-banana) when GEMINI_API_KEY is set; AI video on Fal still needs Fal credits.`;
+          `Fal.ai rejected the request (account lock): ${detail}. ` +
+          `If billing still shows credits, Fal often leaves accounts locked after a zero-balance episode — email support@fal.ai (or Discord) and ask them to unlock/refresh the account. ` +
+          `Also confirm FAL_KEY matches the dashboard account you topped up. ` +
+          `Billing: https://fal.ai/dashboard/billing . ${geminiHint}`;
         void appendPersonalGenerationLog(postId, msg).catch(() => {});
         if (!(await personalPostIsFailed(postId))) {
           await markFailed(postId, msg.slice(0, 900));

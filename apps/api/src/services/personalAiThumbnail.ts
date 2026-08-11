@@ -372,16 +372,17 @@ async function generatePersonalAiThumbnailToR2(args: {
     .filter(Boolean)
     .join(', ');
 
-  // Prefer the account image model; otherwise bias thumbnails toward max quality.
+  // Prefer the account image model; otherwise use tier default (Gemini over Fal when set).
   const tier = args.shotAlign.qualityTier ?? 'balanced';
   const preferredId = args.shotAlign.imageModelId?.trim();
   const preferred = preferredId ? getAiModel(preferredId) : undefined;
+  // Don't force "max" (Flux on Fal) when Gemini is available — stills work without Fal credits.
   const thumbTier: 'max' | 'balanced' | 'budget' =
     preferred?.available && preferred.kind === 'image'
       ? tier
       : tier === 'budget'
         ? 'balanced'
-        : 'max';
+        : tier;
   const modelId =
     preferred?.available && preferred.kind === 'image'
       ? preferred.id

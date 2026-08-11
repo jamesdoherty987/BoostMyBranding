@@ -10,6 +10,7 @@
  *
  *   Images
  *     flux-pro-ultra          (fal.ai — premium photorealism, ref images)
+ *     flux-2-klein-9b         (fal.ai — FLUX.2 Klein 9B, ~2¢ high-quality)
  *     flux-dev                (fal.ai — strong free tier)
  *     nano-banana             (Google Gemini 2.5 Flash Image — multi-ref,
  *                              character consistency, editing)
@@ -129,15 +130,35 @@ function formatFalClientError(err: unknown): string {
 
 /**
  * True when fal.ai says the account cannot run jobs (locked / no balance).
- * In that case we should fail fast instead of attempting every storyboard shot.
+ * Note: Fal often returns "Exhausted balance" even after a top-up while the
+ * account stays admin-locked — treat as a hard Fal outage for this process,
+ * fall back to Gemini/OpenAI for stills, and fail Fal video until unlocked.
  */
 export function isFalFatalAccountError(message: string): boolean {
   const m = message.toLowerCase();
   return (
     m.includes('exhausted balance') ||
     m.includes('user is locked') ||
+    m.includes('admin lock') ||
     (m.includes('fal-ai') && m.includes('403') && m.includes('forbidden'))
   );
+}
+
+/** Once Fal returns a billing lock, skip Fal for later stills in this process. */
+let falImageBillingLocked = false;
+
+export function isFalImageBillingLocked(): boolean {
+  return falImageBillingLocked;
+}
+
+/** Prefer Gemini / OpenAI stills when Fal is out of credits or not wanted as default. */
+export function pickNonFalImageFallback(excludeId?: string): AiModel | undefined {
+  for (const id of ['nano-banana', 'dalle-3'] as const) {
+    if (excludeId && id === excludeId) continue;
+    const m = getAiModel(id);
+    if (m?.available && m.kind === 'image') return m;
+  }
+  return undefined;
 }
 
 async function falSubscribe(
@@ -237,6 +258,20 @@ export function listAiModels(): AiModel[] {
       pricePerUnitCents: 6,
       available: hasFal(),
       notes: 'Best-in-class photorealism. Use for hero shots and character refs.',
+    },
+    {
+      id: 'flux-2-klein-9b',
+      displayName: 'FLUX.2 Klein 9B',
+      provider: 'fal',
+      kind: 'image',
+      qualityTier: 'budget',
+      supportsReference: true,
+      maxReferenceImages: 4,
+      supportedAspectRatios: ['9:16', '1:1', '16:9', '4:5'],
+      pricePerUnitCents: 2,
+      available: hasFal(),
+      notes:
+        'Best quality near 2¢ — fast FLUX.2, strong photorealism, up to 4 reference images.',
     },
     {
       id: 'nano-banana',
@@ -462,6 +497,9 @@ export function getAiModel(id: string): AiModel | undefined {
  * Pick a default model for a tier when the user hasn't specified one.
  * Respects availability — if the "max" tier isn't configured, falls
  * down to balanced → budget before throwing.
+ *
+ * For **still images**, prefer Google/OpenAI over Fal when available so an
+ * exhausted Fal balance does not block the default path (matches .env.example).
  */
 export function pickDefaultModel(
   kind: AiModelKind,
@@ -471,6 +509,25 @@ export function pickDefaultModel(
     tier === 'max' ? ['max', 'balanced', 'budget'] :
     tier === 'balanced' ? ['balanced', 'max', 'budget'] :
     ['budget', 'balanced', 'max'];
+
+  if (kind === 'image') {
+    // Non-Fal first across the tier waterfall, then Fal.
+    for (const preferNonFal of [true, false]) {
+      if (!preferNonFal && falImageBillingLocked) continue;
+      for (const t of tierOrder) {
+        const hit = listAiModels().find(
+          (m) =>
+            m.kind === 'image' &&
+            m.qualityTier === t &&
+            m.available &&
+            (preferNonFal ? m.provider !== 'fal' : m.provider === 'fal'),
+        );
+        if (hit) return hit;
+      }
+    }
+    return undefined;
+  }
+
   for (const t of tierOrder) {
     const hit = listAiModels().find(
       (m) => m.kind === kind && m.qualityTier === t && m.available,
@@ -512,7 +569,9 @@ export function pickImageModelForLongform(
   const available = listAiModels();
   for (const id of preferred) {
     const m = available.find((x) => x.id === id && x.available && x.kind === 'image');
-    if (m) return m.id;
+    if (!m) continue;
+    if (m.provider === 'fal' && falImageBillingLocked) continue;
+    return m.id;
   }
   return pickDefaultModel('image', tier)?.id;
 }
@@ -549,15 +608,41 @@ export async function generateAiImage(
     );
   }
 
-  switch (model.provider) {
-    case 'fal':
-      return generateFalImage(model, args);
-    case 'google':
-      return generateNanoBananaImage(model, args);
-    case 'openai':
-      return generateOpenAIImage(model, args);
-    default:
-      throw new Error(`Image provider ${model.provider} not wired up`);
+  // Fal locked (exhausted balance) — use Gemini/OpenAI without another 403 round-trip.
+  if (model.provider === 'fal' && falImageBillingLocked) {
+    const fallback = pickNonFalImageFallback(model.id);
+    if (fallback) {
+      console.warn(
+        `[personal] Fal image billing locked — using ${fallback.id} instead of ${model.id}`,
+      );
+      return generateAiImage({ ...args, modelId: fallback.id });
+    }
+  }
+
+  try {
+    switch (model.provider) {
+      case 'fal':
+        return await generateFalImage(model, args);
+      case 'google':
+        return await generateNanoBananaImage(model, args);
+      case 'openai':
+        return await generateOpenAIImage(model, args);
+      default:
+        throw new Error(`Image provider ${model.provider} not wired up`);
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (model.provider === 'fal' && isFalFatalAccountError(msg)) {
+      falImageBillingLocked = true;
+      const fallback = pickNonFalImageFallback(model.id);
+      if (fallback) {
+        console.warn(
+          `[personal] Fal rejected still (${msg.slice(0, 160)}) — falling back to ${fallback.displayName}`,
+        );
+        return generateAiImage({ ...args, modelId: fallback.id });
+      }
+    }
+    throw e;
   }
 }
 
@@ -571,6 +656,7 @@ const FAL_IMAGE_PROMPT_MAX: Record<string, number> = {
   'higgsfield-soul': 2000,
   'flux-pro-ultra': 8000,
   'flux-dev': 8000,
+  'flux-2-klein-9b': 8000,
 };
 
 function clampFalImageText(modelId: string, s: string | undefined): string | undefined {
@@ -578,6 +664,22 @@ function clampFalImageText(modelId: string, s: string | undefined): string | und
   const max = FAL_IMAGE_PROMPT_MAX[modelId] ?? 8000;
   const t = s.trim();
   return t.length <= max ? t : t.slice(0, max);
+}
+
+/** fal image_size for models that take width/height instead of aspect_ratio. */
+function falImageSizeForAspect(
+  ratio: '9:16' | '1:1' | '16:9' | '4:5',
+): { width: number; height: number } {
+  switch (ratio) {
+    case '9:16':
+      return { width: 720, height: 1280 };
+    case '16:9':
+      return { width: 1280, height: 720 };
+    case '4:5':
+      return { width: 1024, height: 1280 };
+    default:
+      return { width: 1024, height: 1024 };
+  }
 }
 
 async function generateFalImage(
@@ -590,12 +692,20 @@ async function generateFalImage(
   const endpointMap: Record<string, string> = {
     'flux-pro-ultra': 'fal-ai/flux-pro/v1.1-ultra',
     'flux-dev': 'fal-ai/flux/dev',
+    'flux-2-klein-9b': 'fal-ai/flux-2/klein/9b',
     'ideogram-v3': 'fal-ai/ideogram/v3',
     'seedream-v4': 'fal-ai/bytedance/seedream/v4/text-to-image',
     'recraft-v3': 'fal-ai/recraft/v3/text-to-image',
     'higgsfield-soul': 'fal-ai/higgsfield/soul',
   };
-  const endpoint = endpointMap[model.id];
+  /** Models that need a dedicated edit endpoint + `image_urls` for refs. */
+  const editEndpointMap: Record<string, string> = {
+    'flux-2-klein-9b': 'fal-ai/flux-2/klein/9b/edit',
+  };
+  /** Models that take `image_size` instead of `aspect_ratio`. */
+  const usesImageSize = new Set(['flux-2-klein-9b']);
+
+  let endpoint = endpointMap[model.id];
   if (!endpoint) throw new Error(`No fal endpoint for ${model.id}`);
 
   // Reference-image-capable fluxes route through the edit endpoint.
@@ -603,6 +713,9 @@ async function generateFalImage(
     model.supportsReference &&
     args.referenceImageUrls &&
     args.referenceImageUrls.length > 0;
+  if (useRef && editEndpointMap[model.id]) {
+    endpoint = editEndpointMap[model.id];
+  }
   // Some fal image schemas omit 4:5; only remap when this model does not
   // advertise 4:5 (ideogram, recraft, etc.).
   const requested: '9:16' | '1:1' | '16:9' | '4:5' = args.aspectRatio ?? '9:16';
@@ -613,12 +726,19 @@ async function generateFalImage(
   const prompt = clampFalImageText(model.id, args.prompt) ?? '';
   if (!prompt) throw new Error(`${model.displayName}: empty prompt after clamp`);
 
-  const input: Record<string, unknown> = {
-    prompt,
-    aspect_ratio: falAspect,
-  };
+  const input: Record<string, unknown> = { prompt };
+  if (usesImageSize.has(model.id)) {
+    input.image_size = falImageSizeForAspect(falAspect);
+  } else {
+    input.aspect_ratio = falAspect;
+  }
   if (useRef) {
-    input.image_url = args.referenceImageUrls![0];
+    const refs = args.referenceImageUrls!.slice(0, model.maxReferenceImages);
+    if (editEndpointMap[model.id]) {
+      input.image_urls = refs;
+    } else {
+      input.image_url = refs[0];
+    }
   }
   const neg = clampFalImageText(model.id, args.negativePrompt);
   if (neg) input.negative_prompt = neg;

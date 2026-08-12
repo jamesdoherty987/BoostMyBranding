@@ -351,6 +351,24 @@ export async function generateForAccountDirector(
       reason: `account status is "${account.status}"`,
     };
   }
+  // Schedule autopilot must honor Pause schedule / non-active channel (manual Generate still OK).
+  if (
+    args.fromScheduleAutopilot &&
+    (account.status !== 'active' || account.autoGenerateOnSchedule !== true)
+  ) {
+    return {
+      postId: args.reservedPostId ?? '',
+      videoUrl: null,
+      status: 'skipped',
+      durationSeconds: 0,
+      costCents: 0,
+      skipped: true,
+      reason:
+        account.status !== 'active'
+          ? `account status is "${account.status}"`
+          : 'scheduled generation is paused',
+    };
+  }
 
   const theme =
     getTheme(account.themeId) ??

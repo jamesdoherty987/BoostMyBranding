@@ -286,7 +286,7 @@ export function listAiModels(): AiModel[] {
       pricePerUnitCents: 4,
       available: hasGemini(),
       notes:
-        'Best for character consistency — multi-image composition, precise editing, keeps the same face across generations.',
+        'Best for matching inspiration/style refs and character consistency (up to 6 images). Prefer this over Ideogram for brand look.',
     },
     {
       id: 'ideogram-v3',
@@ -300,7 +300,7 @@ export function listAiModels(): AiModel[] {
       pricePerUnitCents: 3,
       available: hasFal(),
       notes:
-        'Style refs + Quality render; MagicPrompt off; we strip on-image captions (Ideogram invents bad type). Prefer Nano Banana / Flux when you need painted labels.',
+        'Cheaper text-in-image model; weaker at matching your reference stills. Prefer Nano Banana (Gemini 2.5) for style consistency.',
     },
     {
       id: 'seedream-v4',

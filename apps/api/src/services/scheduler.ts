@@ -11,7 +11,7 @@
  */
 
 import cron from 'node-cron';
-import { and, desc, eq, isNull, isNotNull, lt, lte } from 'drizzle-orm';
+import { and, desc, eq, isNull, isNotNull, lt, lte, or } from 'drizzle-orm';
 import {
   getDb,
   isDbConfigured,
@@ -325,10 +325,17 @@ async function delayPersonalAutopilotRetry(accountId: string): Promise<void> {
   if (!isDbConfigured()) return;
   const db = getDb();
   const delayed = new Date(Date.now() + PERSONAL_AUTOPILOT_RETRY_MS);
+  // Never resurrect a next_run_at after the user paused schedule or the channel.
   await db
     .update(personalAccounts)
     .set({ nextRunAt: delayed, updatedAt: new Date() })
-    .where(eq(personalAccounts.id, accountId));
+    .where(
+      and(
+        eq(personalAccounts.id, accountId),
+        eq(personalAccounts.status, 'active'),
+        eq(personalAccounts.autoGenerateOnSchedule, true),
+      ),
+    );
 }
 
 function personalAutopilotProducedVideo(result: {
@@ -507,6 +514,47 @@ export async function runDuePersonalAccounts(): Promise<{
             };
           }
 
+          // Re-check after claim: Pause schedule / channel pause can land between
+          // the due select and generate — never start a video in that window.
+          const [stillDue] = await db
+            .select({
+              id: personalAccounts.id,
+              autoGenerateOnSchedule: personalAccounts.autoGenerateOnSchedule,
+              status: personalAccounts.status,
+            })
+            .from(personalAccounts)
+            .where(eq(personalAccounts.id, acc.id))
+            .limit(1);
+          if (
+            !stillDue ||
+            stillDue.status !== 'active' ||
+            stillDue.autoGenerateOnSchedule !== true
+          ) {
+            // Drop any next_run_at the claim wrote, but only while still paused/off
+            // so a concurrent Resume is not wiped.
+            await db
+              .update(personalAccounts)
+              .set({ nextRunAt: null, updatedAt: new Date() })
+              .where(
+                and(
+                  eq(personalAccounts.id, acc.id),
+                  or(
+                    eq(personalAccounts.autoGenerateOnSchedule, false),
+                    eq(personalAccounts.status, 'paused'),
+                    eq(personalAccounts.status, 'archived'),
+                  ),
+                ),
+              );
+            console.log(
+              `[cron personal] account ${acc.id} skipped — schedule paused or channel not active`,
+            );
+            return {
+              accountId: acc.id,
+              ok: true,
+              skipped: true,
+            };
+          }
+
           try {
             const result = await enqueuePersonalGenerateForAccount(acc.id, () =>
               generateForAccount({
@@ -518,6 +566,33 @@ export async function runDuePersonalAccounts(): Promise<{
                 scheduleToContentStudio: acc.autoSchedule === true,
               }),
             );
+            // Pause / inactive mid-flight: do not retry or email as a failure.
+            const pausedSchedule =
+              result.skipped === true &&
+              typeof result.reason === 'string' &&
+              (result.reason.includes('scheduled generation is paused') ||
+                /^account status is "/.test(result.reason));
+            if (pausedSchedule) {
+              await db
+                .update(personalAccounts)
+                .set({ nextRunAt: null, updatedAt: new Date() })
+                .where(
+                  and(
+                    eq(personalAccounts.id, acc.id),
+                    or(
+                      eq(personalAccounts.autoGenerateOnSchedule, false),
+                      eq(personalAccounts.status, 'paused'),
+                      eq(personalAccounts.status, 'archived'),
+                    ),
+                  ),
+                );
+              return {
+                accountId: acc.id,
+                ok: true,
+                skipped: true,
+                postId: result.postId || undefined,
+              };
+            }
             if (!personalAutopilotProducedVideo(result)) {
               // Pipeline often returns { status: 'failed', skipped: true } without
               // throwing (blocked topic, insufficient shots, etc.). Claim already

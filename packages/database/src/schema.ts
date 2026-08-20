@@ -753,8 +753,13 @@ export const personalAccounts = pgTable(
     /** Accent / locale hint — 'en-US', 'en-GB', 'es-MX', … */
     locale: text('locale'),
 
-    /** How many posts per day this account generates. 1–4. */
+    /** How many posts on each scheduled day. 1–4. */
     postsPerDay: integer('posts_per_day').default(1).notNull(),
+    /**
+     * Days between scheduled posting days. 1 = every day, 2 = every other day,
+     * 7 = once a week, etc. Same-day multi-posts still use {@link postsPerDay}.
+     */
+    scheduleIntervalDays: integer('schedule_interval_days').default(1).notNull(),
     /** UTC hour-of-day the scheduler starts generating (0-23). */
     postingHourUtc: integer('posting_hour_utc').default(8).notNull(),
     /** UTC minute within the hour (0-59). */

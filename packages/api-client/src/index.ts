@@ -2353,6 +2353,8 @@ export interface PersonalAccount {
   voiceId: string | null;
   locale: string | null;
   postsPerDay: number;
+  /** Days between posting days (1 = daily, 7 = weekly). Older rows may omit until migrated. */
+  scheduleIntervalDays?: number;
   postingHourUtc: number;
   postingMinuteUtc: number;
   postSpacingMinutes: number;
@@ -2393,6 +2395,7 @@ export interface CreatePersonalAccountBody {
   voiceId?: string;
   locale?: string;
   postsPerDay?: number;
+  scheduleIntervalDays?: number;
   postingHourUtc?: number;
   postingMinuteUtc?: number;
   postSpacingMinutes?: number;

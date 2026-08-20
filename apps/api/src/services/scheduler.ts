@@ -663,7 +663,7 @@ export async function runDuePersonalAccounts(): Promise<{
 
 /**
  * Next run after claiming a due slot: next grid time strictly after `now`
- * (remaining slots today, else tomorrow's first).
+ * (remaining slots today, else the next interval day's first).
  */
 function rollNextRunAt(
   acc: typeof personalAccounts.$inferSelect,
@@ -675,5 +675,7 @@ function rollNextRunAt(
     postingMinuteUtc: acc.postingMinuteUtc,
     postsPerDay: acc.postsPerDay,
     postSpacingMinutes: acc.postSpacingMinutes,
+    scheduleIntervalDays: acc.scheduleIntervalDays ?? 1,
+    lastGeneratedAt: acc.lastGeneratedAt,
   });
 }

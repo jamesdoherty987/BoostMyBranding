@@ -64,6 +64,8 @@ export interface PersonalAccountPayload {
   voiceId: string | null;
   locale: string | null;
   postsPerDay: number;
+  /** Days between posting days (1 = daily, 7 = weekly). */
+  scheduleIntervalDays: number;
   postingHourUtc: number;
   postingMinuteUtc: number;
   postSpacingMinutes: number;
@@ -109,6 +111,7 @@ export interface CreateAccountArgs {
   voiceId?: string;
   locale?: string;
   postsPerDay?: number;
+  scheduleIntervalDays?: number;
   postingHourUtc?: number;
   postingMinuteUtc?: number;
   postSpacingMinutes?: number;
@@ -172,6 +175,7 @@ export async function createAccount(args: CreateAccountArgs) {
       voiceId: args.voiceId,
       locale: args.locale,
       postsPerDay: args.postsPerDay ?? 1,
+      scheduleIntervalDays: args.scheduleIntervalDays ?? 1,
       postingHourUtc: args.postingHourUtc ?? 8,
       postingMinuteUtc: args.postingMinuteUtc ?? 0,
       postSpacingMinutes: args.postSpacingMinutes ?? 240,
@@ -197,6 +201,7 @@ export async function createAccount(args: CreateAccountArgs) {
               postingMinuteUtc: args.postingMinuteUtc ?? 0,
               postsPerDay: args.postsPerDay ?? 1,
               postSpacingMinutes: args.postSpacingMinutes ?? 60,
+              scheduleIntervalDays: args.scheduleIntervalDays ?? 1,
             })
           : null,
     })
@@ -351,14 +356,29 @@ export async function updateAccount(
     patch.postingMinuteUtc !== undefined ||
     patch.postSpacingMinutes !== undefined ||
     patch.postsPerDay !== undefined ||
+    patch.scheduleIntervalDays !== undefined ||
     (patch.status === 'active' && existing.status !== 'active')
   ) {
+    // Re-anchor only when cadence actually changes. The Schedule card always
+    // PATCHes scheduleIntervalDays, so comparing to existing avoids resetting
+    // the cycle when the user only tweaks hour / posts / spacing.
+    const nextInterval =
+      patch.scheduleIntervalDays ?? existing.scheduleIntervalDays ?? 1;
+    const reanchorCadence =
+      patch.scheduleIntervalDays !== undefined &&
+      patch.scheduleIntervalDays !== (existing.scheduleIntervalDays ?? 1);
     updates.nextRunAt = computeNextRunAt({
       now: new Date(),
       postingHourUtc: patch.postingHourUtc ?? existing.postingHourUtc,
       postingMinuteUtc: patch.postingMinuteUtc ?? existing.postingMinuteUtc,
       postsPerDay: patch.postsPerDay ?? existing.postsPerDay,
       postSpacingMinutes: patch.postSpacingMinutes ?? existing.postSpacingMinutes,
+      scheduleIntervalDays: nextInterval,
+      lastGeneratedAt: reanchorCadence
+        ? null
+        : existing.lastGeneratedAt
+          ? new Date(existing.lastGeneratedAt)
+          : null,
     });
   }
 
@@ -1566,9 +1586,11 @@ function assertDb() {
 }
 
 /**
- * Next UTC run on the posts-per-day grid (first slot at posting hour/minute,
- * then +spacing for each remaining daily post). Always returns a time strictly
- * after `now`.
+ * Next UTC run on the schedule grid (first slot at posting hour/minute, then
+ * +spacing for remaining same-day posts). With `scheduleIntervalDays` > 1,
+ * posting days are spaced that many calendar days apart (anchored to
+ * `lastGeneratedAt` when set, otherwise `now`). Always returns a time
+ * strictly after `now`.
  */
 export function computeNextRunAt(args: {
   now: Date;
@@ -1576,26 +1598,78 @@ export function computeNextRunAt(args: {
   postingMinuteUtc: number;
   postsPerDay?: number;
   postSpacingMinutes?: number;
+  scheduleIntervalDays?: number;
+  lastGeneratedAt?: Date | null;
 }): Date {
   const postsPerDay = Math.max(1, Math.min(48, Math.floor(args.postsPerDay ?? 1)));
+  const intervalDays = Math.max(
+    1,
+    Math.min(30, Math.floor(args.scheduleIntervalDays ?? 1)),
+  );
   const spacingMs = Math.max(1, Math.floor(args.postSpacingMinutes ?? 60)) * 60 * 1000;
-  const anchor = new Date(args.now);
-  anchor.setUTCHours(args.postingHourUtc, args.postingMinuteUtc, 0, 0);
+  const nowMs = args.now.getTime();
 
-  for (let dayOffset = 0; dayOffset < 14; dayOffset++) {
-    const dayFirst = new Date(anchor);
-    dayFirst.setUTCDate(anchor.getUTCDate() + dayOffset);
+  const dayFirstAt = (base: Date, dayOffset: number): Date => {
+    const d = new Date(
+      Date.UTC(
+        base.getUTCFullYear(),
+        base.getUTCMonth(),
+        base.getUTCDate() + dayOffset,
+        args.postingHourUtc,
+        args.postingMinuteUtc,
+        0,
+        0,
+      ),
+    );
+    return d;
+  };
+
+  const firstFutureSlotOnDay = (dayFirst: Date): Date | null => {
     for (let i = 0; i < postsPerDay; i++) {
       const slot = new Date(dayFirst.getTime() + i * spacingMs);
-      if (slot.getTime() > args.now.getTime()) {
-        return slot;
-      }
+      if (slot.getTime() > nowMs) return slot;
     }
+    return null;
+  };
+
+  if (intervalDays <= 1) {
+    const anchor = args.now;
+    for (let dayOffset = 0; dayOffset < 14; dayOffset++) {
+      const hit = firstFutureSlotOnDay(dayFirstAt(anchor, dayOffset));
+      if (hit) return hit;
+    }
+    return dayFirstAt(anchor, 1);
   }
 
-  const fallback = new Date(anchor);
-  fallback.setUTCDate(fallback.getUTCDate() + 1);
-  return fallback;
+  // Multi-day cadence: keep phase from last successful generate when possible
+  // so soft-fail retries on in-between days don't shift the cycle.
+  const origin = args.lastGeneratedAt ?? args.now;
+  const originMidnight = Date.UTC(
+    origin.getUTCFullYear(),
+    origin.getUTCMonth(),
+    origin.getUTCDate(),
+  );
+  const nowMidnight = Date.UTC(
+    args.now.getUTCFullYear(),
+    args.now.getUTCMonth(),
+    args.now.getUTCDate(),
+  );
+  const daysSinceOrigin = Math.floor((nowMidnight - originMidnight) / 86_400_000);
+
+  let startOffset: number;
+  if (daysSinceOrigin >= 0) {
+    startOffset = daysSinceOrigin - (daysSinceOrigin % intervalDays);
+  } else {
+    startOffset = 0;
+  }
+
+  for (let step = 0; step < 60; step++) {
+    const dayOffset = startOffset + step * intervalDays;
+    const hit = firstFutureSlotOnDay(dayFirstAt(origin, dayOffset));
+    if (hit) return hit;
+  }
+
+  return dayFirstAt(args.now, intervalDays);
 }
 
 const REMOVED_STYLE_BIBLE_KEYS = ['motifs', 'copySamples', 'exampleScriptSnippets', 'bannedPhrases'] as const;
@@ -1632,6 +1706,7 @@ function toPayload(
     voiceId: row.voiceId,
     locale: row.locale,
     postsPerDay: row.postsPerDay,
+    scheduleIntervalDays: row.scheduleIntervalDays ?? 1,
     postingHourUtc: row.postingHourUtc,
     postingMinuteUtc: row.postingMinuteUtc,
     postSpacingMinutes: row.postSpacingMinutes,

@@ -206,7 +206,7 @@ export default function PersonalDashboardPage() {
                     <StatusDot status={acc.status} />
                   </div>
                   <div className="mt-2 text-[11px] text-slate-400">
-                    {acc.totalPosts} posts · {acc.postsPerDay}/day
+                    {acc.totalPosts} posts · {formatScheduleCadence(acc.postsPerDay, acc.scheduleIntervalDays ?? 1)}
                   </div>
                 </button>
               ))}
@@ -1398,6 +1398,7 @@ function ScheduleCard({
   onOpenPostingTab: () => void;
 }) {
   const [postsPerDay, setPostsPerDay] = useState(account.postsPerDay);
+  const [intervalDays, setIntervalDays] = useState(account.scheduleIntervalDays ?? 1);
   const [hour, setHour] = useState(account.postingHourUtc);
   const [minute, setMinute] = useState(account.postingMinuteUtc);
   const [spacing, setSpacing] = useState(account.postSpacingMinutes);
@@ -1409,6 +1410,7 @@ function ScheduleCard({
 
   useEffect(() => {
     setPostsPerDay(account.postsPerDay);
+    setIntervalDays(account.scheduleIntervalDays ?? 1);
     setHour(account.postingHourUtc);
     setMinute(account.postingMinuteUtc);
     setSpacing(account.postSpacingMinutes);
@@ -1449,6 +1451,7 @@ function ScheduleCard({
     try {
       await api.updatePersonalAccount(account.id, {
         postsPerDay,
+        scheduleIntervalDays: intervalDays,
         postingHourUtc: hour,
         postingMinuteUtc: minute,
         postSpacingMinutes: spacing,
@@ -1538,8 +1541,24 @@ function ScheduleCard({
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <Field label="Posts / day">
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+          <Field label="How often">
+            <select
+              value={intervalDays}
+              onChange={(e) => setIntervalDays(Number(e.target.value))}
+              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+            >
+              {!SCHEDULE_INTERVAL_OPTIONS.some((o) => o.value === intervalDays) && (
+                <option value={intervalDays}>Every {intervalDays} days</option>
+              )}
+              {SCHEDULE_INTERVAL_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label={intervalDays <= 1 ? 'Posts / day' : 'Posts that day'}>
             <select
               value={postsPerDay}
               onChange={(e) => setPostsPerDay(Number(e.target.value))}
@@ -1632,6 +1651,30 @@ function ScheduleCard({
       </CardContent>
     </Card>
   );
+}
+
+const SCHEDULE_INTERVAL_OPTIONS: Array<{ value: number; label: string }> = [
+  { value: 1, label: 'Every day' },
+  { value: 2, label: 'Every 2 days' },
+  { value: 3, label: 'Every 3 days' },
+  { value: 4, label: 'Every 4 days' },
+  { value: 5, label: 'Every 5 days' },
+  { value: 6, label: 'Every 6 days' },
+  { value: 7, label: 'Once a week' },
+  { value: 14, label: 'Every 2 weeks' },
+];
+
+function formatScheduleCadence(postsPerDay: number, intervalDays: number): string {
+  if (intervalDays <= 1) return `${postsPerDay}/day`;
+  if (intervalDays === 7) {
+    return postsPerDay === 1 ? 'weekly' : `${postsPerDay}× / week`;
+  }
+  if (intervalDays === 14) {
+    return postsPerDay === 1 ? 'every 2 weeks' : `${postsPerDay}× every 2 weeks`;
+  }
+  return postsPerDay === 1
+    ? `every ${intervalDays} days`
+    : `${postsPerDay}× every ${intervalDays} days`;
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {

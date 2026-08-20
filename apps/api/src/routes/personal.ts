@@ -534,6 +534,8 @@ const createAccountBodySchema = z.object({
   voiceId: z.string().max(100).optional(),
   locale: z.string().max(10).optional(),
   postsPerDay: z.number().int().min(1).max(4).optional(),
+  /** 1 = daily, 2 = every other day, 7 = weekly, … */
+  scheduleIntervalDays: z.number().int().min(1).max(30).optional(),
   postingHourUtc: z.number().int().min(0).max(23).optional(),
   postingMinuteUtc: z.number().int().min(0).max(59).optional(),
   postSpacingMinutes: z.number().int().min(30).max(720).optional(),

@@ -11,7 +11,8 @@ lets the authenticated user:
 
 1. **Create many "personal channels"**, each locked to one viral niche
    (finance, educational facts, news, language learning, brainrot, etc).
-2. **Schedule** (Overview) — posts per day, posting window, spacing; optional
+2. **Schedule** (Overview) — cadence (every N days / weekly), posts per posting
+   day, posting window, spacing; optional
    **Automatically generate videos on schedule** (off by default). When off,
    only **Generate** creates videos.
 3. **Autopilot** — when scheduled generation is on, every 5 minutes the API

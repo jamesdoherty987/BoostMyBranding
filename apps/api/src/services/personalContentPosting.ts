@@ -210,6 +210,20 @@ export async function scheduleReadyPersonalPosts(limit = 12): Promise<{
 
   const db = getDb();
   const since = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+  const [peek] = await db
+    .select({ id: personalPosts.id })
+    .from(personalPosts)
+    .where(
+      and(
+        eq(personalPosts.status, 'ready'),
+        isNotNull(personalPosts.videoUrl),
+        isNull(personalPosts.contentStudioPostId),
+        gt(personalPosts.updatedAt, since),
+      ),
+    )
+    .limit(1);
+  if (!peek) return { processed: 0, results: [] };
+
   const rows = await db
     .select({
       post: personalPosts,

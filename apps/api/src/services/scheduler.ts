@@ -2,16 +2,19 @@
  * Scheduled background jobs. Keeps the whole system in motion without
  * requiring any manual kicks from the agency.
  *
- * Jobs:
- *   - publishDue            Every minute. Hit ContentStudio for scheduled posts.
- *   - analyzePendingImages  Every 2 minutes. Score fresh client uploads with Claude Vision.
- *   - generateMonthlyBatches Every day at 09:00 UTC on the 1st. Kicks off the month's batch.
+ * Jobs (defaults tuned to reduce Neon compute — override via CRON_* env vars):
+ *   - publishDue            Every 5 minutes (was 1m). Skips DB when nothing due.
+ *   - scheduleReadyPersonal Every 5 minutes (was 1m). Skips when no ready posts.
+ *   - analyzePendingImages  Every 5 minutes (was 2m). Skips when queue empty.
+ *   - personalAutopilot     Every 5 minutes. Skips when no due accounts.
+ *   - personalStaleSweep    Every 10 minutes (was 5m). Skips when no in-flight posts.
+ *   - generateMonthlyBatches Every day at 09:00 UTC on the 1st.
  *
- * Each job writes to cron_runs so operators can see what happened.
+ * Each job that finds work writes to `cron_runs`; idle ticks exit after a cheap peek.
  */
 
 import cron from 'node-cron';
-import { and, desc, eq, isNull, isNotNull, lt, lte, or } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, isNotNull, lt, lte, or } from 'drizzle-orm';
 import {
   getDb,
   isDbConfigured,
@@ -42,6 +45,14 @@ import {
 } from './personalAccounts.js';
 import { scheduleReadyPersonalPosts } from './personalContentPosting.js';
 import { maybeEmailPersonalPostFailed } from './personalVideoDeliveryEmail.js';
+import {
+  cronAnalyzeImagesIntervalMinutes,
+  cronEveryNMinutes,
+  cronPersonalAutopilotIntervalMinutes,
+  cronPersonalScheduleReadyIntervalMinutes,
+  cronPersonalStaleIntervalMinutes,
+  cronPublishIntervalMinutes,
+} from './dbCost.js';
 
 export function startScheduler() {
   if (!isDbConfigured()) {
@@ -49,24 +60,31 @@ export function startScheduler() {
     return;
   }
 
-  cron.schedule('* * * * *', () => { publishDue().catch((e) => console.error('[cron publishDue]', e)); }, { timezone: 'UTC' });
-  cron.schedule('* * * * *', () => {
+  const publishMin = cronPublishIntervalMinutes();
+  const personalScheduleMin = cronPersonalScheduleReadyIntervalMinutes();
+  const analyzeMin = cronAnalyzeImagesIntervalMinutes();
+  const personalAutopilotMin = cronPersonalAutopilotIntervalMinutes();
+  const personalStaleMin = cronPersonalStaleIntervalMinutes();
+
+  cron.schedule(cronEveryNMinutes(publishMin), () => {
+    publishDue().catch((e) => console.error('[cron publishDue]', e));
+  }, { timezone: 'UTC' });
+  cron.schedule(cronEveryNMinutes(personalScheduleMin), () => {
     scheduleReadyPersonalPosts().catch((e) => console.error('[cron personalScheduleReady]', e));
   }, { timezone: 'UTC' });
-  cron.schedule('*/2 * * * *', () => { analyzePendingImages(10).catch((e) => console.error('[cron analyze]', e)); }, { timezone: 'UTC' });
+  cron.schedule(cronEveryNMinutes(analyzeMin), () => {
+    analyzePendingImages(10).catch((e) => console.error('[cron analyze]', e));
+  }, { timezone: 'UTC' });
   cron.schedule('0 9 1 * *', () => { generateMonthlyBatches().catch((e) => console.error('[cron monthly]', e)); }, { timezone: 'UTC' });
-  cron.schedule('*/5 * * * *', () => { runDuePersonalAccounts().catch((e) => console.error('[cron personal]', e)); }, { timezone: 'UTC' });
-  cron.schedule('*/5 * * * *', () => {
-    failStaleRenderingPersonalPosts().catch((e) =>
-      console.error('[cron personalStaleRender]', e),
-    );
-    failStaleEarlyPhasePersonalPosts().catch((e) =>
-      console.error('[cron personalStaleEarly]', e),
-    );
+  cron.schedule(cronEveryNMinutes(personalAutopilotMin), () => {
+    runDuePersonalAccounts().catch((e) => console.error('[cron personal]', e));
+  }, { timezone: 'UTC' });
+  cron.schedule(cronEveryNMinutes(personalStaleMin), () => {
+    runPersonalStaleSweep().catch((e) => console.error('[cron personalStale]', e));
   }, { timezone: 'UTC' });
 
   console.log(
-    '⏱  Scheduler started (publish=1m · personalScheduleReady=1m · analyze=2m · personalAutopilot=5m when account has scheduled generation on · personalStalePipeline=5m · monthly=day-1 09:00)',
+    `⏱  Scheduler started (publish=${publishMin}m · personalScheduleReady=${personalScheduleMin}m · analyze=${analyzeMin}m · personalAutopilot=${personalAutopilotMin}m · personalStale=${personalStaleMin}m · monthly=day-1 09:00)`,
   );
 
   void (async () => {
@@ -95,18 +113,46 @@ export function startScheduler() {
   );
 }
 
+async function runPersonalStaleSweep(): Promise<void> {
+  if (!(await hasPersonalPostsInPipeline())) return;
+  await failStaleRenderingPersonalPosts();
+  await failStaleEarlyPhasePersonalPosts();
+}
+
+/** Cheap peek — skip stale cron when nothing is generating. */
+async function hasPersonalPostsInPipeline(): Promise<boolean> {
+  if (!isDbConfigured()) return false;
+  const db = getDb();
+  const [row] = await db
+    .select({ id: personalPosts.id })
+    .from(personalPosts)
+    .where(
+      inArray(personalPosts.status, ['queued', 'scripting', 'sourcing_media', 'rendering']),
+    )
+    .limit(1);
+  return Boolean(row);
+}
+
 // ---------------------------------------------------------------------------
 // Publish due
 // ---------------------------------------------------------------------------
 
 export async function publishDue() {
+  if (!isDbConfigured()) return { processed: 0, results: [] };
   const db = getDb();
+  const now = new Date();
+  const [duePeek] = await db
+    .select({ id: posts.id })
+    .from(posts)
+    .where(and(eq(posts.status, 'scheduled'), lt(posts.scheduledAt, now)))
+    .limit(1);
+  if (!duePeek) return { processed: 0, results: [] };
+
   const [run] = await db
     .insert(cronRuns)
     .values({ jobName: 'publish_due', status: 'running' })
     .returning();
 
-  const now = new Date();
   const due = await db
     .select()
     .from(posts)
@@ -162,7 +208,15 @@ export async function publishDue() {
 // ---------------------------------------------------------------------------
 
 export async function analyzePendingImages(limit = 10) {
+  if (!isDbConfigured()) return { processed: 0, results: [] };
   const db = getDb();
+  const [pendingPeek] = await db
+    .select({ id: clientImages.id })
+    .from(clientImages)
+    .where(and(eq(clientImages.status, 'pending'), isNull(clientImages.aiDescription)))
+    .limit(1);
+  if (!pendingPeek) return { processed: 0, results: [] };
+
   const [run] = await db
     .insert(cronRuns)
     .values({ jobName: 'analyze_pending', status: 'running' })
@@ -456,12 +510,26 @@ export async function runDuePersonalAccounts(): Promise<{
 
   try {
     const db = getDb();
+    const now = new Date();
+    const [duePeek] = await db
+      .select({ id: personalAccounts.id })
+      .from(personalAccounts)
+      .where(
+        and(
+          eq(personalAccounts.status, 'active'),
+          eq(personalAccounts.autoGenerateOnSchedule, true),
+          isNotNull(personalAccounts.nextRunAt),
+          lte(personalAccounts.nextRunAt, now),
+        ),
+      )
+      .limit(1);
+    if (!duePeek) return { processed: 0, results: [] };
+
     const [run] = await db
       .insert(cronRuns)
       .values({ jobName: 'personal_generate', status: 'running' })
       .returning();
 
-    const now = new Date();
     const due = await db
       .select()
       .from(personalAccounts)

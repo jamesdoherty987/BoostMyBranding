@@ -27,6 +27,10 @@ import {
 import { stripDirectorResumeKeys, type Storyboard } from './personalDirector.js';
 import type { PersonalGenerationInfo } from './personalGenerationMeta.js';
 import { maybeEmailPersonalPostFailed } from './personalVideoDeliveryEmail.js';
+import {
+  personalAbortHeartbeatTicks,
+  personalInFlightHeartbeatMs,
+} from './dbCost.js';
 
 /**
  * Topic string for rows created as soon as the user clicks Generate, while the
@@ -937,8 +941,10 @@ export function isPersonalPostCancelledError(e: unknown): boolean {
  */
 const inFlightPersonalPostIds = new Set<string>();
 
-/** ~45s — keep `updated_at` fresh for the whole generate (multi-replica + stale cron). */
-const IN_FLIGHT_HEARTBEAT_MS = 45_000;
+/** Keep `updated_at` fresh during generate — default 2m (see PERSONAL_IN_FLIGHT_HEARTBEAT_MS). */
+function inFlightHeartbeatMs(): number {
+  return personalInFlightHeartbeatMs();
+}
 
 async function resolvePersonalPostAccountId(postId: string): Promise<string | null> {
   if (!isDbConfigured()) return null;
@@ -984,7 +990,7 @@ export function trackPersonalPostInFlight<T>(
   void beat().catch(() => {});
   const heartbeat = setInterval(() => {
     void beat().catch(() => {});
-  }, IN_FLIGHT_HEARTBEAT_MS);
+  }, inFlightHeartbeatMs());
   // Don't keep the event loop alive solely for heartbeats if everything else exits.
   heartbeat.unref?.();
   return work().finally(() => {
@@ -1002,9 +1008,6 @@ export function isPersonalPostInFlightLocally(postId: string): boolean {
  * cancel, or **deleting the post** can break out of long LLM/scraper/TTS waits and
  * let the per-account generate queue advance to the next job.
  */
-/** ~60s at 1500ms poll — bumps `updated_at` so failStale* cron does not kill long healthy runs. */
-const PERSONAL_HEARTBEAT_TICKS = 40;
-
 /**
  * Bumps `updated_at` while a post is still in-flight. Used by
  * {@link trackPersonalPostInFlight} (continuous) and {@link withAbortWhenPersonalPostFailed}.
@@ -1026,13 +1029,14 @@ async function touchPersonalPostHeartbeat(postId: string): Promise<void> {
 export async function withAbortWhenPersonalPostFailed<T>(postId: string, work: Promise<T>): Promise<T> {
   let timer: ReturnType<typeof setInterval> | undefined;
   let ticks = 0;
+  const heartbeatEveryTicks = personalAbortHeartbeatTicks();
   try {
     return await Promise.race([
       work,
       new Promise<T>((_, reject) => {
         timer = setInterval(() => {
           ticks += 1;
-          if (ticks % PERSONAL_HEARTBEAT_TICKS === 0) {
+          if (ticks % heartbeatEveryTicks === 0) {
             void touchPersonalPostHeartbeat(postId).catch(() => {});
           }
           void personalPostIsFailed(postId)

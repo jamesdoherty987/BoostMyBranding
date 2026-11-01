@@ -28,6 +28,9 @@
     "swr": "^2.2.5",
     "tailwind-merge": "^2.5.4"
   },
+  "engines": {
+    "node": "26.x"
+  },
   "devDependencies": {
     "@types/node": "^22.9.0",
     "@types/react": "^19.0.0",
